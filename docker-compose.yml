@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  trading-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ist-trading-scalper
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATA_DIR=/app/data
+      # - GEMINI_API_KEY=your_gemini_api_key_here
+    volumes:
+      - ist_trading_data:/app/data
+
+volumes:
+  ist_trading_data:
+    driver: local

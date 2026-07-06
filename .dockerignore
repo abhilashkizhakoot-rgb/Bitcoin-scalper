@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.github
+db_store.json
+db_paper_store.json
+npm-debug.log
+.env
+.env.local
+.DS_Store

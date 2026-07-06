@@ -745,21 +745,28 @@ class TradingEngine {
                                        ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.55 || this.orderBookStats.imbalanceRatio >= 0.25)) ||
                                        (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.45 || this.orderBookStats.imbalanceRatio <= -0.25)));
 
+    const isLowVolatility = this.currentRegime === MarketRegime.LOW_VOLATILITY;
+    const hasSoftenRegimePressure = (config.general.enable_orderflow_softening !== false) &&
+                                    ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.60 || this.orderBookStats.imbalanceRatio >= 0.40)) ||
+                                    (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.40 || this.orderBookStats.imbalanceRatio <= -0.40))) &&
+                                    (relVolume > 1.1);
+
     // C2: Market Regime lock
-    // Blocked all entries during LOW_VOLATILITY. Allowed in RANGE_BOUND and trends.
-    const regimeValid = this.currentRegime !== MarketRegime.LOW_VOLATILITY || hasExtremeRealtimePressure;
+    // Blocked all entries during LOW_VOLATILITY unless softened via heavy order flow pressure and volume.
+    const regimeValid = !isLowVolatility || hasSoftenRegimePressure;
     const regimeAligned =
       (signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
       (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
       this.currentRegime === MarketRegime.HIGH_VOLATILITY ||
-      hasExtremeRealtimePressure;
+      (!isLowVolatility && hasExtremeRealtimePressure) ||
+      (isLowVolatility && hasSoftenRegimePressure);
 
     conditions.push({
       name: "Market Regime Filter",
       met: regimeValid && (signalDirection === "NEUTRAL" ? true : regimeAligned),
-      current_value: this.currentRegime + (hasExtremeRealtimePressure ? " (BYPASSED VIA LEADING ORDER FLOW)" : ""),
-      required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, or HIGH_VOLATILITY (Bypassed under extreme leading order flow pressure)",
-      description: "Restricts execution during low volatility ranging zones to prevent chop losses, unless extreme real-time order flow or book imbalance confirms a breakout.",
+      current_value: this.currentRegime + (isLowVolatility && hasSoftenRegimePressure ? " (SOFTENED VIA HEAVY LEADING ORDER FLOW)" : (hasExtremeRealtimePressure ? " (BYPASSED VIA LEADING ORDER FLOW)" : "")),
+      required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, or HIGH_VOLATILITY (Softenable under heavy leading order flow & volume confirmation)",
+      description: "Restricts execution during low volatility ranging zones to prevent chop losses. Softened under heavy real-time order flow and book imbalance with supporting volume.",
       priority: "CRITICAL",
     });
 
@@ -811,13 +818,17 @@ class TradingEngine {
     });
 
     // C5: Relative Volume Confirmation
-    const requiredRelVol = relVolThreshold;
+    const requiredRelVol = hasExtremeRealtimePressure 
+      ? Math.min(1.0, Math.max(0.75, relVolThreshold - 0.5)) 
+      : relVolThreshold;
     conditions.push({
       name: "Relative Volume Confirmation",
       met: relVolume > requiredRelVol,
-      current_value: `${relVolume.toFixed(2)}x`,
-      required: `> ${requiredRelVol}x above 20-period MA`,
-      description: "Validates that trade has supporting transaction volume to avoid false breakups.",
+      current_value: `${relVolume.toFixed(2)}x` + (hasExtremeRealtimePressure ? " (SOFTENED VIA LEADING ORDER FLOW)" : ""),
+      required: `> ${requiredRelVol.toFixed(2)}x above 20-period MA`,
+      description: hasExtremeRealtimePressure
+        ? "Validates supporting transaction volume. (Threshold softened under extreme leading order flow pressure)."
+        : "Validates that trade has supporting transaction volume to avoid false breakups.",
       priority: "MEDIUM",
     });
 
@@ -3090,20 +3101,27 @@ class TradingEngine {
                                        ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.55 || this.orderBookStats.imbalanceRatio >= 0.25)) ||
                                        (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.45 || this.orderBookStats.imbalanceRatio <= -0.25)));
 
+    const isLowVolatility = this.currentRegime === MarketRegime.LOW_VOLATILITY;
+    const hasSoftenRegimePressure = (config.general.enable_orderflow_softening !== false) &&
+                                    ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.60 || this.orderBookStats.imbalanceRatio >= 0.40)) ||
+                                    (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.40 || this.orderBookStats.imbalanceRatio <= -0.40))) &&
+                                    (relVolume > 1.1);
+
     // C2: Market Regime lock
-    // Blocked all entries during LOW_VOLATILITY. Allowed in RANGE_BOUND and trends.
-    const regimeValid = this.currentRegime !== MarketRegime.LOW_VOLATILITY || hasExtremeRealtimePressure;
+    // Blocked all entries during LOW_VOLATILITY unless softened via heavy order flow pressure and volume.
+    const regimeValid = !isLowVolatility || hasSoftenRegimePressure;
     const regimeAligned =
       (signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
       (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
       this.currentRegime === MarketRegime.HIGH_VOLATILITY ||
-      hasExtremeRealtimePressure;
+      (!isLowVolatility && hasExtremeRealtimePressure) ||
+      (isLowVolatility && hasSoftenRegimePressure);
 
     conditions.push({
       name: "Market Regime Filter",
       met: regimeValid && (signalDirection === "NEUTRAL" ? true : regimeAligned),
-      current_value: this.currentRegime + (hasExtremeRealtimePressure ? " (BYPASSED VIA LEADING ORDER FLOW)" : ""),
-      required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, or HIGH_VOLATILITY (Bypassed under extreme leading order flow pressure)",
+      current_value: this.currentRegime + (isLowVolatility && hasSoftenRegimePressure ? " (SOFTENED VIA HEAVY LEADING ORDER FLOW)" : (hasExtremeRealtimePressure ? " (BYPASSED VIA LEADING ORDER FLOW)" : "")),
+      required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, or HIGH_VOLATILITY (Softenable under heavy leading order flow & volume confirmation)",
     });
 
     // C3 & C8 Combined: Trend Alignment & Strength (EMA/ADX)
@@ -3152,12 +3170,14 @@ class TradingEngine {
     });
 
     // C5: Relative Volume Confirmation
-    const requiredRelVol = relVolThreshold;
+    const requiredRelVol = hasExtremeRealtimePressure 
+      ? Math.min(1.0, Math.max(0.75, relVolThreshold - 0.5)) 
+      : relVolThreshold;
     conditions.push({
       name: "Relative Volume Confirmation",
       met: relVolume > requiredRelVol,
-      current_value: `${relVolume.toFixed(2)}x`,
-      required: `> ${requiredRelVol}x above 20-period MA`,
+      current_value: `${relVolume.toFixed(2)}x` + (hasExtremeRealtimePressure ? " (SOFTENED VIA LEADING ORDER FLOW)" : ""),
+      required: `> ${requiredRelVol.toFixed(2)}x above 20-period MA`,
     });
 
     // C7: Daily Circuit Breaker

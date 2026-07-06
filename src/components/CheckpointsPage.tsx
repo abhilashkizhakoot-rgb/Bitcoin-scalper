@@ -336,6 +336,155 @@ export default function CheckpointsPage({ status, onRefresh, onTabChange }: Chec
         </div>
       </div>
 
+      {/* ================= ACTIVE POSITION LIVE RADAR STATUS ================= */}
+      {status.active_trade && (
+        <div className="bg-slate-900 text-white border border-slate-800 rounded-2xl p-6 shadow-md space-y-4" id="active-trade-checkpoint-details">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                <Target className="w-5 h-5 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="font-sans font-bold text-sm tracking-tight uppercase text-white">Active Position Radar Monitor</h2>
+                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md ${
+                    status.active_trade.direction === "LONG"
+                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                      : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                  }`}>
+                    {status.active_trade.direction} {status.active_trade.leverage}x
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 font-mono">
+                  ID: {status.active_trade.id.substring(0, 8)}... • Entered at {new Date(status.active_trade.entry_timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </p>
+              </div>
+            </div>
+
+            <div className="text-right">
+              <p className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Position Real-Time P&L</p>
+              <div className="flex items-center gap-1.5 justify-end mt-1">
+                <span className={`text-xl font-sans font-extrabold ${status.active_trade.pnl_usdt && status.active_trade.pnl_usdt >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                  {status.active_trade.pnl_usdt && status.active_trade.pnl_usdt >= 0 ? "+" : ""}
+                  ${status.active_trade.pnl_usdt?.toFixed(2)}
+                </span>
+                {status.active_trade.pnl_pct !== undefined && (
+                  <span className={`text-xs font-mono font-semibold px-1.5 py-0.5 rounded-md ${
+                    status.active_trade.pnl_pct && status.active_trade.pnl_pct >= 0 
+                      ? "bg-emerald-500/10 text-emerald-400" 
+                      : "bg-rose-500/10 text-rose-400"
+                  }`}>
+                    {status.active_trade.pnl_pct && status.active_trade.pnl_pct >= 0 ? "+" : ""}
+                    {status.active_trade.pnl_pct?.toFixed(2)}%
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2">
+            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 space-y-1">
+              <span className="text-[10px] font-mono text-slate-400 uppercase">Entry Price</span>
+              <p className="font-mono text-xs font-bold text-slate-200">${safeFormatNumber(status.active_trade.entry_price)}</p>
+            </div>
+
+            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 space-y-1">
+              <span className="text-[10px] font-mono text-slate-400 uppercase">Current Price</span>
+              <p className="font-mono text-xs font-bold text-slate-200">${safeFormatNumber(status.current_price)}</p>
+            </div>
+
+            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 space-y-1">
+              <span className="text-[10px] font-mono text-slate-400 uppercase">Position Size</span>
+              <p className="font-mono text-xs font-bold text-slate-200">{status.active_trade.quantity_btc} BTC</p>
+            </div>
+
+            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 space-y-1">
+              <span className="text-[10px] font-mono text-slate-400 uppercase">AI Signal Score</span>
+              <p className="font-mono text-xs font-bold text-slate-200">{status.active_trade.entry_signal_score} / 100</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Targeted Stop Loss */}
+            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 flex flex-col justify-between space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono text-rose-400 font-bold uppercase tracking-wider">Targeted Stop Loss</span>
+                <span className="text-[9px] font-mono bg-rose-500/10 text-rose-400 px-1.5 py-0.5 rounded-md border border-rose-500/20">RISK</span>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between items-baseline">
+                  <span className="text-slate-400 text-xs">Initial SL:</span>
+                  <span className="font-mono text-xs font-bold text-slate-300">
+                    {status.active_trade.feature_snapshot?.stop_loss_price
+                      ? `$${safeFormatNumber(status.active_trade.feature_snapshot.stop_loss_price)}`
+                      : "N/A"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-baseline pt-1 border-t border-slate-800/50">
+                  <span className="text-slate-400 text-xs">Current Trailing SL:</span>
+                  <span className="font-mono text-sm font-bold text-rose-400">
+                    {status.active_trade.feature_snapshot?.current_stop_loss_price
+                      ? `$${safeFormatNumber(status.active_trade.feature_snapshot.current_stop_loss_price)}`
+                      : "Calculating..."}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Targeted Take Profit */}
+            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 flex flex-col justify-between space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono text-emerald-400 font-bold uppercase tracking-wider">Targeted Take Profit</span>
+                <span className="text-[9px] font-mono bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-md border border-emerald-500/20">TARGET</span>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between items-baseline">
+                  <span className="text-slate-400 text-xs">Profit Target:</span>
+                  <span className="font-mono text-sm font-bold text-emerald-400">
+                    {status.active_trade.feature_snapshot?.take_profit_price
+                      ? `$${safeFormatNumber(status.active_trade.feature_snapshot.take_profit_price)}`
+                      : "N/A"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-baseline pt-1 border-t border-slate-800/50">
+                  <span className="text-slate-400 text-xs">Favorable Peak:</span>
+                  <span className="font-mono text-xs font-bold text-emerald-500">
+                    {status.active_trade.feature_snapshot?.peak_price || status.active_trade.feature_snapshot?.valley_price
+                      ? `$${safeFormatNumber(status.active_trade.feature_snapshot.peak_price || status.active_trade.feature_snapshot.valley_price)}`
+                      : `$${safeFormatNumber(status.active_trade.entry_price)}`}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Hold Duration and Deadline */}
+            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 flex flex-col justify-between space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono text-slate-400 font-bold uppercase tracking-wider">Time in Position</span>
+                <span className="text-[9px] font-mono bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded-md border border-indigo-500/20">TIMER</span>
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between items-baseline">
+                  <span className="text-slate-400 text-xs">Duration:</span>
+                  <span className="font-sans text-xs font-bold text-indigo-400">
+                    {Math.floor(status.active_trade.hold_duration_seconds / 60)}m {status.active_trade.hold_duration_seconds % 60}s
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div
+                      className="bg-indigo-500 h-full transition-all duration-1000 rounded-full"
+                      style={{ width: `${Math.min(100, (status.active_trade.hold_duration_seconds / (29 * 60)) * 100)}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-[9px] font-mono text-slate-400 text-right">Hard exit in 29 minutes</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ================= CRITICAL BLOCKED SPOTLIGHT ================= */}
       {blockedCount > 0 && (
         <div className="bg-rose-50/60 border border-rose-100 rounded-2xl p-5 shadow-sm space-y-4">

@@ -167,6 +167,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
   const [reasonFilter, setReasonFilter] = useState<"ALL" | ExitReason>("ALL");
   const [windowFilter, setWindowFilter] = useState<string>("ALL");
   const [regimeFilter, setRegimeFilter] = useState<string>("ALL");
+  const [showTargetsInTable, setShowTargetsInTable] = useState<boolean>(false);
 
   // Clear modal states
   const [showClearModal, setShowClearModal] = useState(false);
@@ -438,6 +439,17 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
             </select>
           </div>
 
+          {/* Toggle SL/TP columns */}
+          <label className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100/80 text-slate-700 border border-slate-200 rounded-lg text-xs font-sans font-medium transition-colors cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showTargetsInTable}
+              onChange={(e) => setShowTargetsInTable(e.target.checked)}
+              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer"
+            />
+            <span>Show SL/TP Targets</span>
+          </label>
+
           {/* Clear History Button */}
           <button
             onClick={() => setShowClearModal(true)}
@@ -460,6 +472,12 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                 <th className="py-3 px-4 font-normal">Direction</th>
                 <th className="py-3 px-4 font-normal">Size (BTC)</th>
                 <th className="py-3 px-4 font-normal">Entry Price</th>
+                {showTargetsInTable && (
+                  <>
+                    <th className="py-3 px-4 font-normal">Target SL</th>
+                    <th className="py-3 px-4 font-normal">Target TP</th>
+                  </>
+                )}
                 <th className="py-3 px-4 font-normal">Exit Price</th>
                 <th className="py-3 px-4 font-normal">Session IST</th>
                 <th className="py-3 px-4 font-normal">Trigger Reason</th>
@@ -496,6 +514,22 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                        <td className="py-3.5 px-4 font-mono text-slate-500">
                          ${safeFormatNumber(t.entry_price)}
                        </td>
+                       {showTargetsInTable && (
+                         <>
+                           <td className="py-3.5 px-4 font-mono text-rose-600 font-medium">
+                             {t.feature_snapshot?.stop_loss_price 
+                               ? `$${safeFormatNumber(t.feature_snapshot.stop_loss_price)}` 
+                               : t.feature_snapshot?.current_stop_loss_price 
+                               ? `$${safeFormatNumber(t.feature_snapshot.current_stop_loss_price)}` 
+                               : "—"}
+                           </td>
+                           <td className="py-3.5 px-4 font-mono text-emerald-600 font-medium">
+                             {t.feature_snapshot?.take_profit_price 
+                               ? `$${safeFormatNumber(t.feature_snapshot.take_profit_price)}` 
+                               : "—"}
+                           </td>
+                         </>
+                       )}
                        <td className="py-3.5 px-4 font-mono text-slate-500">
                          {t.exit_price ? `$${safeFormatNumber(t.exit_price)}` : "Active..."}
                        </td>
@@ -534,7 +568,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                      {/* Trade Detail Drawer */}
                      {isSelected && (
                        <tr>
-                         <td colSpan={9} className="bg-slate-50 border-t border-b border-slate-100 p-5">
+                         <td colSpan={showTargetsInTable ? 11 : 9} className="bg-slate-50 border-t border-b border-slate-100 p-5">
                            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-slate-600" id={`trade-drawer-${t.id}`}>
                              {/* Execution stats */}
                              <div className="space-y-3">
@@ -548,9 +582,27 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                                    <span className="text-slate-400">Hold Duration:</span>
                                    <span className="font-semibold text-slate-700">{Math.floor(t.hold_duration_seconds / 60)}m {t.hold_duration_seconds % 60}s</span>
                                  </div>
-                                 <div className="flex justify-between">
+                                 <div className="flex justify-between border-b border-slate-200/50 pb-1">
                                    <span className="text-slate-400">Commissions Paid:</span>
                                    <span className="font-mono text-slate-700">${t.fees_paid_usdt.toFixed(4)}</span>
+                                 </div>
+                                 <div className="flex justify-between border-b border-slate-200/50 pb-1">
+                                   <span className="text-slate-400">Target Stop Loss:</span>
+                                   <span className="font-mono text-rose-600 font-semibold">
+                                     {t.feature_snapshot?.stop_loss_price 
+                                       ? `$${safeFormatNumber(t.feature_snapshot.stop_loss_price)}` 
+                                       : t.feature_snapshot?.current_stop_loss_price 
+                                       ? `$${safeFormatNumber(t.feature_snapshot.current_stop_loss_price)}` 
+                                       : "N/A"}
+                                   </span>
+                                 </div>
+                                 <div className="flex justify-between">
+                                   <span className="text-slate-400">Target Take Profit:</span>
+                                   <span className="font-mono text-emerald-600 font-semibold">
+                                     {t.feature_snapshot?.take_profit_price 
+                                       ? `$${safeFormatNumber(t.feature_snapshot.take_profit_price)}` 
+                                       : "N/A"}
+                                   </span>
                                  </div>
                                </div>
                              </div>
@@ -608,7 +660,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                })}
                {filteredTrades.length === 0 && (
                  <tr>
-                   <td colSpan={9} className="text-center font-mono text-slate-400 text-xs italic py-16">
+                   <td colSpan={showTargetsInTable ? 11 : 9} className="text-center font-mono text-slate-400 text-xs italic py-16">
                      No historical trades matching the current filter criteria...
                    </td>
                  </tr>

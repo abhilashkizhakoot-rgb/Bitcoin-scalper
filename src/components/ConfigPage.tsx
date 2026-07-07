@@ -823,18 +823,34 @@ export default function ConfigPage({
                 </div>
 
                 {riskConfig.trailing_stop_loss_enabled && (
-                  <div className="space-y-1.5 pl-6.5">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Trailing SL Distance (ATR Multiplier)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={riskConfig.trailing_stop_loss_distance_atr !== undefined ? riskConfig.trailing_stop_loss_distance_atr : 1.2}
-                      onChange={(e) => setRiskConfig({ ...riskConfig, trailing_stop_loss_distance_atr: parseFloat(e.target.value) || 1.2 })}
-                      className="w-32 bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                    />
-                    <p className="text-[9px] text-slate-400 leading-relaxed">
-                      Distance to trail behind the highest favorable price excursion point, computed as ATR(14) * multiplier. Keep tight to lock in fast scalping breakout waves (Standard: 1.2 - 1.8).
-                    </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-6.5">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-mono text-slate-400 uppercase">Trailing SL Distance (ATR Multiplier)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={riskConfig.trailing_stop_loss_distance_atr !== undefined ? riskConfig.trailing_stop_loss_distance_atr : 1.8}
+                        onChange={(e) => setRiskConfig({ ...riskConfig, trailing_stop_loss_distance_atr: parseFloat(e.target.value) || 1.8 })}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                      />
+                      <p className="text-[9px] text-slate-400 leading-relaxed text-slate-500">
+                        Distance to trail behind the peak/valley, computed as ATR(14) * multiplier. Narrower trailing secures near-term gains faster; wider trailing captures longer trends (Standard: 1.2 - 2.0).
+                      </p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-mono text-slate-400 uppercase">Trailing Activation (Risk Multiple)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={riskConfig.trailing_stop_loss_activation_ratio !== undefined ? riskConfig.trailing_stop_loss_activation_ratio : 1.2}
+                        onChange={(e) => setRiskConfig({ ...riskConfig, trailing_stop_loss_activation_ratio: parseFloat(e.target.value) || 1.2 })}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                      />
+                      <p className="text-[9px] text-slate-400 leading-relaxed text-slate-500">
+                        The multiple of the initial stop loss distance (risk) required in profit before trailing is armed (e.g., 1.2x means a 1:1.2 R:R profit level). Keeps stop loss wide early so the trade can breathe!
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>

@@ -174,6 +174,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     default_order_execution: "TAKER",
     trailing_stop_loss_enabled: true,
     trailing_stop_loss_distance_atr: 1.8,
+    trailing_stop_loss_activation_ratio: 1.2,
     min_stop_loss_distance_usd: 80,
     min_stop_loss_distance_pct: 0.12,
   },
@@ -866,6 +867,10 @@ class DatabaseManager {
       }
       if (this.cache.config.risk_management.trailing_stop_loss_distance_atr === undefined || this.cache.config.risk_management.trailing_stop_loss_distance_atr <= 1.3) {
         this.cache.config.risk_management.trailing_stop_loss_distance_atr = 1.8;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.trailing_stop_loss_activation_ratio === undefined) {
+        this.cache.config.risk_management.trailing_stop_loss_activation_ratio = 1.2;
         changed = true;
       }
       if (this.cache.config.risk_management.min_stop_loss_distance_usd === undefined) {

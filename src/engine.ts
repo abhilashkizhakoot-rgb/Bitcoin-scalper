@@ -3834,6 +3834,12 @@ class TradingEngine {
         this.activeTrade.feature_snapshot = {};
       }
       
+      const activationRatio = config.risk_management.trailing_stop_loss_activation_ratio !== undefined
+        ? config.risk_management.trailing_stop_loss_activation_ratio
+        : 1.2;
+      
+      let trailingActivated = this.activeTrade.feature_snapshot.trailing_activated === true;
+      
       if (direction === TradeDirection.LONG) {
         // Track maximum price observed since entry
         const peakPrice = Math.max(
@@ -3846,8 +3852,22 @@ class TradingEngine {
         const trailingSl = peakPrice - tsldistance;
         this.activeTrade.feature_snapshot.trailing_stop_loss_price = trailingSl;
         
-        // The final stop loss price is the higher of original fixed SL and the trailing SL
-        finalStopLossPrice = Math.max(stopLossPrice, trailingSl);
+        // Check activation condition if not already activated
+        if (!trailingActivated) {
+          const reachedTarget = (peakPrice - entryPrice) >= (stopLossDistance * activationRatio);
+          if (reachedTarget) {
+            trailingActivated = true;
+            this.activeTrade.feature_snapshot.trailing_activated = true;
+            this.log(`📈 Trailing Stop Loss ACTIVATED for trade ${this.activeTrade.id}! Peak profit reached ${activationRatio}x of risk threshold ($${(stopLossDistance * activationRatio).toFixed(2)} USD in profit).`);
+          }
+        }
+        
+        // Apply trailing stop loss ONLY if activated
+        if (trailingActivated) {
+          finalStopLossPrice = Math.max(stopLossPrice, trailingSl);
+        } else {
+          finalStopLossPrice = stopLossPrice;
+        }
       } else {
         // Track minimum price observed since entry
         const valleyPrice = Math.min(
@@ -3860,8 +3880,22 @@ class TradingEngine {
         const trailingSl = valleyPrice + tsldistance;
         this.activeTrade.feature_snapshot.trailing_stop_loss_price = trailingSl;
         
-        // The final stop loss price is the lower of original fixed SL and the trailing SL
-        finalStopLossPrice = Math.min(stopLossPrice, trailingSl);
+        // Check activation condition if not already activated
+        if (!trailingActivated) {
+          const reachedTarget = (entryPrice - valleyPrice) >= (stopLossDistance * activationRatio);
+          if (reachedTarget) {
+            trailingActivated = true;
+            this.activeTrade.feature_snapshot.trailing_activated = true;
+            this.log(`📉 Trailing Stop Loss ACTIVATED for trade ${this.activeTrade.id}! Peak profit reached ${activationRatio}x of risk threshold ($${(stopLossDistance * activationRatio).toFixed(2)} USD in profit).`);
+          }
+        }
+        
+        // Apply trailing stop loss ONLY if activated
+        if (trailingActivated) {
+          finalStopLossPrice = Math.min(stopLossPrice, trailingSl);
+        } else {
+          finalStopLossPrice = stopLossPrice;
+        }
       }
       
       this.activeTrade.feature_snapshot.current_stop_loss_price = finalStopLossPrice;

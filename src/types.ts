@@ -218,6 +218,7 @@ export interface StrategyConfig {
     default_order_execution?: "MAKER" | "TAKER"; // Default order execution type
     trailing_stop_loss_enabled?: boolean; // Dynamic trailing stop loss trigger
     trailing_stop_loss_distance_atr?: number; // ATR distance multiplier for trailing
+    trailing_stop_loss_activation_ratio?: number; // Multiple of initial stop loss distance to activate trailing (e.g. 1.2x)
     min_stop_loss_distance_usd?: number; // Minimum USD distance floor for stop loss
     min_stop_loss_distance_pct?: number; // Minimum percentage distance floor for stop loss (e.g. 0.12 for 0.12%)
   };

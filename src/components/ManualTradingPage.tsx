@@ -21,6 +21,7 @@ import {
   Target,
   ShieldAlert,
   Info,
+  Calculator,
 } from "lucide-react";
 import { Trade, TradeDirection, StrategyConfig } from "../types.js";
 import { safeFormatTime, safeFormatNumber } from "../utils/format";
@@ -45,6 +46,86 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
   const currentPrice = status.current_price;
   const balance = status.account_balance_usdt;
   const activeTrade = status.active_trade;
+
+  // Left Column Tab selection
+  const [leftSubTab, setLeftSubTab] = useState<"trade" | "calculator">("trade");
+
+  // Candles data and Live ATR calculation state
+  const [candles, setCandles] = useState<any[]>([]);
+  const [liveAtr, setLiveAtr] = useState<number | null>(null);
+
+  useEffect(() => {
+    const fetchCandles = async () => {
+      try {
+        const res = await apiFetch("/api/market/candles");
+        if (res.ok) {
+          const data = await res.json();
+          setCandles(data);
+          if (Array.isArray(data) && data.length > 0) {
+            const calculated = calculateATR(data, 14);
+            setLiveAtr(calculated);
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to fetch candles for ATR calculation", e);
+      }
+    };
+    fetchCandles();
+    const interval = setInterval(fetchCandles, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  function calculateATR(candlesList: any[], period = 14): number {
+    if (!Array.isArray(candlesList) || candlesList.length < period + 1) return 150;
+    const tr: number[] = [];
+    for (let i = 1; i < candlesList.length; i++) {
+      const high = Number(candlesList[i].high);
+      const low = Number(candlesList[i].low);
+      const prevClose = Number(candlesList[i - 1].close);
+      const h_l = high - low;
+      const h_pc = Math.abs(high - prevClose);
+      const l_pc = Math.abs(low - prevClose);
+      tr.push(Math.max(h_l, h_pc, l_pc));
+    }
+    let sum = 0;
+    for (let i = 0; i < period; i++) {
+      sum += tr[i];
+    }
+    const atr: number[] = [];
+    atr[period - 1] = sum / period;
+    for (let i = period; i < tr.length; i++) {
+      atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
+    }
+    const finalAtr = atr[atr.length - 1];
+    return typeof finalAtr === "number" && !isNaN(finalAtr) ? finalAtr : 150;
+  }
+
+  // Calculator State
+  const [calcExpectedProfit, setCalcExpectedProfit] = useState<string>("1.0");
+  const [calcQuantity, setCalcQuantity] = useState<string>("0.01");
+  const [calcPrice, setCalcPrice] = useState<string>("");
+  const [calcDirection, setCalcDirection] = useState<"LONG" | "SHORT">("LONG");
+  const [calcAtrSource, setCalcAtrSource] = useState<"auto" | "manual">("auto");
+  const [calcAtrOverride, setCalcAtrOverride] = useState<string>("");
+  const [calcSlMultiplier, setCalcSlMultiplier] = useState<string>(
+    config?.risk_management?.stop_loss_atr_multiplier !== undefined
+      ? config.risk_management.stop_loss_atr_multiplier.toString()
+      : "1.8"
+  );
+  const [calcUseFees, setCalcUseFees] = useState<boolean>(true);
+
+  // Initialize calcPrice and sync fields from config
+  useEffect(() => {
+    if (currentPrice && !calcPrice) {
+      setCalcPrice(currentPrice.toString());
+    }
+  }, [currentPrice]);
+
+  useEffect(() => {
+    if (config?.risk_management?.stop_loss_atr_multiplier !== undefined) {
+      setCalcSlMultiplier(config.risk_management.stop_loss_atr_multiplier.toString());
+    }
+  }, [config?.risk_management?.stop_loss_atr_multiplier]);
 
   // Form State
   const [direction, setDirection] = useState<"LONG" | "SHORT">("LONG");
@@ -239,360 +320,765 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
     }
   };
 
+  // Calculator Computations
+  const cPrice = parseFloat(calcPrice) || currentPrice || 63000;
+  const cQty = parseFloat(calcQuantity) || 0.01;
+  const cAtr = calcAtrSource === "manual" && calcAtrOverride ? parseFloat(calcAtrOverride) || 26.86 : (liveAtr || 26.86);
+  const cSlMult = parseFloat(calcSlMultiplier) || 1.8;
+  const cExpectedProfit = parseFloat(calcExpectedProfit) || 1.0;
+
+  // Stop loss calculations (reproducing exact trading engine logic)
+  const cRawSlDistance = cAtr * cSlMult;
+  const cUsdFloor = config?.risk_management?.min_stop_loss_distance_usd !== undefined ? config.risk_management.min_stop_loss_distance_usd : 80;
+  const cPctFloorVal = config?.risk_management?.min_stop_loss_distance_pct !== undefined ? config.risk_management.min_stop_loss_distance_pct : 0.12;
+  const cMinSlDistance = Math.max(cUsdFloor, cPrice * (cPctFloorVal / 100));
+  const cFinalSlDistance = Math.max(cRawSlDistance, cMinSlDistance);
+
+  // Stop Loss Price
+  const cStopLossPrice = calcDirection === "LONG" ? cPrice - cFinalSlDistance : cPrice + cFinalSlDistance;
+
+  // Fee calculation matching exact server fee calculation
+  const cNotionalValue = cPrice * cQty;
+  const cExecType = config?.risk_management?.default_order_execution || "TAKER";
+  let cBaseRate = cExecType === "MAKER" ? 0.0002 : 0.0005;
+  if (isPaper && !simulateFees) {
+    cBaseRate = 0;
+  }
+  const cEntryFeeGstMultiplier = (config?.risk_management?.delta_india_gst_enabled !== false && cBaseRate > 0) ? 1.18 : 1.0;
+  const cEntryFee = cNotionalValue * cBaseRate * cEntryFeeGstMultiplier;
+  const cExitFeeNormal = cNotionalValue * cBaseRate * cEntryFeeGstMultiplier;
+  const cScalperOfferActive = config?.risk_management?.delta_scalper_offer_enabled !== false;
+  const cExitFee = cScalperOfferActive ? 0 : cExitFeeNormal;
+  const cTotalFees = cEntryFee + cExitFee;
+
+  // Gross profit needed to achieve target net profit
+  const cRequiredGrossProfit = calcUseFees ? (cExpectedProfit + cTotalFees) : cExpectedProfit;
+  const cTakeProfitDistance = cRequiredGrossProfit / cQty;
+
+  // Required reward ratio: take profit distance divided by stop loss distance
+  const cRequiredRewardRatio = cTakeProfitDistance / cFinalSlDistance;
+
+  // Take Profit Price
+  const cTakeProfitPrice = calcDirection === "LONG" ? cPrice + cTakeProfitDistance : cPrice - cTakeProfitDistance;
+
+  // Gross Loss and Net Loss at Stop Loss
+  const cGrossLoss = cFinalSlDistance * cQty;
+  const cNetLoss = cGrossLoss + cTotalFees;
+
+  // Copy calculated values to manual order entry form
+  const handleApplyCalcToForm = () => {
+    setDirection(calcDirection);
+    setQuantityStr(cQty.toString());
+    setUseSl(true);
+    setSlType("price");
+    setSlPriceStr(cStopLossPrice.toFixed(2));
+    setUseTp(true);
+    setTpType("price");
+    setTpPriceStr(cTakeProfitPrice.toFixed(2));
+    setLeftSubTab("trade");
+    setSuccessMsg(`Applied calculator settings! Quantity: ${cQty} BTC, SL: ${cStopLossPrice.toFixed(2)}, TP: ${cTakeProfitPrice.toFixed(2)}.`);
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8" id="manual-trading-panel">
       
       {/* LEFT COLUMN: Order Entry Panel (lg:col-span-8) */}
       <div className="lg:col-span-8 space-y-6">
         
-        {/* Dynamic Warning if Automated Trading is Active */}
-        {status.is_trading_active && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0 animate-pulse" />
-            <div className="text-xs text-amber-800">
-              <span className="font-bold">Automated Agent Scalper is currently ACTIVE.</span> Placing manual orders while the bot is active may result in overlapping margin usage or immediate automated exit triggers if system thresholds are violated. Consider turning off automated trading in the Strategy configuration or proceed with caution.
+        {/* SUB-TABS SELECTOR */}
+        <div className="flex items-center gap-4 border-b border-slate-200 pb-2">
+          <button
+            type="button"
+            onClick={() => setLeftSubTab("trade")}
+            className={`pb-2.5 text-xs font-bold uppercase tracking-wider transition-all border-b-2 cursor-pointer ${
+              leftSubTab === "trade"
+                ? "border-indigo-600 text-indigo-600"
+                : "border-transparent text-slate-400 hover:text-slate-600"
+            }`}
+          >
+            Execute Trades
+          </button>
+          <button
+            type="button"
+            onClick={() => setLeftSubTab("calculator")}
+            className={`pb-2.5 text-xs font-bold uppercase tracking-wider transition-all border-b-2 cursor-pointer ${
+              leftSubTab === "calculator"
+                ? "border-indigo-600 text-indigo-600"
+                : "border-transparent text-slate-400 hover:text-slate-600"
+            }`}
+            id="btn-calculator-subtab"
+          >
+            Risk-Reward & ATR Calculator
+          </button>
+        </div>
+
+        {leftSubTab === "trade" ? (
+          <>
+            {/* Dynamic Warning if Automated Trading is Active */}
+            {status.is_trading_active && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0 animate-pulse" />
+                <div className="text-xs text-amber-800">
+                  <span className="font-bold">Automated Agent Scalper is currently ACTIVE.</span> Placing manual orders while the bot is active may result in overlapping margin usage or immediate automated exit triggers if system thresholds are violated. Consider turning off automated trading in the Strategy configuration or proceed with caution.
+                </div>
+              </div>
+            )}
+
+            {/* ORDER BOX CARD */}
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+              <div className="bg-slate-900 px-6 py-4 flex items-center justify-between text-white">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-indigo-400" />
+                  <h2 className="font-sans font-bold text-sm tracking-tight">EXECUTE MANUAL FUTURES TRADE</h2>
+                </div>
+                <div className="flex items-center gap-1.5 font-mono text-xs bg-indigo-950/80 px-2.5 py-1 rounded-lg border border-indigo-900/60">
+                  <span className="text-slate-400">INDEX:</span>
+                  <span className="text-indigo-400 font-bold">BTCUSD-FUTURES</span>
+                </div>
+              </div>
+
+              <form onSubmit={handleSubmitOrder} className="p-6 space-y-6">
+                
+                {/* 1. DIRECTION SELECTOR (LONG vs SHORT) */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">Trade Direction</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setDirection("LONG")}
+                      className={`py-3.5 px-5 rounded-xl border flex items-center justify-center gap-2.5 font-sans font-bold text-xs transition-all cursor-pointer ${
+                        direction === "LONG"
+                          ? "bg-emerald-500 border-emerald-500 text-white shadow-md shadow-emerald-500/10"
+                          : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
+                      }`}
+                      id="btn-manual-long"
+                    >
+                      <TrendingUp className="w-4 h-4" />
+                      BUY / LONG FUTURES
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDirection("SHORT")}
+                      className={`py-3.5 px-5 rounded-xl border flex items-center justify-center gap-2.5 font-sans font-bold text-xs transition-all cursor-pointer ${
+                        direction === "SHORT"
+                          ? "bg-rose-500 border-rose-500 text-white shadow-md shadow-rose-500/10"
+                          : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
+                      }`}
+                      id="btn-manual-short"
+                    >
+                      <TrendingDown className="w-4 h-4" />
+                      SELL / SHORT FUTURES
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. LEVERAGE CONFIGURATION */}
+                <div className="space-y-3 bg-slate-50 border border-slate-200/50 p-4 rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">
+                      <Scale className="w-3.5 h-3.5 text-indigo-500" />
+                      <span>Adjust Position Leverage</span>
+                    </div>
+                    <span className="font-mono font-bold text-indigo-600 text-sm bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">{leverage}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="125"
+                    value={leverage}
+                    onChange={(e) => setLeverage(parseInt(e.target.value, 10))}
+                    className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                  <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono pt-1">
+                    <span>1x (Unleveraged)</span>
+                    <div className="flex gap-1.5">
+                      {[5, 10, 20, 50, 100].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => setLeverage(val)}
+                          className={`px-2 py-0.5 border rounded cursor-pointer transition-colors ${
+                            leverage === val ? "bg-indigo-600 border-indigo-600 text-white font-bold" : "bg-white border-slate-200 hover:bg-slate-100 hover:text-slate-700"
+                          }`}
+                        >
+                          {val}x
+                        </button>
+                      ))}
+                    </div>
+                    <span>125x (Max)</span>
+                  </div>
+                </div>
+
+                {/* 3. QUANTITY BTC INPUT */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                      <Percent className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Order Quantity (BTC)</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.001"
+                        min="0.001"
+                        required
+                        value={quantityStr}
+                        onChange={(e) => setQuantityStr(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pr-14 text-sm font-mono text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400"
+                        placeholder="0.1"
+                      />
+                      <div className="absolute right-3.5 top-3.5 text-xs font-mono font-bold text-slate-400 select-none">BTC</div>
+                    </div>
+                  </div>
+
+                  {/* Dynamic Percentage of Balance presets */}
+                  <div className="space-y-2 flex flex-col justify-end">
+                    <label className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">Use Margin Preset</label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {[10, 25, 50, 100].map((pct) => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => handleQuantityPct(pct)}
+                          className="py-2.5 text-center border border-slate-200 hover:bg-slate-50 rounded-lg text-xs font-mono font-semibold text-slate-600 transition-colors cursor-pointer"
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. RISK CONTROLS: STOP LOSS & TAKE PROFIT */}
+                <div className="border-t border-slate-100 pt-5 space-y-4">
+                  <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans flex items-center gap-1.5">
+                    <Sliders className="w-4 h-4 text-indigo-500" />
+                    Stop Loss & Take Profit Settings
+                  </h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    {/* STOP LOSS BOX */}
+                    <div className="bg-slate-50 border border-slate-200/50 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-200/60 pb-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={useSl}
+                            onChange={(e) => setUseSl(e.target.checked)}
+                            className="rounded border-slate-300 text-rose-500 focus:ring-0"
+                          />
+                          <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Stop Loss</span>
+                        </label>
+                        <span className="text-[10px] font-mono text-rose-500 font-bold uppercase">Risk Protection</span>
+                      </div>
+
+                      {useSl && (
+                        <div className="space-y-3">
+                          <div className="flex bg-white border border-slate-200 rounded-lg p-1 text-xs">
+                            <button
+                              type="button"
+                              onClick={() => setSlType("offset")}
+                              className={`flex-1 py-1 text-center rounded transition-colors cursor-pointer ${
+                                slType === "offset" ? "bg-rose-50 text-rose-600 font-bold" : "text-slate-400"
+                              }`}
+                            >
+                              Offset ($)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSlType("price")}
+                              className={`flex-1 py-1 text-center rounded transition-colors cursor-pointer ${
+                                slType === "price" ? "bg-rose-50 text-rose-600 font-bold" : "text-slate-400"
+                              }`}
+                            >
+                              Trigger Price
+                            </button>
+                          </div>
+
+                          {slType === "offset" ? (
+                            <div className="relative">
+                              <input
+                                type="number"
+                                value={slOffsetStr}
+                                onChange={(e) => setSlOffsetStr(e.target.value)}
+                                className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none focus:ring-1 focus:ring-rose-400"
+                                placeholder="500"
+                              />
+                              <div className="absolute right-3 top-2.5 text-[10px] font-mono text-slate-400 uppercase">USDT Offset</div>
+                            </div>
+                          ) : (
+                            <div className="relative">
+                              <input
+                                type="number"
+                                value={slPriceStr}
+                                onChange={(e) => setSlPriceStr(e.target.value)}
+                                className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none focus:ring-1 focus:ring-rose-400"
+                                placeholder="Price in USDT"
+                              />
+                              <div className="absolute right-3 top-2.5 text-[10px] font-mono text-slate-400 uppercase">USDT Target</div>
+                            </div>
+                          )}
+
+                          <div className="text-[10.5px] font-mono text-rose-600 flex justify-between">
+                            <span>Trigger: ${safeFormatNumber(computedSlPrice)}</span>
+                            <span>Distance: {slPct.toFixed(2)}%</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* TAKE PROFIT BOX */}
+                    <div className="bg-slate-50 border border-slate-200/50 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-200/60 pb-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={useTp}
+                            onChange={(e) => setUseTp(e.target.checked)}
+                            className="rounded border-slate-300 text-emerald-500 focus:ring-0"
+                          />
+                          <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Take Profit</span>
+                        </label>
+                        <span className="text-[10px] font-mono text-emerald-500 font-bold uppercase">Target Reward</span>
+                      </div>
+
+                      {useTp && (
+                        <div className="space-y-3">
+                          <div className="flex bg-white border border-slate-200 rounded-lg p-1 text-xs">
+                            <button
+                              type="button"
+                              onClick={() => setTpType("offset")}
+                              className={`flex-1 py-1 text-center rounded transition-colors cursor-pointer ${
+                                tpType === "offset" ? "bg-emerald-50 text-emerald-600 font-bold" : "text-slate-400"
+                              }`}
+                            >
+                              Offset ($)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setTpType("price")}
+                              className={`flex-1 py-1 text-center rounded transition-colors cursor-pointer ${
+                                tpType === "price" ? "bg-emerald-50 text-emerald-600 font-bold" : "text-slate-400"
+                              }`}
+                            >
+                              Trigger Price
+                            </button>
+                          </div>
+
+                          {tpType === "offset" ? (
+                            <div className="relative">
+                              <input
+                                type="number"
+                                value={tpOffsetStr}
+                                onChange={(e) => setTpOffsetStr(e.target.value)}
+                                className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none focus:ring-1 focus:ring-emerald-400"
+                                placeholder="1000"
+                              />
+                              <div className="absolute right-3 top-2.5 text-[10px] font-mono text-slate-400 uppercase">USDT Offset</div>
+                            </div>
+                          ) : (
+                            <div className="relative">
+                              <input
+                                type="number"
+                                value={tpPriceStr}
+                                onChange={(e) => setTpPriceStr(e.target.value)}
+                                className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none focus:ring-1 focus:ring-emerald-400"
+                                placeholder="Price in USDT"
+                              />
+                              <div className="absolute right-3 top-2.5 text-[10px] font-mono text-slate-400 uppercase">USDT Target</div>
+                            </div>
+                          )}
+
+                          <div className="text-[10.5px] font-mono text-emerald-600 flex justify-between">
+                            <span>Trigger: ${safeFormatNumber(computedTpPrice)}</span>
+                            <span>Distance: {tpPct.toFixed(2)}%</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                </div>
+
+                {/* ORDER SUBMISSION FEEDBACK MESSAGES */}
+                <AnimatePresence>
+                  {errorMsg && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="bg-rose-50 border border-rose-100 rounded-xl p-3 flex items-start gap-2 text-rose-700 text-xs font-sans"
+                    >
+                      <XCircle className="w-4 h-4 text-rose-500 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <span className="font-bold">Execution Denied:</span> {errorMsg}
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {successMsg && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex items-start gap-2 text-emerald-800 text-xs font-sans"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <span className="font-bold">Success:</span> {successMsg}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* SUBMIT BUTTON */}
+                <div className="border-t border-slate-100 pt-5">
+                  <button
+                    type="submit"
+                    disabled={isSubmitting || !!activeTrade}
+                    className={`w-full py-3.5 rounded-xl font-sans font-bold text-sm text-center flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer ${
+                      activeTrade
+                        ? "bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed shadow-none"
+                        : direction === "LONG"
+                        ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/10"
+                        : "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/10"
+                    }`}
+                    id="btn-submit-manual-order"
+                  >
+                    {isSubmitting ? (
+                      <span>Transmitting Order...</span>
+                    ) : activeTrade ? (
+                      <span className="flex items-center gap-1">
+                        <Lock className="w-4 h-4" /> Position Locked (Exit Active Trade First)
+                      </span>
+                    ) : (
+                      <span>
+                        EXECUTE {direction === "LONG" ? "BUY / LONG" : "SELL / SHORT"} MARKET ORDER
+                      </span>
+                    )}
+                  </button>
+                </div>
+
+              </form>
+            </div>
+          </>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden" id="risk-reward-calculator-card">
+            <div className="bg-slate-900 px-6 py-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2">
+                <Calculator className="w-4 h-4 text-indigo-400" />
+                <h2 className="font-sans font-bold text-sm tracking-tight">RISK-REWARD & ATR CALCULATOR</h2>
+              </div>
+              <div className="flex items-center gap-1.5 font-mono text-xs bg-indigo-950/80 px-2.5 py-1 rounded-lg border border-indigo-900/60">
+                <span className="text-slate-400">MODE:</span>
+                <span className="text-indigo-400 font-bold">FEE-ADJUSTED NET TARGETS</span>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-6">
+              
+              {/* DIRECTION SELECTOR (LONG vs SHORT) */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">Target Direction</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setCalcDirection("LONG")}
+                    className={`py-3 px-5 rounded-xl border flex items-center justify-center gap-2 font-sans font-bold text-xs transition-all cursor-pointer ${
+                      calcDirection === "LONG"
+                        ? "bg-emerald-500 border-emerald-500 text-white shadow-md shadow-emerald-500/10"
+                        : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
+                    }`}
+                  >
+                    <TrendingUp className="w-4 h-4" />
+                    LONG (BUY)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCalcDirection("SHORT")}
+                    className={`py-3 px-5 rounded-xl border flex items-center justify-center gap-2 font-sans font-bold text-xs transition-all cursor-pointer ${
+                      calcDirection === "SHORT"
+                        ? "bg-rose-500 border-rose-500 text-white shadow-md shadow-rose-500/10"
+                        : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
+                    }`}
+                  >
+                    <TrendingDown className="w-4 h-4" />
+                    SHORT (SELL)
+                  </button>
+                </div>
+              </div>
+
+              {/* Input Parameters */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                
+                {/* Expected Net Profit Input */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                    <DollarSign className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Target Net Profit (USDT)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      value={calcExpectedProfit}
+                      onChange={(e) => setCalcExpectedProfit(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pr-14 text-sm font-mono text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400"
+                      placeholder="1.0"
+                    />
+                    <div className="absolute right-3.5 top-3.5 text-xs font-mono font-bold text-slate-400 select-none">USDT</div>
+                  </div>
+                </div>
+
+                {/* Position Quantity BTC Input */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                    <Percent className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Order Quantity (BTC)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.0001"
+                      min="0.0001"
+                      required
+                      value={calcQuantity}
+                      onChange={(e) => setCalcQuantity(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pr-14 text-sm font-mono text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400"
+                      placeholder="0.01"
+                    />
+                    <div className="absolute right-3.5 top-3.5 text-xs font-mono font-bold text-slate-400 select-none">BTC</div>
+                  </div>
+                </div>
+
+                {/* Entry Price Input */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                    <Sliders className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Entry Price (USDT)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="1"
+                      required
+                      value={calcPrice}
+                      onChange={(e) => setCalcPrice(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pr-14 text-sm font-mono text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400"
+                      placeholder="63947"
+                    />
+                    <div className="absolute right-3.5 top-3.5 text-xs font-mono font-bold text-slate-400 select-none">USDT</div>
+                  </div>
+                </div>
+
+                {/* Stop Loss ATR Multiplier Input */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                    <Scale className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Stop Loss ATR Multiplier</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      required
+                      value={calcSlMultiplier}
+                      onChange={(e) => setCalcSlMultiplier(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pr-14 text-sm font-mono text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400"
+                      placeholder="1.8"
+                    />
+                    <div className="absolute right-3.5 top-3.5 text-xs font-mono font-bold text-slate-400 select-none">Mult</div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Fee and ATR Toggles */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
+                
+                {/* Adjust for Fees Toggle */}
+                <div className="bg-slate-50 border border-slate-200/50 rounded-xl p-4 flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-bold text-slate-700 block">Deduct & Adjust Exchange Fees</span>
+                    <span className="text-[10px] font-mono text-slate-400">Target net profit after paying maker/taker fees</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={calcUseFees}
+                    onChange={(e) => setCalcUseFees(e.target.checked)}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-0 w-4 h-4 cursor-pointer"
+                  />
+                </div>
+
+                {/* ATR Toggle & Manual override inputs */}
+                <div className="bg-slate-50 border border-slate-200/50 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700">Volatility (ATR) Source</span>
+                    <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => setCalcAtrSource("auto")}
+                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                          calcAtrSource === "auto" ? "bg-indigo-50 text-indigo-600 font-bold" : "text-slate-400"
+                        }`}
+                      >
+                        Auto (Live)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCalcAtrSource("manual")}
+                        className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                          calcAtrSource === "manual" ? "bg-indigo-50 text-indigo-600 font-bold" : "text-slate-400"
+                        }`}
+                      >
+                        Manual
+                      </button>
+                    </div>
+                  </div>
+
+                  {calcAtrSource === "manual" ? (
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={calcAtrOverride}
+                        onChange={(e) => setCalcAtrOverride(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs font-mono outline-none focus:ring-1 focus:ring-indigo-400"
+                        placeholder="e.g. 26.8612"
+                      />
+                      <div className="absolute right-3 top-2 text-[9px] font-mono text-slate-400 uppercase">Custom ATR</div>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between items-center text-xs font-mono text-indigo-600 bg-indigo-50/50 px-2 py-1.5 rounded border border-indigo-100/50">
+                      <span>Live 14-period ATR:</span>
+                      <span className="font-bold">${liveAtr ? liveAtr.toFixed(4) : "26.8612"}</span>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+              {/* CALCULATED OUTPUTS BLOCK */}
+              <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-5 space-y-4">
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-sans flex items-center gap-1.5">
+                  <Target className="w-4 h-4 text-indigo-500" />
+                  Calculated Target Output Settings
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  
+                  {/* Left Column outputs */}
+                  <div className="space-y-3.5 text-xs">
+                    
+                    <div className="flex justify-between text-slate-500">
+                      <span>Calculated ATR (14):</span>
+                      <span className="font-mono font-bold text-slate-800">${cAtr.toFixed(4)} USDT</span>
+                    </div>
+
+                    <div className="flex justify-between text-slate-500">
+                      <span>Stop Loss Distance:</span>
+                      <span className="font-mono font-bold text-rose-600">
+                        ${cFinalSlDistance.toFixed(2)} USDT
+                        {cFinalSlDistance === cMinSlDistance && (
+                          <span className="text-[10px] text-slate-400 block text-right font-sans font-normal">(Enforced Min Floor)</span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between text-slate-500">
+                      <span>Take Profit Distance:</span>
+                      <span className="font-mono font-bold text-emerald-600">${cTakeProfitDistance.toFixed(2)} USDT</span>
+                    </div>
+
+                    <div className="flex justify-between text-slate-500 pt-2 border-t border-slate-200/60">
+                      <span className="font-semibold text-slate-700">Required Reward Ratio:</span>
+                      <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                        1 : {cRequiredRewardRatio.toFixed(4)}
+                      </span>
+                    </div>
+
+                  </div>
+
+                  {/* Right Column outputs */}
+                  <div className="space-y-3.5 text-xs">
+                    
+                    <div className="flex justify-between text-slate-500">
+                      <span>Stop Loss Target Price:</span>
+                      <span className="font-mono font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-100">
+                        ${cStopLossPrice.toFixed(2)} USDT
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between text-slate-500">
+                      <span>Take Profit Target Price:</span>
+                      <span className="font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                        ${cTakeProfitPrice.toFixed(2)} USDT
+                      </span>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-3 border border-slate-200/50 space-y-1.5">
+                      <div className="flex justify-between text-slate-500 text-[11px]">
+                        <span>Entry Fee (estimated):</span>
+                        <span className="font-mono text-slate-600">${cEntryFee.toFixed(4)} USDT</span>
+                      </div>
+                      <div className="flex justify-between text-slate-500 text-[11px]">
+                        <span>Exit Fee (estimated):</span>
+                        <span className="font-mono text-slate-600">${cExitFee.toFixed(4)} USDT</span>
+                      </div>
+                      <div className="flex justify-between text-slate-700 text-[11px] font-bold border-t border-slate-100 pt-1">
+                        <span>Total Fees (Maker/Taker):</span>
+                        <span className="font-mono">${cTotalFees.toFixed(4)} USDT</span>
+                      </div>
+                    </div>
+
+                  </div>
+
+                </div>
+
+                {/* Net Outcomes Summary Banner */}
+                <div className="bg-slate-900 rounded-xl p-4 text-white grid grid-cols-2 gap-4 text-center">
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-mono uppercase">Estimated Outcome (TP)</span>
+                    <p className="font-mono text-lg font-bold text-emerald-400 mt-0.5">
+                      +${cExpectedProfit.toFixed(2)} Net
+                    </p>
+                    <span className="text-[9px] text-slate-400 block">
+                      (${cRequiredGrossProfit.toFixed(4)} Gross)
+                    </span>
+                  </div>
+                  <div className="border-l border-slate-800">
+                    <span className="text-[10px] text-slate-400 font-mono uppercase">Maximum Loss (SL)</span>
+                    <p className="font-mono text-lg font-bold text-rose-400 mt-0.5">
+                      -${cNetLoss.toFixed(2)} Net
+                    </p>
+                    <span className="text-[9px] text-slate-400 block">
+                      (${cGrossLoss.toFixed(4)} Gross)
+                    </span>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* ACTION BUTTON */}
+              <div className="border-t border-slate-100 pt-5">
+                <button
+                  type="button"
+                  onClick={handleApplyCalcToForm}
+                  className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-sans font-bold text-sm text-center flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/10 cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  APPLY TO MANUAL ORDER ENTRY FORM
+                </button>
+              </div>
+
             </div>
           </div>
         )}
-
-        {/* ORDER BOX CARD */}
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="bg-slate-900 px-6 py-4 flex items-center justify-between text-white">
-            <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-indigo-400" />
-              <h2 className="font-sans font-bold text-sm tracking-tight">EXECUTE MANUAL FUTURES TRADE</h2>
-            </div>
-            <div className="flex items-center gap-1.5 font-mono text-xs bg-indigo-950/80 px-2.5 py-1 rounded-lg border border-indigo-900/60">
-              <span className="text-slate-400">INDEX:</span>
-              <span className="text-indigo-400 font-bold">BTCUSD-FUTURES</span>
-            </div>
-          </div>
-
-          <form onSubmit={handleSubmitOrder} className="p-6 space-y-6">
-            
-            {/* 1. DIRECTION SELECTOR (LONG vs SHORT) */}
-            <div className="space-y-2">
-              <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">Trade Direction</label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setDirection("LONG")}
-                  className={`py-3.5 px-5 rounded-xl border flex items-center justify-center gap-2.5 font-sans font-bold text-xs transition-all cursor-pointer ${
-                    direction === "LONG"
-                      ? "bg-emerald-500 border-emerald-500 text-white shadow-md shadow-emerald-500/10"
-                      : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-                  }`}
-                  id="btn-manual-long"
-                >
-                  <TrendingUp className="w-4 h-4" />
-                  BUY / LONG FUTURES
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDirection("SHORT")}
-                  className={`py-3.5 px-5 rounded-xl border flex items-center justify-center gap-2.5 font-sans font-bold text-xs transition-all cursor-pointer ${
-                    direction === "SHORT"
-                      ? "bg-rose-500 border-rose-500 text-white shadow-md shadow-rose-500/10"
-                      : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-                  }`}
-                  id="btn-manual-short"
-                >
-                  <TrendingDown className="w-4 h-4" />
-                  SELL / SHORT FUTURES
-                </button>
-              </div>
-            </div>
-
-            {/* 2. LEVERAGE CONFIGURATION */}
-            <div className="space-y-3 bg-slate-50 border border-slate-200/50 p-4 rounded-xl">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">
-                  <Scale className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>Adjust Position Leverage</span>
-                </div>
-                <span className="font-mono font-bold text-indigo-600 text-sm bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">{leverage}x</span>
-              </div>
-              <input
-                type="range"
-                min="1"
-                max="125"
-                value={leverage}
-                onChange={(e) => setLeverage(parseInt(e.target.value, 10))}
-                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-              />
-              <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono pt-1">
-                <span>1x (Unleveraged)</span>
-                <div className="flex gap-1.5">
-                  {[5, 10, 20, 50, 100].map((val) => (
-                    <button
-                      key={val}
-                      type="button"
-                      onClick={() => setLeverage(val)}
-                      className={`px-2 py-0.5 border rounded cursor-pointer transition-colors ${
-                        leverage === val ? "bg-indigo-600 border-indigo-600 text-white font-bold" : "bg-white border-slate-200 hover:bg-slate-100 hover:text-slate-700"
-                      }`}
-                    >
-                      {val}x
-                    </button>
-                  ))}
-                </div>
-                <span>125x (Max)</span>
-              </div>
-            </div>
-
-            {/* 3. QUANTITY BTC INPUT */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div className="space-y-2">
-                <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                  <Percent className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Order Quantity (BTC)</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="0.001"
-                    min="0.001"
-                    required
-                    value={quantityStr}
-                    onChange={(e) => setQuantityStr(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pr-14 text-sm font-mono text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400"
-                    placeholder="0.1"
-                  />
-                  <div className="absolute right-3.5 top-3.5 text-xs font-mono font-bold text-slate-400 select-none">BTC</div>
-                </div>
-              </div>
-
-              {/* Dynamic Percentage of Balance presets */}
-              <div className="space-y-2 flex flex-col justify-end">
-                <label className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">Use Margin Preset</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {[10, 25, 50, 100].map((pct) => (
-                    <button
-                      key={pct}
-                      type="button"
-                      onClick={() => handleQuantityPct(pct)}
-                      className="py-2.5 text-center border border-slate-200 hover:bg-slate-50 rounded-lg text-xs font-mono font-semibold text-slate-600 transition-colors cursor-pointer"
-                    >
-                      {pct}%
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* 4. RISK CONTROLS: STOP LOSS & TAKE PROFIT */}
-            <div className="border-t border-slate-100 pt-5 space-y-4">
-              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans flex items-center gap-1.5">
-                <Sliders className="w-4 h-4 text-indigo-500" />
-                Stop Loss & Take Profit Settings
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
-                {/* STOP LOSS BOX */}
-                <div className="bg-slate-50 border border-slate-200/50 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between border-b border-slate-200/60 pb-2">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={useSl}
-                        onChange={(e) => setUseSl(e.target.checked)}
-                        className="rounded border-slate-300 text-rose-500 focus:ring-0"
-                      />
-                      <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Stop Loss</span>
-                    </label>
-                    <span className="text-[10px] font-mono text-rose-500 font-bold uppercase">Risk Protection</span>
-                  </div>
-
-                  {useSl && (
-                    <div className="space-y-3">
-                      <div className="flex bg-white border border-slate-200 rounded-lg p-1 text-xs">
-                        <button
-                          type="button"
-                          onClick={() => setSlType("offset")}
-                          className={`flex-1 py-1 text-center rounded transition-colors cursor-pointer ${
-                            slType === "offset" ? "bg-rose-50 text-rose-600 font-bold" : "text-slate-400"
-                          }`}
-                        >
-                          Offset ($)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSlType("price")}
-                          className={`flex-1 py-1 text-center rounded transition-colors cursor-pointer ${
-                            slType === "price" ? "bg-rose-50 text-rose-600 font-bold" : "text-slate-400"
-                          }`}
-                        >
-                          Trigger Price
-                        </button>
-                      </div>
-
-                      {slType === "offset" ? (
-                        <div className="relative">
-                          <input
-                            type="number"
-                            value={slOffsetStr}
-                            onChange={(e) => setSlOffsetStr(e.target.value)}
-                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none focus:ring-1 focus:ring-rose-400"
-                            placeholder="500"
-                          />
-                          <div className="absolute right-3 top-2.5 text-[10px] font-mono text-slate-400 uppercase">USDT Offset</div>
-                        </div>
-                      ) : (
-                        <div className="relative">
-                          <input
-                            type="number"
-                            value={slPriceStr}
-                            onChange={(e) => setSlPriceStr(e.target.value)}
-                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none focus:ring-1 focus:ring-rose-400"
-                            placeholder="Price in USDT"
-                          />
-                          <div className="absolute right-3 top-2.5 text-[10px] font-mono text-slate-400 uppercase">USDT Target</div>
-                        </div>
-                      )}
-
-                      <div className="text-[10.5px] font-mono text-rose-600 flex justify-between">
-                        <span>Trigger: ${safeFormatNumber(computedSlPrice)}</span>
-                        <span>Distance: {slPct.toFixed(2)}%</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* TAKE PROFIT BOX */}
-                <div className="bg-slate-50 border border-slate-200/50 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between border-b border-slate-200/60 pb-2">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={useTp}
-                        onChange={(e) => setUseTp(e.target.checked)}
-                        className="rounded border-slate-300 text-emerald-500 focus:ring-0"
-                      />
-                      <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Take Profit</span>
-                    </label>
-                    <span className="text-[10px] font-mono text-emerald-500 font-bold uppercase">Target Reward</span>
-                  </div>
-
-                  {useTp && (
-                    <div className="space-y-3">
-                      <div className="flex bg-white border border-slate-200 rounded-lg p-1 text-xs">
-                        <button
-                          type="button"
-                          onClick={() => setTpType("offset")}
-                          className={`flex-1 py-1 text-center rounded transition-colors cursor-pointer ${
-                            tpType === "offset" ? "bg-emerald-50 text-emerald-600 font-bold" : "text-slate-400"
-                          }`}
-                        >
-                          Offset ($)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setTpType("price")}
-                          className={`flex-1 py-1 text-center rounded transition-colors cursor-pointer ${
-                            tpType === "price" ? "bg-emerald-50 text-emerald-600 font-bold" : "text-slate-400"
-                          }`}
-                        >
-                          Trigger Price
-                        </button>
-                      </div>
-
-                      {tpType === "offset" ? (
-                        <div className="relative">
-                          <input
-                            type="number"
-                            value={tpOffsetStr}
-                            onChange={(e) => setTpOffsetStr(e.target.value)}
-                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none focus:ring-1 focus:ring-emerald-400"
-                            placeholder="1000"
-                          />
-                          <div className="absolute right-3 top-2.5 text-[10px] font-mono text-slate-400 uppercase">USDT Offset</div>
-                        </div>
-                      ) : (
-                        <div className="relative">
-                          <input
-                            type="number"
-                            value={tpPriceStr}
-                            onChange={(e) => setTpPriceStr(e.target.value)}
-                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none focus:ring-1 focus:ring-emerald-400"
-                            placeholder="Price in USDT"
-                          />
-                          <div className="absolute right-3 top-2.5 text-[10px] font-mono text-slate-400 uppercase">USDT Target</div>
-                        </div>
-                      )}
-
-                      <div className="text-[10.5px] font-mono text-emerald-600 flex justify-between">
-                        <span>Trigger: ${safeFormatNumber(computedTpPrice)}</span>
-                        <span>Distance: {tpPct.toFixed(2)}%</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-              </div>
-            </div>
-
-            {/* ORDER SUBMISSION FEEDBACK MESSAGES */}
-            <AnimatePresence>
-              {errorMsg && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="bg-rose-50 border border-rose-100 rounded-xl p-3 flex items-start gap-2 text-rose-700 text-xs font-sans"
-                >
-                  <XCircle className="w-4 h-4 text-rose-500 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <span className="font-bold">Execution Denied:</span> {errorMsg}
-                  </div>
-                </motion.div>
-              )}
-
-              {successMsg && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex items-start gap-2 text-emerald-800 text-xs font-sans"
-                >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <span className="font-bold">Success:</span> {successMsg}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* SUBMIT BUTTON */}
-            <div className="border-t border-slate-100 pt-5">
-              <button
-                type="submit"
-                disabled={isSubmitting || !!activeTrade}
-                className={`w-full py-3.5 rounded-xl font-sans font-bold text-sm text-center flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer ${
-                  activeTrade
-                    ? "bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed shadow-none"
-                    : direction === "LONG"
-                    ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/10"
-                    : "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/10"
-                }`}
-                id="btn-submit-manual-order"
-              >
-                {isSubmitting ? (
-                  <span>Transmitting Order...</span>
-                ) : activeTrade ? (
-                  <span className="flex items-center gap-1">
-                    <Lock className="w-4 h-4" /> Position Locked (Exit Active Trade First)
-                  </span>
-                ) : (
-                  <span>
-                    EXECUTE {direction === "LONG" ? "BUY / LONG" : "SELL / SHORT"} MARKET ORDER
-                  </span>
-                )}
-              </button>
-            </div>
-
-          </form>
-        </div>
 
       </div>
 

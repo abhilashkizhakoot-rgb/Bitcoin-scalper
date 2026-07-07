@@ -168,6 +168,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
   const [windowFilter, setWindowFilter] = useState<string>("ALL");
   const [regimeFilter, setRegimeFilter] = useState<string>("ALL");
   const [showTargetsInTable, setShowTargetsInTable] = useState<boolean>(false);
+  const [showAtrInTable, setShowAtrInTable] = useState<boolean>(false);
 
   // Clear modal states
   const [showClearModal, setShowClearModal] = useState(false);
@@ -450,6 +451,17 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
             <span>Show SL/TP Targets</span>
           </label>
 
+          {/* Toggle Entry ATR column */}
+          <label className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100/80 text-slate-700 border border-slate-200 rounded-lg text-xs font-sans font-medium transition-colors cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showAtrInTable}
+              onChange={(e) => setShowAtrInTable(e.target.checked)}
+              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer"
+            />
+            <span>Show Entry ATR</span>
+          </label>
+
           {/* Clear History Button */}
           <button
             onClick={() => setShowClearModal(true)}
@@ -478,6 +490,9 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                     <th className="py-3 px-4 font-normal">Target TP</th>
                   </>
                 )}
+                {showAtrInTable && (
+                  <th className="py-3 px-4 font-normal">Entry ATR</th>
+                )}
                 <th className="py-3 px-4 font-normal">Exit Price</th>
                 <th className="py-3 px-4 font-normal">Session IST</th>
                 <th className="py-3 px-4 font-normal">Trigger Reason</th>
@@ -491,84 +506,92 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                 const tWindow = getTradeTimingWindow(t.entry_timestamp, windowsList);
                 return (
                   <React.Fragment key={t.id}>
-                    <tr
-                       onClick={() => toggleSelectTrade(t.id)}
-                       className={`hover:bg-slate-50/50 transition-colors duration-150 cursor-pointer text-xs ${
-                         isSelected ? "bg-slate-50" : ""
-                       }`}
-                     >
-                       <td className="py-3.5 px-4 font-mono text-slate-500">
-                         {safeFormatTime(t.entry_timestamp, true)}
-                       </td>
-                       <td className="py-3.5 px-4">
-                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
-                           t.direction === TradeDirection.LONG ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-rose-50 border-rose-200 text-rose-700"
-                         }`}>
-                           {t.direction === TradeDirection.LONG ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                           {t.direction}
-                         </span>
-                       </td>
-                       <td className="py-3.5 px-4 font-sans font-semibold text-slate-800">
-                         {t.quantity_btc} BTC
-                       </td>
-                       <td className="py-3.5 px-4 font-mono text-slate-500">
-                         ${safeFormatNumber(t.entry_price)}
-                       </td>
-                       {showTargetsInTable && (
-                         <>
-                           <td className="py-3.5 px-4 font-mono text-rose-600 font-medium">
-                             {t.feature_snapshot?.stop_loss_price 
-                               ? `$${safeFormatNumber(t.feature_snapshot.stop_loss_price)}` 
-                               : t.feature_snapshot?.current_stop_loss_price 
-                               ? `$${safeFormatNumber(t.feature_snapshot.current_stop_loss_price)}` 
-                               : "—"}
-                           </td>
-                           <td className="py-3.5 px-4 font-mono text-emerald-600 font-medium">
-                             {t.feature_snapshot?.take_profit_price 
-                               ? `$${safeFormatNumber(t.feature_snapshot.take_profit_price)}` 
-                               : "—"}
-                           </td>
-                         </>
-                       )}
-                       <td className="py-3.5 px-4 font-mono text-slate-500">
-                         {t.exit_price ? `$${safeFormatNumber(t.exit_price)}` : "Active..."}
-                       </td>
-                       <td className="py-3.5 px-4">
-                         <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold border uppercase ${
-                           tWindow.id === 'europe_us_overlap' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' :
-                           tWindow.id === 'late_us_session' ? 'bg-blue-50 border-blue-250 text-indigo-800' :
-                           tWindow.id === 'asia_open' ? 'bg-emerald-50 border-emerald-250 text-emerald-800' :
-                           tWindow.id === 'intraday_chop' ? 'bg-amber-50 border-amber-250 text-amber-850' :
-                           tWindow.id === 'dead_liquidity' ? 'bg-rose-50 border-rose-250 text-rose-800' :
-                           tWindow.id === 'weekends' ? 'bg-slate-100 border-slate-300 text-slate-700' :
-                           'bg-slate-50 border-slate-200 text-slate-650'
-                         }`} title={`${tWindow.name} (${tWindow.allowed ? "Allowed" : "Restricted"})`}>
-                           <Clock className="w-2.5 h-2.5" />
-                           {tWindow.name.replace(" Session", "").replace(" Overlap", "")}
-                           {!tWindow.allowed && <span className="text-[9px] text-rose-500 font-bold ml-0.5" title="Bypassed restriction or manual trade in restricted window">⚠️</span>}
-                         </span>
-                       </td>
-                       <td className="py-3.5 px-4">
-                         {t.exit_reason ? (
-                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-medium border uppercase ${getReasonBadgeClass(t.exit_reason)}`}>
-                             {t.exit_reason.replace("_", " ")}
-                           </span>
-                         ) : (
-                           <span className="text-slate-400 font-mono italic text-[10px]">Active scanning...</span>
-                         )}
-                       </td>
-                       <td className={`py-3.5 px-4 text-right font-sans font-bold text-sm ${t.pnl_usdt && t.pnl_usdt >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                         {t.pnl_usdt ? `${t.pnl_usdt >= 0 ? "+" : ""}$${safeFormatNumber(t.pnl_usdt, 2, 2)}` : "Active"}
-                       </td>
-                       <td className="py-3.5 px-4 text-slate-400">
-                         {isSelected ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                       </td>
-                     </tr>
+                                         <tr
+                        onClick={() => toggleSelectTrade(t.id)}
+                        className={`hover:bg-slate-50/50 transition-colors duration-150 cursor-pointer text-xs ${
+                          isSelected ? "bg-slate-50" : ""
+                        }`}
+                      >
+                        <td className="py-3.5 px-4 font-mono text-slate-500">
+                          {safeFormatTime(t.entry_timestamp, true)}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
+                            t.direction === TradeDirection.LONG ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-rose-50 border-rose-200 text-rose-700"
+                          }`}>
+                            {t.direction === TradeDirection.LONG ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                            {t.direction}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 font-sans font-semibold text-slate-800">
+                          {t.quantity_btc} BTC
+                        </td>
+                        <td className="py-3.5 px-4 font-mono text-slate-500">
+                          ${safeFormatNumber(t.entry_price)}
+                        </td>
+                        {showTargetsInTable && (
+                          <>
+                            <td className="py-3.5 px-4 font-mono text-rose-600 font-medium">
+                              {t.feature_snapshot?.stop_loss_price 
+                                ? `$${safeFormatNumber(t.feature_snapshot.stop_loss_price)}` 
+                                : t.feature_snapshot?.current_stop_loss_price 
+                                ? `$${safeFormatNumber(t.feature_snapshot.current_stop_loss_price)}` 
+                                : "—"}
+                            </td>
+                            <td className="py-3.5 px-4 font-mono text-emerald-600 font-medium">
+                              {t.feature_snapshot?.take_profit_price 
+                                ? `$${safeFormatNumber(t.feature_snapshot.take_profit_price)}` 
+                                : "—"}
+                            </td>
+                          </>
+                        )}
+                        {showAtrInTable && (
+                          <td className="py-3.5 px-4 font-mono text-amber-600 font-medium">
+                            {t.feature_snapshot?.atr_14 !== undefined
+                              ? `$${safeFormatNumber(t.feature_snapshot.atr_14, 2, 2)}`
+                              : "—"}
+                          </td>
+                        )}
+                        <td className="py-3.5 px-4 font-mono text-slate-500">
+                          {t.exit_price ? `$${safeFormatNumber(t.exit_price)}` : "Active..."}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold border uppercase ${
+                            tWindow.id === 'europe_us_overlap' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' :
+                            tWindow.id === 'late_us_session' ? 'bg-blue-50 border-blue-250 text-indigo-800' :
+                            tWindow.id === 'asia_open' ? 'bg-emerald-50 border-emerald-250 text-emerald-800' :
+                            tWindow.id === 'intraday_chop' ? 'bg-amber-50 border-amber-250 text-amber-850' :
+                            tWindow.id === 'dead_liquidity' ? 'bg-rose-50 border-rose-250 text-rose-800' :
+                            tWindow.id === 'weekends' ? 'bg-slate-100 border-slate-300 text-slate-700' :
+                            'bg-slate-50 border-slate-200 text-slate-650'
+                          }`} title={`${tWindow.name} (${tWindow.allowed ? "Allowed" : "Restricted"})`}>
+                            <Clock className="w-2.5 h-2.5" />
+                            {tWindow.name.replace(" Session", "").replace(" Overlap", "")}
+                            {!tWindow.allowed && <span className="text-[9px] text-rose-500 font-bold ml-0.5" title="Bypassed restriction or manual trade in restricted window">⚠️</span>}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {t.exit_reason ? (
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-medium border uppercase ${getReasonBadgeClass(t.exit_reason)}`}>
+                              {t.exit_reason.replace("_", " ")}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-mono italic text-[10px]">Active scanning...</span>
+                          )}
+                        </td>
+                        <td className={`py-3.5 px-4 text-right font-sans font-bold text-sm ${t.pnl_usdt && t.pnl_usdt >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                          {t.pnl_usdt ? `${t.pnl_usdt >= 0 ? "+" : ""}$${safeFormatNumber(t.pnl_usdt, 2, 2)}` : "Active"}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-400">
+                          {isSelected ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </td>
+                      </tr>
+
  
                      {/* Trade Detail Drawer */}
                      {isSelected && (
                        <tr>
-                         <td colSpan={showTargetsInTable ? 11 : 9} className="bg-slate-50 border-t border-b border-slate-100 p-5">
+                         <td colSpan={(showTargetsInTable ? 11 : 9) + (showAtrInTable ? 1 : 0)} className="bg-slate-50 border-t border-b border-slate-100 p-5">
                            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-slate-600" id={`trade-drawer-${t.id}`}>
                              {/* Execution stats */}
                              <div className="space-y-3">
@@ -645,6 +668,14 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                                    <span className="text-slate-400">Market Regime:</span>
                                    <span className="font-semibold text-slate-700 uppercase text-[10px]">{(t.regime_at_entry || "").replace("_", " ")}</span>
                                  </div>
+                                 <div className="flex justify-between border-b border-slate-200/50 pb-1">
+                                   <span className="text-slate-400">Entry ATR (14):</span>
+                                   <span className="font-mono text-amber-600 font-semibold">
+                                     {t.feature_snapshot?.atr_14 !== undefined 
+                                       ? `$${safeFormatNumber(t.feature_snapshot.atr_14, 2, 2)}` 
+                                       : "N/A"}
+                                   </span>
+                                 </div>
                                  <div className="flex justify-between">
                                    <span className="text-slate-400">Entry Score:</span>
                                    <span className="font-mono text-indigo-600 font-bold">{t.entry_signal_score}/100</span>
@@ -660,7 +691,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                })}
                {filteredTrades.length === 0 && (
                  <tr>
-                   <td colSpan={showTargetsInTable ? 11 : 9} className="text-center font-mono text-slate-400 text-xs italic py-16">
+                   <td colSpan={(showTargetsInTable ? 11 : 9) + (showAtrInTable ? 1 : 0)} className="text-center font-mono text-slate-400 text-xs italic py-16">
                      No historical trades matching the current filter criteria...
                    </td>
                  </tr>

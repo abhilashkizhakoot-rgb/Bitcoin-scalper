@@ -4022,6 +4022,9 @@ class TradingEngine {
 
     const feesPaid = this.calculateTradingFee(currentPrice * q, true, 0);
 
+    const atr14List = this.calculateATR(this.candles1m, 14);
+    const lastAtr = atr14List.length > 0 ? (atr14List[atr14List.length - 1] || 150) : 150;
+
     const newTrade = dbManager.addTrade({
       entry_timestamp: new Date().toISOString(),
       exit_timestamp: null,
@@ -4045,6 +4048,7 @@ class TradingEngine {
       is_win: null,
       feature_snapshot: {
         last_price: currentPrice,
+        atr_14: lastAtr,
         regime: this.currentRegime,
         is_manual: true,
         stop_loss_price: sl,

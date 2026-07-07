@@ -416,6 +416,36 @@ async function startServer() {
     res.json(tradingEngine.getLogs());
   });
 
+  app.get("/api/trade-log", (req, res) => {
+    try {
+      const DATA_DIR = process.env.DATA_DIR || process.cwd();
+      const filePath = path.join(DATA_DIR, "trade_log");
+      if (fs.existsSync(filePath)) {
+        const logs = fs.readFileSync(filePath, "utf-8");
+        res.type("text/plain").send(logs);
+      } else {
+        res.type("text/plain").send("No trades logged yet in trade_log.");
+      }
+    } catch (e) {
+      res.status(500).send("Error reading trade_log: " + e);
+    }
+  });
+
+  app.delete("/api/trade-log", (req, res) => {
+    try {
+      const DATA_DIR = process.env.DATA_DIR || process.cwd();
+      const filePath = path.join(DATA_DIR, "trade_log");
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        res.json({ success: true, message: "trade_log file cleared successfully." });
+      } else {
+        res.json({ success: true, message: "No trade_log file to clear." });
+      }
+    } catch (e) {
+      res.status(500).json({ success: false, error: String(e) });
+    }
+  });
+
   // ----------------------------------------------------
   // REST API: Analytics
   // ----------------------------------------------------

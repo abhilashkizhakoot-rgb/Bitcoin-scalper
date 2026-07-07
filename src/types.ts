@@ -175,6 +175,7 @@ export interface StrategyConfig {
     regime_candle_interval_minutes?: number;
     data_feed_source?: "BINANCE" | "DELTA_EXCHANGE";
     enable_block_logging?: boolean;
+    enable_trade_logging?: boolean;
     enable_orderflow_softening?: boolean;
     order_book_min_depth?: number;
     order_book_max_imbalance?: number;

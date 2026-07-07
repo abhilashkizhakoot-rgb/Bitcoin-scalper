@@ -510,6 +510,22 @@ export default function ConfigPage({
                     Actively logs standard polling checklists and any disqualified checkpoint gates to the terminal/file log every single minute. Helps with diagnostics and verification.
                   </p>
                 </div>
+
+                <div className="space-y-2 flex flex-col justify-end pb-1">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                    <input
+                      type="checkbox"
+                      checked={generalConfig.enable_trade_logging !== false}
+                      onChange={(e) => setGeneralConfig({ ...generalConfig, enable_trade_logging: e.target.checked })}
+                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
+                      id="config-enable-trade-logging"
+                    />
+                    <span className="text-xs font-semibold text-slate-700">Enable Comprehensive Trade Logging</span>
+                  </label>
+                  <p className="text-[10px] text-slate-400 leading-relaxed pl-6.5">
+                    Actively records all trade execution details, final parameters (SL, TP, ATR), and complete entry checkpoint gates status into the backend file <code className="bg-slate-100 text-indigo-600 font-mono text-[9px] px-1 py-0.5 rounded">trade_log</code> at entry/exit.
+                  </p>
+                </div>
               </div>
             </div>
 

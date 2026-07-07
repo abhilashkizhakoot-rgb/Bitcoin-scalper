@@ -111,6 +111,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     regime_candle_interval_minutes: 3,
     data_feed_source: "BINANCE",
     enable_block_logging: true,
+    enable_trade_logging: true,
     enable_orderflow_softening: true,
     order_book_min_depth: 4.0,
     order_book_max_imbalance: 0.35,
@@ -570,9 +571,21 @@ class DatabaseManager {
         this.cache = JSON.parse(fileContent);
         
         // Migrate legacy/default 2.0 Take Profit ratio to 3.5 to offset round-trip exchange fees
-        if (this.cache && this.cache.config && this.cache.config.risk_management) {
-          if (!this.cache.config.risk_management.take_profit_ratio || this.cache.config.risk_management.take_profit_ratio <= 2.0) {
-            this.cache.config.risk_management.take_profit_ratio = 3.5;
+        if (this.cache && this.cache.config) {
+          let updated = false;
+          if (this.cache.config.risk_management) {
+            if (!this.cache.config.risk_management.take_profit_ratio || this.cache.config.risk_management.take_profit_ratio <= 2.0) {
+              this.cache.config.risk_management.take_profit_ratio = 3.5;
+              updated = true;
+            }
+          }
+          if (this.cache.config.general) {
+            if (this.cache.config.general.enable_trade_logging === undefined) {
+              this.cache.config.general.enable_trade_logging = true;
+              updated = true;
+            }
+          }
+          if (updated) {
             this.save();
           }
         }

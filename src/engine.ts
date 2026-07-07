@@ -313,6 +313,93 @@ class TradingEngine {
     return this.logs;
   }
 
+  private logTradeToFile(trade: Trade, checkpoints: any) {
+    const config = dbManager.getConfig();
+    if (config.general.enable_trade_logging === false) {
+      return;
+    }
+
+    try {
+      const DATA_DIR = process.env.DATA_DIR || process.cwd();
+      const logFilePath = path.join(DATA_DIR, "trade_log");
+
+      const timestamp = new Date().toISOString();
+      const separator = "=".repeat(80) + "\n";
+
+      let checkpointStr = "";
+      if (checkpoints && checkpoints.conditions) {
+        checkpointStr = "EVALUATED CHECKPOINT GATES STATUS:\n";
+        checkpoints.conditions.forEach((c: any) => {
+          const statusChar = c.met ? "✅ [PASS]" : "❌ [FAIL]";
+          checkpointStr += `  - ${statusChar} ${c.name} (Priority: ${c.priority || "MEDIUM"})\n`;
+          checkpointStr += `    Current Value : ${c.current_value}\n`;
+          checkpointStr += `    Required      : ${c.required}\n`;
+          checkpointStr += `    Description   : ${c.description}\n\n`;
+        });
+      } else {
+        checkpointStr = "No checkpoints evaluated or available.\n";
+      }
+
+      const logEntry =
+        `[TRADE ENTRY] ${timestamp}\n` +
+        `Trade ID         : ${trade.id}\n` +
+        `Direction        : ${trade.direction}\n` +
+        `Entry Price      : $${trade.entry_price}\n` +
+        `Quantity (BTC)   : ${trade.quantity_btc} BTC\n` +
+        `Leverage         : ${trade.leverage}x\n` +
+        `Signal Score     : ${trade.entry_signal_score}/100\n` +
+        `CatBoost Prob    : ${(trade.catboost_probability * 100).toFixed(1)}%\n` +
+        `Regime At Entry  : ${trade.regime_at_entry}\n` +
+        `Sentiment Score  : ${trade.sentiment_score_at_entry}\n` +
+        `Stop Loss Price  : $${trade.feature_snapshot?.stop_loss_price || "—"}\n` +
+        `Take Profit Price: $${trade.feature_snapshot?.take_profit_price || "—"}\n` +
+        `ATR (14)         : $${trade.feature_snapshot?.atr_14 || "—"}\n` +
+        `Fees Paid        : $${trade.fees_paid_usdt} USDT\n` +
+        `\n` +
+        checkpointStr +
+        separator;
+
+      fs.appendFileSync(logFilePath, logEntry, "utf-8");
+      this.log(`📝 Logged trade entry ${trade.id} details to trade_log file.`);
+    } catch (e) {
+      console.error("[TradingEngine] Failed to write to trade_log file:", e);
+    }
+  }
+
+  private logTradeExitToFile(trade: Trade) {
+    const config = dbManager.getConfig();
+    if (config.general.enable_trade_logging === false) {
+      return;
+    }
+
+    try {
+      const DATA_DIR = process.env.DATA_DIR || process.cwd();
+      const logFilePath = path.join(DATA_DIR, "trade_log");
+
+      const timestamp = new Date().toISOString();
+      const separator = "=".repeat(80) + "\n";
+
+      const logEntry =
+        `[TRADE EXIT] ${timestamp}\n` +
+        `Trade ID         : ${trade.id}\n` +
+        `Direction        : ${trade.direction}\n` +
+        `Entry Price      : $${trade.entry_price}\n` +
+        `Exit Price       : $${trade.exit_price}\n` +
+        `Quantity (BTC)   : ${trade.quantity_btc} BTC\n` +
+        `Hold Duration    : ${Math.floor(trade.hold_duration_seconds / 60)}m ${trade.hold_duration_seconds % 60}s\n` +
+        `Exit Reason      : ${trade.exit_reason || "—"}\n` +
+        `Is Win           : ${trade.is_win ? "YES ✅" : "NO ❌"}\n` +
+        `Fees Paid (Total): $${trade.fees_paid_usdt} USDT\n` +
+        `Net P&L (USDT)   : $${(trade.pnl_usdt || 0).toFixed(2)} USDT (${(trade.pnl_pct || 0).toFixed(2)}%)\n` +
+        separator;
+
+      fs.appendFileSync(logFilePath, logEntry, "utf-8");
+      this.log(`📝 Logged trade exit ${trade.id} details to trade_log file.`);
+    } catch (e) {
+      console.error("[TradingEngine] Failed to write trade exit to trade_log file:", e);
+    }
+  }
+
   public getStatus() {
     const creds = dbManager.getCredentials();
     const config = dbManager.getConfig();
@@ -3665,6 +3752,7 @@ class TradingEngine {
     }
 
     this.log(`SUCCESS! Trade entry confirmed. Transaction ID: ${newTrade.id}`);
+    this.logTradeToFile(newTrade, this.getCurrentCheckpoints());
 
     // If live account mode is enabled, execute real-time order placement on Delta Exchange!
     if (!dbManager.isPaperMode()) {
@@ -3945,6 +4033,8 @@ class TradingEngine {
       fees_paid_usdt: totalFeesPaid,
     });
 
+    this.logTradeExitToFile(updated);
+
     // Update account balance in DB credentials
     const finalPnL = trade.pnl_usdt || 0;
     const currentBal = dbManager.getCredentials().account_balance_usdt;
@@ -4058,6 +4148,7 @@ class TradingEngine {
 
     this.activeTrade = newTrade;
     this.log(`Manual trade successfully created and active. Trade ID: ${newTrade.id}`);
+    this.logTradeToFile(newTrade, this.getCurrentCheckpoints());
 
     const creds = dbManager.getCredentials();
 

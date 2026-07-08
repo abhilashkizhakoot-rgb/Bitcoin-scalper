@@ -2568,6 +2568,55 @@ class TradingEngine {
   }
 
   private evaluateMarketStructureConfirmation(signalDirection: "LONG" | "SHORT" | "NEUTRAL"): { confirmed: boolean; message: string; swingHigh: number; swingLow: number } {
+    const rawResult = this.evaluateMarketStructureConfirmationRaw(signalDirection);
+    return this.applyEma200ProximityFilter(signalDirection, this.currentPrice, rawResult);
+  }
+
+  private applyEma200ProximityFilter(
+    direction: "LONG" | "SHORT" | "NEUTRAL",
+    currentPrice: number,
+    result: { confirmed: boolean; message: string; swingHigh: number; swingLow: number }
+  ): { confirmed: boolean; message: string; swingHigh: number; swingLow: number } {
+    if (!result.confirmed || direction === "NEUTRAL") {
+      return result;
+    }
+
+    const closes = this.candles1m.map(c => c.close);
+    if (closes.length === 0) return result;
+
+    const ema200 = this.calculateEMA(closes, Math.min(closes.length, 200));
+    const lastIdx = closes.length - 1;
+    const ema200Val = lastIdx >= 0 && ema200.length > lastIdx ? ema200[lastIdx] : currentPrice;
+
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentAtr = atr14[lastIdx] || 50;
+
+    const proximityThreshold = 1.5 * currentAtr;
+
+    if (direction === "LONG") {
+      const distance = ema200Val - currentPrice;
+      if (distance > 0 && distance < proximityThreshold) {
+        return {
+          ...result,
+          confirmed: false,
+          message: `Blocked: LONG trade avoided because EMA 200 ($${ema200Val.toFixed(2)}) is nearby above the price ($${currentPrice.toFixed(2)}) within ${proximityThreshold.toFixed(2)} (1.5 * ATR: ${currentAtr.toFixed(2)}), posing a rejection risk.`
+        };
+      }
+    } else if (direction === "SHORT") {
+      const distance = currentPrice - ema200Val;
+      if (distance > 0 && distance < proximityThreshold) {
+        return {
+          ...result,
+          confirmed: false,
+          message: `Blocked: SHORT trade avoided because EMA 200 ($${ema200Val.toFixed(2)}) is nearby below the price ($${currentPrice.toFixed(2)}) within ${proximityThreshold.toFixed(2)} (1.5 * ATR: ${currentAtr.toFixed(2)}), posing a rejection risk.`
+        };
+      }
+    }
+
+    return result;
+  }
+
+  private evaluateMarketStructureConfirmationRaw(signalDirection: "LONG" | "SHORT" | "NEUTRAL"): { confirmed: boolean; message: string; swingHigh: number; swingLow: number } {
     const config = dbManager.getConfig();
     const struct = this.getTrendMarketStructure();
     const lastIdx = this.candles1m.length - 1;

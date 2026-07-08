@@ -259,9 +259,9 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     }
   }
   
-  // Set credentials to "include" by default to ensure cookies are sent for iframe requests
+  // Set credentials to "same-origin" by default to prevent strict CORS wildcard browser rejections when no cookies are needed
   const fetchOptions: RequestInit = {
-    credentials: "include",
+    credentials: init?.credentials || "same-origin",
     ...init
   };
   

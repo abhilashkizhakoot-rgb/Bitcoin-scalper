@@ -111,13 +111,15 @@ async function startServer() {
 
   // Enable CORS middleware for all API routes (important for sandboxed iframes)
   app.use((req, res, next) => {
-    const origin = req.headers.origin || "*";
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, api-key, signature, timestamp, x-requested-with");
-    if (origin !== "*") {
+    const origin = req.headers.origin;
+    if (!origin || origin === "null") {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    } else {
+      res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");
     }
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, api-key, signature, timestamp, x-requested-with");
     if (req.method === "OPTIONS") {
       res.sendStatus(200);
     } else {

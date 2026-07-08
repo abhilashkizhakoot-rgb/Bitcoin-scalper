@@ -702,10 +702,11 @@ class TradingEngine {
     const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_UPTREND;
     if (hasEnoughData && isUptrendAligned && struct.isLongStructureConfirmed && struct.pullbackLongMet && struct.current_HH) {
       const isPriceBreak = currentPrice > struct.current_HH.price;
+      const isNotOverextended = currentPrice <= struct.current_HH.price + 1.2 * currentAtr_cp;
       const isCandleSizeConfirmed = currentBodySize > 1.2 * averageBodySize || currentPrice > (struct.current_HH.price + 0.3 * currentAtr_cp);
       const isVolumeConfirmed = relVolume > 1.0;
 
-      if (isPriceBreak && isCandleSizeConfirmed && isVolumeConfirmed) {
+      if (isPriceBreak && isNotOverextended && isCandleSizeConfirmed && isVolumeConfirmed) {
         isLongBreakout = true;
       }
     }
@@ -714,10 +715,11 @@ class TradingEngine {
     const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
     if (hasEnoughData && isDowntrendAligned && struct.isShortStructureConfirmed && struct.pullbackShortMet && struct.current_LL) {
       const isPriceBreak = currentPrice < struct.current_LL.price;
+      const isNotOverextended = currentPrice >= struct.current_LL.price - 1.2 * currentAtr_cp;
       const isCandleSizeConfirmed = currentBodySize > 1.2 * averageBodySize || currentPrice < (struct.current_LL.price - 0.3 * currentAtr_cp);
       const isVolumeConfirmed = relVolume > 1.0;
 
-      if (isPriceBreak && isCandleSizeConfirmed && isVolumeConfirmed) {
+      if (isPriceBreak && isNotOverextended && isCandleSizeConfirmed && isVolumeConfirmed) {
         isShortBreakout = true;
       }
     }
@@ -761,7 +763,8 @@ class TradingEngine {
         const pullbackHasFormed = struct.pullbackLongMet && struct.current_HH;
         if (pullbackHasFormed && struct.current_HH) {
           const isHHBreakout = currentPrice > struct.current_HH.price;
-          if (isHHBreakout && relVolume > 1.0 && probabilityLong >= 0.70) {
+          const isNotOverextended = currentPrice <= struct.current_HH.price + 1.2 * currentAtr_cp;
+          if (isHHBreakout && isNotOverextended && relVolume > 1.0 && probabilityLong >= 0.70) {
             signalDirection = "LONG";
           } else {
             // Wait for breakout or pullback to complete
@@ -775,7 +778,8 @@ class TradingEngine {
         const pullbackHasFormed = struct.pullbackShortMet && struct.current_LL;
         if (pullbackHasFormed && struct.current_LL) {
           const isLLBreakout = currentPrice < struct.current_LL.price;
-          if (isLLBreakout && relVolume > 1.0 && probabilityShort >= 0.70) {
+          const isNotOverextended = currentPrice >= struct.current_LL.price - 1.2 * currentAtr_cp;
+          if (isLLBreakout && isNotOverextended && relVolume > 1.0 && probabilityShort >= 0.70) {
             signalDirection = "SHORT";
           } else {
             // Wait for breakout or pullback to complete
@@ -1059,9 +1063,13 @@ class TradingEngine {
         const pullbackHasFormed = struct.pullbackLongMet && struct.current_HH;
         if (pullbackHasFormed && struct.current_HH) {
           const isHHBreakout = currentPrice > struct.current_HH.price;
-          if (isHHBreakout) {
+          const isNotOverextended = currentPrice <= struct.current_HH.price + 1.2 * currentAtr_cp;
+          if (isHHBreakout && isNotOverextended) {
             structCheck.confirmed = true;
             structCheck.message = `[Super Strong Trend] Pullback breakout confirmed! Price ($${currentPrice.toFixed(2)}) broke above previous HH ($${struct.current_HH.price.toFixed(2)}).`;
+          } else if (isHHBreakout) {
+            structCheck.confirmed = false;
+            structCheck.message = `[Super Strong Trend] Blocked: Price ($${currentPrice.toFixed(2)}) is overextended above HH ($${struct.current_HH.price.toFixed(2)}).`;
           } else {
             structCheck.confirmed = false;
             structCheck.message = `[Super Strong Trend] Pullback is developing. Waiting for breakout above previous HH ($${struct.current_HH.price.toFixed(2)}).`;
@@ -1074,9 +1082,13 @@ class TradingEngine {
         const pullbackHasFormed = struct.pullbackShortMet && struct.current_LL;
         if (pullbackHasFormed && struct.current_LL) {
           const isLLBreakout = currentPrice < struct.current_LL.price;
-          if (isLLBreakout) {
+          const isNotOverextended = currentPrice >= struct.current_LL.price - 1.2 * currentAtr_cp;
+          if (isLLBreakout && isNotOverextended) {
             structCheck.confirmed = true;
             structCheck.message = `[Super Strong Trend] Pullback breakdown confirmed! Price ($${currentPrice.toFixed(2)}) broke below previous LL ($${struct.current_LL.price.toFixed(2)}).`;
+          } else if (isLLBreakout) {
+            structCheck.confirmed = false;
+            structCheck.message = `[Super Strong Trend] Blocked: Price ($${currentPrice.toFixed(2)}) is overextended below LL ($${struct.current_LL.price.toFixed(2)}).`;
           } else {
             structCheck.confirmed = false;
             structCheck.message = `[Super Strong Trend] Pullback is developing. Waiting for breakdown below previous LL ($${struct.current_LL.price.toFixed(2)}).`;
@@ -2337,7 +2349,8 @@ class TradingEngine {
       // or touched/gone below prev_HH breakout level, or retraced to between 38% and 61% of HH to HL move.
       const fib38 = current_HH.price - 0.382 * (current_HH.price - current_HL.price);
       
-      const candlesAfterHH = this.candles1m.slice(current_HH.index);
+      const startIndex = Math.max(current_HH.index, lastIdx - 12);
+      const candlesAfterHH = this.candles1m.slice(startIndex);
       for (const candle of candlesAfterHH) {
         if (
           candle.low <= ema20Val ||
@@ -2355,7 +2368,8 @@ class TradingEngine {
       // or touched/gone above prev_LL breakout level, or retraced to between 38% and 61% of LH to LL move.
       const fib38 = current_LL.price + 0.382 * (current_LH.price - current_LL.price);
       
-      const candlesAfterLL = this.candles1m.slice(current_LL.index);
+      const startIndex = Math.max(current_LL.index, lastIdx - 12);
+      const candlesAfterLL = this.candles1m.slice(startIndex);
       for (const candle of candlesAfterLL) {
         if (
           candle.high >= ema20Val ||
@@ -3054,10 +3068,11 @@ class TradingEngine {
     const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_UPTREND;
     if (isUptrendAligned && struct.isLongStructureConfirmed && struct.pullbackLongMet && struct.current_HH) {
       const isPriceBreak = currentClose > struct.current_HH.price;
+      const isNotOverextended = currentClose <= struct.current_HH.price + 1.2 * currentAtr;
       const isCandleSizeConfirmed = currentBodySize > 1.2 * averageBodySize || currentClose > (struct.current_HH.price + 0.3 * currentAtr);
       const isVolumeConfirmed = relVolume > 1.0;
 
-      if (isPriceBreak && isCandleSizeConfirmed && isVolumeConfirmed) {
+      if (isPriceBreak && isNotOverextended && isCandleSizeConfirmed && isVolumeConfirmed) {
         isLongBreakout = true;
       }
     }
@@ -3066,10 +3081,11 @@ class TradingEngine {
     const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
     if (isDowntrendAligned && struct.isShortStructureConfirmed && struct.pullbackShortMet && struct.current_LL) {
       const isPriceBreak = currentClose < struct.current_LL.price;
+      const isNotOverextended = currentClose >= struct.current_LL.price - 1.2 * currentAtr;
       const isCandleSizeConfirmed = currentBodySize > 1.2 * averageBodySize || currentClose < (struct.current_LL.price - 0.3 * currentAtr);
       const isVolumeConfirmed = relVolume > 1.0;
 
-      if (isPriceBreak && isCandleSizeConfirmed && isVolumeConfirmed) {
+      if (isPriceBreak && isNotOverextended && isCandleSizeConfirmed && isVolumeConfirmed) {
         isShortBreakout = true;
       }
     }
@@ -3113,7 +3129,8 @@ class TradingEngine {
         const pullbackHasFormed = struct.pullbackLongMet && struct.current_HH;
         if (pullbackHasFormed && struct.current_HH) {
           const isHHBreakout = currentClose > struct.current_HH.price;
-          if (isHHBreakout && relVolume > 1.0 && probabilityLong >= 0.70) {
+          const isNotOverextended = currentClose <= struct.current_HH.price + 1.2 * currentAtr;
+          if (isHHBreakout && isNotOverextended && relVolume > 1.0 && probabilityLong >= 0.70) {
             signalDirection = "LONG";
             this.log(`[Super Strong Trend] Pullback breakout confirmed: Price ($${currentClose.toFixed(2)}) broke above previous HH ($${struct.current_HH.price.toFixed(2)}).`);
           } else {
@@ -3126,7 +3143,8 @@ class TradingEngine {
         const pullbackHasFormed = struct.pullbackShortMet && struct.current_LL;
         if (pullbackHasFormed && struct.current_LL) {
           const isLLBreakout = currentClose < struct.current_LL.price;
-          if (isLLBreakout && relVolume > 1.0 && probabilityShort >= 0.70) {
+          const isNotOverextended = currentClose >= struct.current_LL.price - 1.2 * currentAtr;
+          if (isLLBreakout && isNotOverextended && relVolume > 1.0 && probabilityShort >= 0.70) {
             signalDirection = "SHORT";
             this.log(`[Super Strong Trend] Pullback breakdown confirmed: Price ($${currentClose.toFixed(2)}) broke below previous LL ($${struct.current_LL.price.toFixed(2)}).`);
           } else {
@@ -3393,9 +3411,13 @@ class TradingEngine {
         const pullbackHasFormed = struct.pullbackLongMet && struct.current_HH;
         if (pullbackHasFormed && struct.current_HH) {
           const isHHBreakout = currentClose > struct.current_HH.price;
-          if (isHHBreakout) {
+          const isNotOverextended = currentClose <= struct.current_HH.price + 1.2 * currentAtr;
+          if (isHHBreakout && isNotOverextended) {
             structCheck.confirmed = true;
             structCheck.message = `[Super Strong Trend] Pullback breakout confirmed! Price ($${currentClose.toFixed(2)}) broke above previous HH ($${struct.current_HH.price.toFixed(2)}).`;
+          } else if (isHHBreakout) {
+            structCheck.confirmed = false;
+            structCheck.message = `[Super Strong Trend] Blocked: Price ($${currentClose.toFixed(2)}) is overextended above HH ($${struct.current_HH.price.toFixed(2)}).`;
           } else {
             structCheck.confirmed = false;
             structCheck.message = `[Super Strong Trend] Pullback is developing. Waiting for breakout above previous HH ($${struct.current_HH.price.toFixed(2)}).`;
@@ -3408,9 +3430,13 @@ class TradingEngine {
         const pullbackHasFormed = struct.pullbackShortMet && struct.current_LL;
         if (pullbackHasFormed && struct.current_LL) {
           const isLLBreakout = currentClose < struct.current_LL.price;
-          if (isLLBreakout) {
+          const isNotOverextended = currentClose >= struct.current_LL.price - 1.2 * currentAtr;
+          if (isLLBreakout && isNotOverextended) {
             structCheck.confirmed = true;
             structCheck.message = `[Super Strong Trend] Pullback breakdown confirmed! Price ($${currentClose.toFixed(2)}) broke below previous LL ($${struct.current_LL.price.toFixed(2)}).`;
+          } else if (isLLBreakout) {
+            structCheck.confirmed = false;
+            structCheck.message = `[Super Strong Trend] Blocked: Price ($${currentClose.toFixed(2)}) is overextended below LL ($${struct.current_LL.price.toFixed(2)}).`;
           } else {
             structCheck.confirmed = false;
             structCheck.message = `[Super Strong Trend] Pullback is developing. Waiting for breakdown below previous LL ($${struct.current_LL.price.toFixed(2)}).`;

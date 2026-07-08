@@ -2371,6 +2371,8 @@ class TradingEngine {
       return { confirmed: false, message: "No candle data available." };
     }
     const currentCandle = this.candles1m[lastIdx];
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentAtr = atr14[lastIdx] || 50;
 
     if (direction === "LONG") {
       const isEmaAlignedLong = ema20Val > ema50Val && ema50Val > ema100Val;
@@ -2381,14 +2383,14 @@ class TradingEngine {
         };
       }
 
-      const breakoutLevel = struct.current_HH ? struct.current_HH.price : struct.swingHigh;
-      
+      // Symmetrically, the broken level is the previous Higher High (prev_HH) in a confirmed uptrend
+      const breakoutLevel = struct.prev_HH ? struct.prev_HH.price : (struct.current_HH ? struct.current_HH.price : struct.swingHigh);
+      const searchStart = struct.prev_HH ? struct.prev_HH.index : 0;
+
       // Find the candle index where breakout occurred (closing above breakout level)
       let breakoutIdx = -1;
-      for (let i = lastIdx; i >= Math.max(0, lastIdx - 25); i--) {
-        const candle = this.candles1m[i];
-        const prevCandle = i > 0 ? this.candles1m[i - 1] : null;
-        if (candle.close > breakoutLevel && (!prevCandle || prevCandle.close <= breakoutLevel)) {
+      for (let i = searchStart; i <= lastIdx; i++) {
+        if (this.candles1m[i].close > breakoutLevel) {
           breakoutIdx = i;
           break;
         }
@@ -2411,8 +2413,9 @@ class TradingEngine {
       const postBreakoutCandles = this.candles1m.slice(breakoutIdx + 1);
 
       // Invalidation: strongly reclaim/break below breakout level
-      const hasReclaimed = postBreakoutCandles.some(c => c.close < breakoutLevel * 0.999);
-      if (hasReclaimed || currentPrice < breakoutLevel) {
+      const reclaimThreshold = breakoutLevel - 0.25 * currentAtr;
+      const hasReclaimed = postBreakoutCandles.some(c => c.close < reclaimThreshold);
+      if (hasReclaimed || currentPrice < reclaimThreshold) {
         return {
           confirmed: false,
           message: `Blocked: Higher High breakout setup was invalidated because price strongly reclaimed/broke below the broken HH level ($${breakoutLevel.toFixed(2)}).`
@@ -2420,36 +2423,35 @@ class TradingEngine {
       }
 
       // Chasing check: too many candles elapsed without entry
-      if (postBreakoutCandles.length > 8) {
+      if (postBreakoutCandles.length > 15) {
         return {
           confirmed: false,
-          message: "Blocked: Chasing price after an extended upward move (more than 8 candles since HH breakout) is forbidden."
+          message: "Blocked: Chasing price after an extended upward move (more than 15 candles since HH breakout) is forbidden."
         };
       }
 
       // Setup 1: Pullback and Retest
-      const zoneLower = breakoutLevel * 0.998;
-      const zoneUpper = breakoutLevel * 1.003;
-      const hasPulledBackToZone = postBreakoutCandles.some(c => c.low >= zoneLower && c.low <= zoneUpper);
+      const pullbackLimit = breakoutLevel + 0.4 * currentAtr;
+      const hasPulledBackToZone = postBreakoutCandles.some(c => c.low <= pullbackLimit);
+      
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
       if (hasPulledBackToZone) {
-        const testCandles = postBreakoutCandles.filter(c => c.low >= zoneLower && c.low <= zoneUpper);
-        if (testCandles.length > 0) {
-          const lastTest = testCandles[testCandles.length - 1];
-          const isRejection = (lastTest.close > lastTest.open) || ((Math.min(lastTest.open, lastTest.close) - lastTest.low) >= 0.35 * (lastTest.high - lastTest.low));
-          const isContinuation = currentCandle.close > currentCandle.open && currentPrice > lastTest.low;
-          if (isRejection && isContinuation) {
-            isPullbackRetestValid = true;
-            pullbackRetestMessage = `Pullback & Retest setup confirmed: Price pulled back to broken HH level ($${breakoutLevel.toFixed(2)}) and rejected it as support (bullish confirmation).`;
-          }
+        const isRejection = (currentCandle.close > currentCandle.open) || ((currentCandle.close - currentCandle.low) >= 0.3 * (currentCandle.high - currentCandle.low));
+        const isContinuation = currentCandle.close > currentCandle.open && currentPrice >= breakoutLevel - 0.1 * currentAtr;
+        if (isRejection && isContinuation) {
+          isPullbackRetestValid = true;
+          pullbackRetestMessage = `Pullback & Retest setup confirmed: Price pulled back to broken HH level ($${breakoutLevel.toFixed(2)}) and rejected it as support with bullish confirmation.`;
         }
       }
 
       // Setup 2: 20/50 EMA Pushback
-      const hasRetracedToEMA = postBreakoutCandles.some(c => c.low <= ema20Val * 1.0015 || c.low <= ema50Val * 1.0015);
-      const currentRejectsEma20 = currentCandle.low <= ema20Val * 1.0015 && currentCandle.close > ema20Val && currentCandle.close > currentCandle.open;
-      const currentRejectsEma50 = currentCandle.low <= ema50Val * 1.0015 && currentCandle.close > ema50Val && currentCandle.close > currentCandle.open;
+      const emaRetraceThreshold20 = ema20Val + 0.25 * currentAtr;
+      const emaRetraceThreshold50 = ema50Val + 0.25 * currentAtr;
+      const hasRetracedToEMA = postBreakoutCandles.some(c => c.low <= emaRetraceThreshold20 || c.low <= emaRetraceThreshold50);
+      
+      const currentRejectsEma20 = currentCandle.low <= ema20Val + 0.2 * currentAtr && currentPrice >= ema20Val * 0.9995 && currentCandle.close > currentCandle.open;
+      const currentRejectsEma50 = currentCandle.low <= ema50Val + 0.2 * currentAtr && currentPrice >= ema50Val * 0.9995 && currentCandle.close > currentCandle.open;
       const isEmaPushbackValid = (currentRejectsEma20 || currentRejectsEma50) && hasRetracedToEMA;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
@@ -2477,14 +2479,14 @@ class TradingEngine {
         };
       }
 
-      const breakoutLevel = struct.current_LL ? struct.current_LL.price : struct.swingLow;
-      
+      // The broken level is the previous Lower Low (prev_LL) in a confirmed downtrend
+      const breakoutLevel = struct.prev_LL ? struct.prev_LL.price : (struct.current_LL ? struct.current_LL.price : struct.swingLow);
+      const searchStart = struct.prev_LL ? struct.prev_LL.index : 0;
+
       // Find the candle index where breakout occurred (closing below breakout level)
       let breakoutIdx = -1;
-      for (let i = lastIdx; i >= Math.max(0, lastIdx - 25); i--) {
-        const candle = this.candles1m[i];
-        const prevCandle = i > 0 ? this.candles1m[i - 1] : null;
-        if (candle.close < breakoutLevel && (!prevCandle || prevCandle.close >= breakoutLevel)) {
+      for (let i = searchStart; i <= lastIdx; i++) {
+        if (this.candles1m[i].close < breakoutLevel) {
           breakoutIdx = i;
           break;
         }
@@ -2507,8 +2509,9 @@ class TradingEngine {
       const postBreakoutCandles = this.candles1m.slice(breakoutIdx + 1);
 
       // Invalidation: strongly reclaim/break above breakout level
-      const hasReclaimed = postBreakoutCandles.some(c => c.close > breakoutLevel * 1.001);
-      if (hasReclaimed || currentPrice > breakoutLevel) {
+      const reclaimThreshold = breakoutLevel + 0.25 * currentAtr;
+      const hasReclaimed = postBreakoutCandles.some(c => c.close > reclaimThreshold);
+      if (hasReclaimed || currentPrice > reclaimThreshold) {
         return {
           confirmed: false,
           message: `Blocked: Lower Low breakout setup was invalidated because price strongly reclaimed/broke above the broken LL level ($${breakoutLevel.toFixed(2)}).`
@@ -2516,36 +2519,35 @@ class TradingEngine {
       }
 
       // Chasing check: too many candles elapsed without entry
-      if (postBreakoutCandles.length > 8) {
+      if (postBreakoutCandles.length > 15) {
         return {
           confirmed: false,
-          message: "Blocked: Chasing price after an extended downward move (more than 8 candles since LL breakout) is forbidden."
+          message: "Blocked: Chasing price after an extended downward move (more than 15 candles since LL breakout) is forbidden."
         };
       }
 
       // Setup 1: Pullback and Retest
-      const zoneLower = breakoutLevel * 0.997;
-      const zoneUpper = breakoutLevel * 1.002;
-      const hasPulledBackToZone = postBreakoutCandles.some(c => c.high >= zoneLower && c.high <= zoneUpper);
+      const pullbackLimit = breakoutLevel - 0.4 * currentAtr;
+      const hasPulledBackToZone = postBreakoutCandles.some(c => c.high >= pullbackLimit);
+      
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
       if (hasPulledBackToZone) {
-        const testCandles = postBreakoutCandles.filter(c => c.high >= zoneLower && c.high <= zoneUpper);
-        if (testCandles.length > 0) {
-          const lastTest = testCandles[testCandles.length - 1];
-          const isRejection = (lastTest.close < lastTest.open) || ((lastTest.high - Math.max(lastTest.open, lastTest.close)) >= 0.35 * (lastTest.high - lastTest.low));
-          const isContinuation = currentCandle.close < currentCandle.open && currentPrice < lastTest.high;
-          if (isRejection && isContinuation) {
-            isPullbackRetestValid = true;
-            pullbackRetestMessage = `Pullback & Retest setup confirmed: Price pulled back to broken LL level ($${breakoutLevel.toFixed(2)}) and rejected it as resistance (bearish confirmation).`;
-          }
+        const isRejection = (currentCandle.close < currentCandle.open) || ((currentCandle.high - currentCandle.close) >= 0.3 * (currentCandle.high - currentCandle.low));
+        const isContinuation = currentCandle.close < currentCandle.open && currentPrice <= breakoutLevel + 0.1 * currentAtr;
+        if (isRejection && isContinuation) {
+          isPullbackRetestValid = true;
+          pullbackRetestMessage = `Pullback & Retest setup confirmed: Price pulled back to broken LL level ($${breakoutLevel.toFixed(2)}) and rejected it as resistance with bearish confirmation.`;
         }
       }
 
       // Setup 2: 20/50 EMA Pushback
-      const hasRetracedToEMA = postBreakoutCandles.some(c => c.high >= ema20Val * 0.9985 || c.high >= ema50Val * 0.9985);
-      const currentRejectsEma20 = currentCandle.high >= ema20Val * 0.9985 && currentCandle.close < ema20Val && currentCandle.close < currentCandle.open;
-      const currentRejectsEma50 = currentCandle.high >= ema50Val * 0.9985 && currentCandle.close < ema50Val && currentCandle.close < currentCandle.open;
+      const emaRetraceThreshold20 = ema20Val - 0.25 * currentAtr;
+      const emaRetraceThreshold50 = ema50Val - 0.25 * currentAtr;
+      const hasRetracedToEMA = postBreakoutCandles.some(c => c.high >= emaRetraceThreshold20 || c.high >= emaRetraceThreshold50);
+      
+      const currentRejectsEma20 = currentCandle.high >= ema20Val - 0.2 * currentAtr && currentPrice <= ema20Val * 1.0005 && currentCandle.close < currentCandle.open;
+      const currentRejectsEma50 = currentCandle.high >= ema50Val - 0.2 * currentAtr && currentPrice <= ema50Val * 1.0005 && currentCandle.close < currentCandle.open;
       const isEmaPushbackValid = (currentRejectsEma20 || currentRejectsEma50) && hasRetracedToEMA;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {

@@ -687,42 +687,19 @@ class TradingEngine {
 
     const probabilityShort = Number((1 - probabilityLong).toFixed(4));
 
-    // --- SPECIAL SUPER STRONG TREND PULLBACK BREAKOUT LOGIC CHECK ---
+    const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_UPTREND;
+    const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
     const isSuperStrongUptrend = (this.currentRegime === MarketRegime.STRONG_UPTREND || adxValue >= 35) && 
                                  ema20Val > ema50Val && ema50Val > ema100Val;
     const isSuperStrongDowntrend = (this.currentRegime === MarketRegime.STRONG_DOWNTREND || adxValue >= 35) && 
                                    ema20Val < ema50Val && ema50Val < ema100Val;
-    const isFarFromEma100 = Math.abs(currentPrice - ema100Val) > 1.5 * currentAtr_cp;
-    const isSpecialSuperStrongTrendLogicActive = (isSuperStrongUptrend || isSuperStrongDowntrend) && isFarFromEma100;
+
+    // We block any entries on lower low breakouts (SHORT) or higher high breakouts (LONG)
+    // and instead only enter at pushback at 20/50 EMA.
+    const isSpecialSuperStrongTrendLogicActive = false;
 
     let isLongBreakout = false;
     let isShortBreakout = false;
-
-    // LONG breakout check - Only applied to strong trends (ADX >= 30 & STRONG_UPTREND)
-    const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_UPTREND;
-    if (hasEnoughData && isUptrendAligned && struct.isLongStructureConfirmed && struct.pullbackLongMet && struct.current_HH) {
-      const isPriceBreak = currentPrice > struct.current_HH.price;
-      const isNotOverextended = currentPrice <= struct.current_HH.price + 1.2 * currentAtr_cp;
-      const isCandleSizeConfirmed = currentBodySize > 1.2 * averageBodySize || currentPrice > (struct.current_HH.price + 0.3 * currentAtr_cp);
-      const isVolumeConfirmed = relVolume > 1.0;
-
-      if (isPriceBreak && isNotOverextended && isCandleSizeConfirmed && isVolumeConfirmed) {
-        isLongBreakout = true;
-      }
-    }
-
-    // SHORT breakout check - Only applied to strong trends (ADX >= 30 & STRONG_DOWNTREND)
-    const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
-    if (hasEnoughData && isDowntrendAligned && struct.isShortStructureConfirmed && struct.pullbackShortMet && struct.current_LL) {
-      const isPriceBreak = currentPrice < struct.current_LL.price;
-      const isNotOverextended = currentPrice >= struct.current_LL.price - 1.2 * currentAtr_cp;
-      const isCandleSizeConfirmed = currentBodySize > 1.2 * averageBodySize || currentPrice < (struct.current_LL.price - 0.3 * currentAtr_cp);
-      const isVolumeConfirmed = relVolume > 1.0;
-
-      if (isPriceBreak && isNotOverextended && isCandleSizeConfirmed && isVolumeConfirmed) {
-        isShortBreakout = true;
-      }
-    }
 
     if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       // Mean-Reversion and Breakout rules for RANGE_BOUND
@@ -756,50 +733,28 @@ class TradingEngine {
       }
     } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
       signalDirection = "NEUTRAL";
-    } else if (isSpecialSuperStrongTrendLogicActive) {
-      // Separate logic in super strong trending market:
-      // Wait for pullback to complete and confirm trend continuation using HH/LL breakout
-      if (isSuperStrongUptrend) {
-        const pullbackHasFormed = struct.pullbackLongMet && struct.current_HH;
-        if (pullbackHasFormed && struct.current_HH) {
-          const isHHBreakout = currentPrice > struct.current_HH.price;
-          const isNotOverextended = currentPrice <= struct.current_HH.price + 1.2 * currentAtr_cp;
-          if (isHHBreakout && isNotOverextended && relVolume > 1.0 && probabilityLong >= 0.70) {
-            signalDirection = "LONG";
-          } else {
-            // Wait for breakout or pullback to complete
-            signalDirection = "NEUTRAL";
-          }
-        } else {
-          // Pullback is still developing or not formed yet
-          signalDirection = "NEUTRAL";
-        }
-      } else {
-        const pullbackHasFormed = struct.pullbackShortMet && struct.current_LL;
-        if (pullbackHasFormed && struct.current_LL) {
-          const isLLBreakout = currentPrice < struct.current_LL.price;
-          const isNotOverextended = currentPrice >= struct.current_LL.price - 1.2 * currentAtr_cp;
-          if (isLLBreakout && isNotOverextended && relVolume > 1.0 && probabilityShort >= 0.70) {
-            signalDirection = "SHORT";
-          } else {
-            // Wait for breakout or pullback to complete
-            signalDirection = "NEUTRAL";
-          }
-        } else {
-          // Pullback is still developing or not formed yet
-          signalDirection = "NEUTRAL";
-        }
-      }
     } else {
-      // Trending/High-Volatility Breakout and Pullback Strategy
-      const pbTrend = this.detectPullbackTrendlineBreak();
-      if (isLongBreakout && probabilityLong >= 0.75) {
+      // --- TREND-FOLLOWING LOGIC RESTRICTED TO 20/50 EMA PUSHBACKS ---
+      const recentCandles = this.candles1m.slice(-8);
+
+      const recentPullbackToEma20Long = recentCandles.some(c => c.low <= ema20Val * 1.0015 && c.high >= ema20Val * 0.9985);
+      const recentPullbackToEma50Long = recentCandles.some(c => c.low <= ema50Val * 1.0015 && c.high >= ema50Val * 0.9985);
+      const hasValidPushbackLong = (recentPullbackToEma20Long || recentPullbackToEma50Long) && currentPrice >= ema50Val * 0.998;
+
+      const recentPullbackToEma20Short = recentCandles.some(c => c.high >= ema20Val * 0.9985 && c.low <= ema20Val * 1.0015);
+      const recentPullbackToEma50Short = recentCandles.some(c => c.high >= ema50Val * 0.9985 && c.low <= ema50Val * 1.0015);
+      const hasValidPushbackShort = (recentPullbackToEma20Short || recentPullbackToEma50Short) && currentPrice <= ema50Val * 1.002;
+
+      const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema100Val;
+      const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema100Val;
+
+      // Ensure we are NOT in breakout territory (preventing buying tops / shorting bottoms)
+      const isNotLongBreakout = struct.current_HH ? currentPrice <= struct.current_HH.price : true;
+      const isNotShortBreakdown = struct.current_LL ? currentPrice >= struct.current_LL.price : true;
+
+      if (isUptrendAligned && hasValidPushbackLong && isNotLongBreakout && probabilityLong >= 0.70) {
         signalDirection = "LONG";
-      } else if (isShortBreakout && probabilityShort >= 0.75) {
-        signalDirection = "SHORT";
-      } else if (pbTrend.isLongBreak && probabilityLong >= 0.70) {
-        signalDirection = "LONG";
-      } else if (pbTrend.isShortBreak && probabilityShort >= 0.70) {
+      } else if (isDowntrendAligned && hasValidPushbackShort && isNotShortBreakdown && probabilityShort >= 0.70) {
         signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
@@ -810,10 +765,10 @@ class TradingEngine {
 
     // C1: CatBoost AI Prediction (threshold is 0.50 leaning direction in RANGE_BOUND, 0.70 for pullback, 0.75 in trending breakouts)
     const pbTrendStatus = this.detectPullbackTrendlineBreak();
-    const isEnteringPullback = signalDirection !== "NEUTRAL" && (pbTrendStatus.isLongBreak || pbTrendStatus.isShortBreak || isSpecialSuperStrongTrendLogicActive);
+    const isEnteringPullback = signalDirection !== "NEUTRAL";
     const catboostThreshold = this.currentRegime === MarketRegime.RANGE_BOUND 
       ? 0.50 
-      : (isEnteringPullback ? 0.70 : 0.75);
+      : 0.70;
     const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold) : false;
     const pShortMet = signalDirection === "SHORT" ? (probabilityShort >= catboostThreshold) : false;
     conditions.push({
@@ -2527,84 +2482,46 @@ class TradingEngine {
     const ema100Val = lastIdxVal >= 0 && ema100.length > lastIdxVal ? ema100[lastIdxVal] : currentPrice;
 
     if (signalDirection === "LONG") {
-      const hasExtremeRealtimePressure = (config.general.enable_orderflow_softening !== false) &&
-                                         (this.orderFlowStats.takerBuyRatio >= 0.55 || this.orderBookStats.imbalanceRatio >= 0.25);
+      const isEmaAlignedLong = hasEnoughData && ema20Val > ema50Val && ema50Val > ema100Val;
+      const recentCandles = this.candles1m.slice(-8);
+      const recentPullbackToEma20 = recentCandles.some(c => c.low <= ema20Val * 1.0015 && c.high >= ema20Val * 0.9985);
+      const recentPullbackToEma50 = recentCandles.some(c => c.low <= ema50Val * 1.0015 && c.high >= ema50Val * 0.9985);
+      const hasValidPushbackLong = (recentPullbackToEma20 || recentPullbackToEma50) && currentPrice >= ema50Val * 0.998;
+      const isNotLongBreakout = struct.current_HH ? currentPrice <= struct.current_HH.price : true;
 
-      if (hasExtremeRealtimePressure) {
+      if (isEmaAlignedLong && hasValidPushbackLong && isNotLongBreakout) {
         confirmed = true;
-        message = `[Leading Flow Confirmation] Extreme real-time buy pressure (Taker Buy: ${(this.orderFlowStats.takerBuyRatio * 100).toFixed(1)}% | Imbalance: ${(this.orderBookStats.imbalanceRatio * 100).toFixed(1)}%) confirmed. Activating immediate market breakout entry.`;
+        message = `Uptrend confirmed via 20/50 EMA pushback. Price ($${currentPrice.toFixed(2)}) rejected EMA support within valid entry zone, below previous HH ($${struct.current_HH ? struct.current_HH.price.toFixed(2) : "N/A"}).`;
+      } else if (!isEmaAlignedLong) {
+        confirmed = false;
+        message = `Blocked: Bullish EMA structure not aligned (Requires EMA 20 > EMA 50 > EMA 100).`;
+      } else if (!isNotLongBreakout) {
+        confirmed = false;
+        message = `Blocked: Price ($${currentPrice.toFixed(2)}) is in breakout territory above previous HH ($${struct.current_HH?.price.toFixed(2)}). Waiting for pushback.`;
       } else {
-        const isEmaAlignedLong = hasEnoughData && currentPrice > ema20Val && ema20Val > ema50Val && ema50Val > ema100Val;
-
-        let recentPullbackToEma20 = false;
-        if (hasEnoughData) {
-          const recentCandles = this.candles1m.slice(-5);
-          recentPullbackToEma20 = recentCandles.some(c => c.low <= ema20Val * 1.0025);
-        }
-
-        const pbTrend = this.detectPullbackTrendlineBreak();
-        if (pbTrend.isLongBreak) {
-          confirmed = true;
-          message = pbTrend.message;
-        } else if (struct.isLongStructureConfirmed && struct.pullbackLongMet) {
-          confirmed = true;
-          message = `Uptrend structure & pullback confirmed. Waiting for price to break above current Higher High ($${struct.current_HH?.price.toFixed(2)}).`;
-        } else if (isEmaAlignedLong && recentPullbackToEma20) {
-          confirmed = true;
-          message = `Uptrend confirmed via EMA Alignment & 20-EMA pullback. Entry structure confirmed.`;
-        } else if (this.currentRegime === MarketRegime.STRONG_UPTREND && isEmaAlignedLong) {
-          confirmed = true;
-          message = `Uptrend confirmed via Strong Uptrend regime & bullish EMA alignment. Entering on trend continuation.`;
-        } else if (this.currentRegime === MarketRegime.HIGH_VOLATILITY && currentPrice >= struct.swingHigh * 0.999) {
-          confirmed = true;
-          message = `High Volatility breakout confirmed. Price is breaking local Swing High resistance ($${struct.swingHigh.toFixed(2)}).`;
-        } else {
-          if (!struct.isLongStructureConfirmed) {
-            message = "Uptrend structure NOT confirmed (Requires Current HH > Previous HH and Current HL > Previous HL).";
-          } else {
-            message = `Uptrend structure confirmed, but waiting for a pullback to EMA20, the breakout level ($${struct.prev_HH?.price.toFixed(2)}), or Fib 38%.`;
-          }
-        }
+        confirmed = false;
+        message = `Waiting for a valid pushback (pullback) to 20/50 EMA in the uptrend.`;
       }
     } else if (signalDirection === "SHORT") {
-      const hasExtremeRealtimePressure = (config.general.enable_orderflow_softening !== false) &&
-                                         (this.orderFlowStats.takerBuyRatio <= 0.45 || this.orderBookStats.imbalanceRatio <= -0.25);
+      const isEmaAlignedShort = hasEnoughData && ema20Val < ema50Val && ema50Val < ema100Val;
+      const recentCandles = this.candles1m.slice(-8);
+      const recentPullbackToEma20 = recentCandles.some(c => c.high >= ema20Val * 0.9985 && c.low <= ema20Val * 1.0015);
+      const recentPullbackToEma50 = recentCandles.some(c => c.high >= ema50Val * 0.9985 && c.low <= ema50Val * 1.0015);
+      const hasValidPushbackShort = (recentPullbackToEma20 || recentPullbackToEma50) && currentPrice <= ema50Val * 1.002;
+      const isNotShortBreakdown = struct.current_LL ? currentPrice >= struct.current_LL.price : true;
 
-      if (hasExtremeRealtimePressure) {
+      if (isEmaAlignedShort && hasValidPushbackShort && isNotShortBreakdown) {
         confirmed = true;
-        message = `[Leading Flow Confirmation] Extreme real-time sell pressure (Taker Sell: ${(100 - this.orderFlowStats.takerBuyRatio * 100).toFixed(1)}% | Imbalance: ${(this.orderBookStats.imbalanceRatio * 100).toFixed(1)}%) confirmed. Activating immediate market breakdown entry.`;
+        message = `Downtrend confirmed via 20/50 EMA pushback. Price ($${currentPrice.toFixed(2)}) rejected EMA resistance within valid entry zone, above previous LL ($${struct.current_LL ? struct.current_LL.price.toFixed(2) : "N/A"}).`;
+      } else if (!isEmaAlignedShort) {
+        confirmed = false;
+        message = `Blocked: Bearish EMA structure not aligned (Requires EMA 20 < EMA 50 < EMA 100).`;
+      } else if (!isNotShortBreakdown) {
+        confirmed = false;
+        message = `Blocked: Price ($${currentPrice.toFixed(2)}) is in breakdown territory below previous LL ($${struct.current_LL?.price.toFixed(2)}). Waiting for pushback.`;
       } else {
-        const isEmaAlignedShort = hasEnoughData && currentPrice < ema20Val && ema20Val < ema50Val && ema50Val < ema100Val;
-
-        let recentPullbackToEma20 = false;
-        if (hasEnoughData) {
-          const recentCandles = this.candles1m.slice(-5);
-          recentPullbackToEma20 = recentCandles.some(c => c.high >= ema20Val * 0.9975);
-        }
-
-        const pbTrend = this.detectPullbackTrendlineBreak();
-        if (pbTrend.isShortBreak) {
-          confirmed = true;
-          message = pbTrend.message;
-        } else if (struct.isShortStructureConfirmed && struct.pullbackShortMet) {
-          confirmed = true;
-          message = `Downtrend structure & pullback confirmed. Waiting for price to break below current Lower Low ($${struct.current_LL?.price.toFixed(2)}).`;
-        } else if (isEmaAlignedShort && recentPullbackToEma20) {
-          confirmed = true;
-          message = `Downtrend confirmed via EMA Alignment & 20-EMA pullback. Entry structure confirmed.`;
-        } else if (this.currentRegime === MarketRegime.STRONG_DOWNTREND && isEmaAlignedShort) {
-          confirmed = true;
-          message = `Downtrend confirmed via Strong Downtrend regime & bearish EMA alignment. Entering on trend continuation.`;
-        } else if (this.currentRegime === MarketRegime.HIGH_VOLATILITY && currentPrice <= struct.swingLow * 1.001) {
-          confirmed = true;
-          message = `High Volatility breakdown confirmed. Price is breaking local Swing Low support ($${struct.swingLow.toFixed(2)}).`;
-        } else {
-          if (!struct.isShortStructureConfirmed) {
-            message = "Downtrend structure NOT confirmed (Requires Current LH < Previous LH and Current LL < Previous LL).";
-          } else {
-            message = `Downtrend structure confirmed, but waiting for a pullback to EMA20, the breakout level ($${struct.prev_LL?.price.toFixed(2)}), or Fib 38%.`;
-          }
-        }
+        confirmed = false;
+        message = `Waiting for a valid pushback (pullback) to 20/50 EMA in the downtrend.`;
       }
     }
 
@@ -3053,44 +2970,22 @@ class TradingEngine {
     const ema100Val = ema100List[lastIdx] !== undefined ? ema100List[lastIdx] : currentClose;
     const ema200Val = ema200[lastIdx] || currentClose;
 
-    // --- SPECIAL SUPER STRONG TREND PULLBACK BREAKOUT LOGIC CHECK ---
+    const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_UPTREND;
+    const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
     const isSuperStrongUptrend = (this.currentRegime === MarketRegime.STRONG_UPTREND || adxValue >= 35) && 
                                  ema20Val > ema50Val && ema50Val > ema100Val;
     const isSuperStrongDowntrend = (this.currentRegime === MarketRegime.STRONG_DOWNTREND || adxValue >= 35) && 
                                    ema20Val < ema50Val && ema50Val < ema100Val;
-    const isFarFromEma100 = Math.abs(currentClose - ema100Val) > 1.5 * currentAtr;
-    const isSpecialSuperStrongTrendLogicActive = (isSuperStrongUptrend || isSuperStrongDowntrend) && isFarFromEma100;
+
+    let signalDirection: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL";
+
+    // We block any entries on lower low breakouts (SHORT) or higher high breakouts (LONG)
+    // and instead only enter at pushback at 20/50 EMA.
+    const isSpecialSuperStrongTrendLogicActive = false;
 
     let isLongBreakout = false;
     let isShortBreakout = false;
 
-    // LONG breakout check - Only applied to strong trends (ADX >= 30 & STRONG_UPTREND)
-    const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_UPTREND;
-    if (isUptrendAligned && struct.isLongStructureConfirmed && struct.pullbackLongMet && struct.current_HH) {
-      const isPriceBreak = currentClose > struct.current_HH.price;
-      const isNotOverextended = currentClose <= struct.current_HH.price + 1.2 * currentAtr;
-      const isCandleSizeConfirmed = currentBodySize > 1.2 * averageBodySize || currentClose > (struct.current_HH.price + 0.3 * currentAtr);
-      const isVolumeConfirmed = relVolume > 1.0;
-
-      if (isPriceBreak && isNotOverextended && isCandleSizeConfirmed && isVolumeConfirmed) {
-        isLongBreakout = true;
-      }
-    }
-
-    // SHORT breakout check - Only applied to strong trends (ADX >= 30 & STRONG_DOWNTREND)
-    const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
-    if (isDowntrendAligned && struct.isShortStructureConfirmed && struct.pullbackShortMet && struct.current_LL) {
-      const isPriceBreak = currentClose < struct.current_LL.price;
-      const isNotOverextended = currentClose >= struct.current_LL.price - 1.2 * currentAtr;
-      const isCandleSizeConfirmed = currentBodySize > 1.2 * averageBodySize || currentClose < (struct.current_LL.price - 0.3 * currentAtr);
-      const isVolumeConfirmed = relVolume > 1.0;
-
-      if (isPriceBreak && isNotOverextended && isCandleSizeConfirmed && isVolumeConfirmed) {
-        isShortBreakout = true;
-      }
-    }
-
-    let signalDirection: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL";
     if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       // Mean-Reversion and Breakout rules for RANGE_BOUND
       const rangeLookback = 30;
@@ -3123,47 +3018,28 @@ class TradingEngine {
       }
     } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
       signalDirection = "NEUTRAL";
-    } else if (isSpecialSuperStrongTrendLogicActive) {
-      // Special Super Strong Trend Pullback Breakout Logic (Independent from standard trend-following)
-      if (isSuperStrongUptrend) {
-        const pullbackHasFormed = struct.pullbackLongMet && struct.current_HH;
-        if (pullbackHasFormed && struct.current_HH) {
-          const isHHBreakout = currentClose > struct.current_HH.price;
-          const isNotOverextended = currentClose <= struct.current_HH.price + 1.2 * currentAtr;
-          if (isHHBreakout && isNotOverextended && relVolume > 1.0 && probabilityLong >= 0.70) {
-            signalDirection = "LONG";
-            this.log(`[Super Strong Trend] Pullback breakout confirmed: Price ($${currentClose.toFixed(2)}) broke above previous HH ($${struct.current_HH.price.toFixed(2)}).`);
-          } else {
-            signalDirection = "NEUTRAL";
-          }
-        } else {
-          signalDirection = "NEUTRAL";
-        }
-      } else {
-        const pullbackHasFormed = struct.pullbackShortMet && struct.current_LL;
-        if (pullbackHasFormed && struct.current_LL) {
-          const isLLBreakout = currentClose < struct.current_LL.price;
-          const isNotOverextended = currentClose >= struct.current_LL.price - 1.2 * currentAtr;
-          if (isLLBreakout && isNotOverextended && relVolume > 1.0 && probabilityShort >= 0.70) {
-            signalDirection = "SHORT";
-            this.log(`[Super Strong Trend] Pullback breakdown confirmed: Price ($${currentClose.toFixed(2)}) broke below previous LL ($${struct.current_LL.price.toFixed(2)}).`);
-          } else {
-            signalDirection = "NEUTRAL";
-          }
-        } else {
-          signalDirection = "NEUTRAL";
-        }
-      }
     } else {
-      // Trending/High-Volatility Breakout and Pullback Strategy
-      const pbTrend = this.detectPullbackTrendlineBreak();
-      if (isLongBreakout && probabilityLong >= 0.75) {
+      // --- TREND-FOLLOWING LOGIC RESTRICTED TO 20/50 EMA PUSHBACKS ---
+      const recentCandles = this.candles1m.slice(-8);
+
+      const recentPullbackToEma20Long = recentCandles.some(c => c.low <= ema20Val * 1.0015 && c.high >= ema20Val * 0.9985);
+      const recentPullbackToEma50Long = recentCandles.some(c => c.low <= ema50Val * 1.0015 && c.high >= ema50Val * 0.9985);
+      const hasValidPushbackLong = (recentPullbackToEma20Long || recentPullbackToEma50Long) && currentClose >= ema50Val * 0.998;
+
+      const recentPullbackToEma20Short = recentCandles.some(c => c.high >= ema20Val * 0.9985 && c.low <= ema20Val * 1.0015);
+      const recentPullbackToEma50Short = recentCandles.some(c => c.high >= ema50Val * 0.9985 && c.low <= ema50Val * 1.0015);
+      const hasValidPushbackShort = (recentPullbackToEma20Short || recentPullbackToEma50Short) && currentClose <= ema50Val * 1.002;
+
+      const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema100Val;
+      const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema100Val;
+
+      // Ensure we are NOT in breakout territory (preventing buying tops / shorting bottoms)
+      const isNotLongBreakout = struct.current_HH ? currentClose <= struct.current_HH.price : true;
+      const isNotShortBreakdown = struct.current_LL ? currentClose >= struct.current_LL.price : true;
+
+      if (isUptrendAligned && hasValidPushbackLong && isNotLongBreakout && probabilityLong >= 0.70) {
         signalDirection = "LONG";
-      } else if (isShortBreakout && probabilityShort >= 0.75) {
-        signalDirection = "SHORT";
-      } else if (pbTrend.isLongBreak && probabilityLong >= 0.70) {
-        signalDirection = "LONG";
-      } else if (pbTrend.isShortBreak && probabilityShort >= 0.70) {
+      } else if (isDowntrendAligned && hasValidPushbackShort && isNotShortBreakdown && probabilityShort >= 0.70) {
         signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
@@ -3182,10 +3058,10 @@ class TradingEngine {
 
     // C1: CatBoost Probability Filter
     const pbTrendStatus = this.detectPullbackTrendlineBreak();
-    const isEnteringPullback = signalDirection !== "NEUTRAL" && (pbTrendStatus.isLongBreak || pbTrendStatus.isShortBreak || isSpecialSuperStrongTrendLogicActive);
+    const isEnteringPullback = signalDirection !== "NEUTRAL";
     const catboostThreshold = this.currentRegime === MarketRegime.RANGE_BOUND 
       ? 0.50 
-      : (isEnteringPullback ? 0.70 : 0.75);
+      : 0.70;
     const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold) : false;
     const pShortMet = signalDirection === "SHORT" ? (probabilityShort >= catboostThreshold) : false;
     conditions.push({
@@ -3196,10 +3072,10 @@ class TradingEngine {
         : (pLongMet || pShortMet),
       current_value: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}% | P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%`,
       required: signalDirection === "LONG"
-        ? `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : (isEnteringPullback ? "70" : "75")}% (Evaluating LONG Trade)`
+        ? `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "70"}% (Evaluating LONG Trade)`
         : signalDirection === "SHORT"
-        ? `P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : (isEnteringPullback ? "70" : "75")}% (Evaluating SHORT Trade)`
-        : `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : (isEnteringPullback ? "70" : "75")}% for LONG OR P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : (isEnteringPullback ? "70" : "75")}% for SHORT (Mutually Exclusive)`,
+        ? `P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "70"}% (Evaluating SHORT Trade)`
+        : `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "75"}% for LONG OR P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "75"}% for SHORT (Mutually Exclusive)`,
     });
 
     const hasExtremeRealtimePressure = (config.general.enable_orderflow_softening !== false) &&
@@ -3708,20 +3584,8 @@ class TradingEngine {
     const positionQtyBtc = Number((baseQty * sizeMultiplier).toFixed(5));
     const leverage = config.risk_management.leverage || 20;
 
-    // Place stop below previous swing Higher Low (for LONG), or above previous swing Lower High (for SHORT)
-    // To prevent extremely tight stop-loss triggers due to near-term minor swing structures,
-    // we enforce that the stop loss is at least the computed `stopLossDistance` away from the entry price.
-    const struct = this.getTrendMarketStructure();
-    let stopLossPrice = 0;
-    if (direction === "LONG" && struct.current_HL) {
-      const idealSL = struct.current_HL.price - 20; // 20 USDT buffer
-      stopLossPrice = Math.min(idealSL, currentPrice - stopLossDistance);
-    } else if (direction === "SHORT" && struct.current_LH) {
-      const idealSL = struct.current_LH.price + 20; // 20 USDT buffer
-      stopLossPrice = Math.max(idealSL, currentPrice + stopLossDistance);
-    } else {
-      stopLossPrice = direction === "LONG" ? currentPrice - stopLossDistance : currentPrice + stopLossDistance;
-    }
+    // Respect the ATR-based stop loss distance directly as configured by the user, bounded only by the minimum floor.
+    const stopLossPrice = direction === "LONG" ? currentPrice - stopLossDistance : currentPrice + stopLossDistance;
 
     const actualSLDistance = Math.abs(currentPrice - stopLossPrice);
     const takeProfitDistance = actualSLDistance * config.risk_management.take_profit_ratio;

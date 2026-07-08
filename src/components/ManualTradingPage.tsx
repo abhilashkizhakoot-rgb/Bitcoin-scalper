@@ -101,7 +101,7 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
   }
 
   // Calculator State
-  const [calcExpectedProfit, setCalcExpectedProfit] = useState<string>("1.0");
+  const [calcRewardRatio, setCalcRewardRatio] = useState<string>("3.0");
   const [calcQuantity, setCalcQuantity] = useState<string>("0.01");
   const [calcPrice, setCalcPrice] = useState<string>("");
   const [calcDirection, setCalcDirection] = useState<"LONG" | "SHORT">("LONG");
@@ -325,7 +325,7 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
   const cQty = parseFloat(calcQuantity) || 0.01;
   const cAtr = calcAtrSource === "manual" && calcAtrOverride ? parseFloat(calcAtrOverride) || 26.86 : (liveAtr || 26.86);
   const cSlMult = parseFloat(calcSlMultiplier) || 1.8;
-  const cExpectedProfit = parseFloat(calcExpectedProfit) || 1.0;
+  const cRewardRatio = parseFloat(calcRewardRatio) || 3.0;
 
   // Stop loss calculations (reproducing exact trading engine logic)
   const cRawSlDistance = cAtr * cSlMult;
@@ -351,15 +351,20 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
   const cExitFee = cScalperOfferActive ? 0 : cExitFeeNormal;
   const cTotalFees = cEntryFee + cExitFee;
 
-  // Gross profit needed to achieve target net profit
-  const cRequiredGrossProfit = calcUseFees ? (cExpectedProfit + cTotalFees) : cExpectedProfit;
-  const cTakeProfitDistance = cRequiredGrossProfit / cQty;
-
-  // Required reward ratio: take profit distance divided by stop loss distance
-  const cRequiredRewardRatio = cTakeProfitDistance / cFinalSlDistance;
+  // Take Profit Distance calculated based on Reward Ratio (R:R)
+  const cTakeProfitDistance = cFinalSlDistance * cRewardRatio;
 
   // Take Profit Price
   const cTakeProfitPrice = calcDirection === "LONG" ? cPrice + cTakeProfitDistance : cPrice - cTakeProfitDistance;
+
+  // Gross profit
+  const cRequiredGrossProfit = cTakeProfitDistance * cQty;
+
+  // Expected Net Profit calculated automatically
+  const cExpectedProfit = calcUseFees ? (cRequiredGrossProfit - cTotalFees) : cRequiredGrossProfit;
+
+  // Required reward ratio matches selected reward ratio
+  const cRequiredRewardRatio = cRewardRatio;
 
   // Gross Loss and Net Loss at Stop Loss
   const cGrossLoss = cFinalSlDistance * cQty;
@@ -812,24 +817,24 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
               {/* Input Parameters */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 
-                {/* Expected Net Profit Input */}
+                {/* Target Reward Ratio Input */}
                 <div className="space-y-2">
                   <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                    <DollarSign className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Target Net Profit (USDT)</span>
+                    <Target className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Target Reward Ratio (R:R)</span>
                   </label>
                   <div className="relative">
                     <input
                       type="number"
-                      step="0.01"
-                      min="0.01"
+                      step="0.1"
+                      min="0.1"
                       required
-                      value={calcExpectedProfit}
-                      onChange={(e) => setCalcExpectedProfit(e.target.value)}
+                      value={calcRewardRatio}
+                      onChange={(e) => setCalcRewardRatio(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pr-14 text-sm font-mono text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400"
-                      placeholder="1.0"
+                      placeholder="3.0"
                     />
-                    <div className="absolute right-3.5 top-3.5 text-xs font-mono font-bold text-slate-400 select-none">USDT</div>
+                    <div className="absolute right-3.5 top-3.5 text-xs font-mono font-bold text-slate-400 select-none">R:R</div>
                   </div>
                 </div>
 
@@ -996,9 +1001,16 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
                     </div>
 
                     <div className="flex justify-between text-slate-500 pt-2 border-t border-slate-200/60">
-                      <span className="font-semibold text-slate-700">Required Reward Ratio:</span>
+                      <span className="font-semibold text-slate-700">Calculated Net Profit:</span>
+                      <span className="font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                        ${cExpectedProfit.toFixed(2)} USDT
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between text-slate-500">
+                      <span className="font-semibold text-slate-700">Selected Reward Ratio:</span>
                       <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
-                        1 : {cRequiredRewardRatio.toFixed(4)}
+                        1 : {cRequiredRewardRatio.toFixed(2)}
                       </span>
                     </div>
 

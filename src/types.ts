@@ -222,6 +222,10 @@ export interface StrategyConfig {
     trailing_stop_loss_activation_ratio?: number; // Multiple of initial stop loss distance to activate trailing (e.g. 1.2x)
     min_stop_loss_distance_usd?: number; // Minimum USD distance floor for stop loss
     min_stop_loss_distance_pct?: number; // Minimum percentage distance floor for stop loss (e.g. 0.12 for 0.12%)
+    static_stop_loss_enabled?: boolean; // Enable/disable static stop loss override
+    static_stop_loss_value_usd?: number; // Static stop loss distance in USD
+    max_atr_for_stop_loss_enabled?: boolean; // Enable/disable maximum ATR cap for stop loss calculation
+    max_atr_for_stop_loss_value?: number; // Maximum ATR value to cap at
   };
 }
 

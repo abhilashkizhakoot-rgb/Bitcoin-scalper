@@ -178,6 +178,10 @@ const DEFAULT_CONFIG: StrategyConfig = {
     trailing_stop_loss_activation_ratio: 1.2,
     min_stop_loss_distance_usd: 80,
     min_stop_loss_distance_pct: 0.12,
+    static_stop_loss_enabled: false,
+    static_stop_loss_value_usd: 150,
+    max_atr_for_stop_loss_enabled: false,
+    max_atr_for_stop_loss_value: 100,
   },
 };
 
@@ -892,6 +896,22 @@ class DatabaseManager {
       }
       if (this.cache.config.risk_management.min_stop_loss_distance_pct === undefined) {
         this.cache.config.risk_management.min_stop_loss_distance_pct = 0.12;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.static_stop_loss_enabled === undefined) {
+        this.cache.config.risk_management.static_stop_loss_enabled = false;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.static_stop_loss_value_usd === undefined) {
+        this.cache.config.risk_management.static_stop_loss_value_usd = 150;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.max_atr_for_stop_loss_enabled === undefined) {
+        this.cache.config.risk_management.max_atr_for_stop_loss_enabled = false;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.max_atr_for_stop_loss_value === undefined) {
+        this.cache.config.risk_management.max_atr_for_stop_loss_value = 100;
         changed = true;
       }
     }

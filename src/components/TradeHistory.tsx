@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   RefreshCw,
   Clock,
+  Download,
 } from "lucide-react";
 import { Trade, TradeDirection, ExitReason, MarketRegime, StrategyConfig, TimingWindow } from "../types.js";
 import { safeFormatTime, safeFormatDate, safeFormatNumber } from "../utils/format";
@@ -264,6 +265,91 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
     return true;
   });
 
+  const exportToCSV = () => {
+    if (filteredTrades.length === 0) return;
+
+    // Helper to escape double quotes and wrap values in quotes if they contain commas
+    const escapeCSVValue = (val: any) => {
+      if (val === null || val === undefined) return "";
+      const stringVal = String(val);
+      if (stringVal.includes(",") || stringVal.includes('"') || stringVal.includes("\n") || stringVal.includes("\r")) {
+        return `"${stringVal.replace(/"/g, '""')}"`;
+      }
+      return stringVal;
+    };
+
+    const headers = [
+      "Timestamp (UTC)",
+      "Direction",
+      "Size (BTC)",
+      "Entry Price ($)",
+      "Exit Price ($)",
+      "Target SL ($)",
+      "Target TP ($)",
+      "Entry ATR ($)",
+      "Exit Reason",
+      "Net P&L ($)",
+      "Leverage",
+      "Hold Duration (Sec)",
+      "Fees Paid ($)",
+      "Max Favorable Excursion (%)",
+      "Max Adverse Excursion (%)",
+      "Sentiment Score",
+      "Market Regime",
+      "Entry Score",
+    ];
+
+    const rows = filteredTrades.map((t) => {
+      const sl = t.feature_snapshot?.stop_loss_price 
+        ? t.feature_snapshot.stop_loss_price 
+        : t.feature_snapshot?.current_stop_loss_price 
+        ? t.feature_snapshot.current_stop_loss_price 
+        : "";
+      const tp = t.feature_snapshot?.take_profit_price 
+        ? t.feature_snapshot.take_profit_price 
+        : "";
+      const atr = t.feature_snapshot?.atr_14 !== undefined
+        ? t.feature_snapshot.atr_14
+        : "";
+
+      return [
+        t.entry_timestamp,
+        t.direction,
+        t.quantity_btc,
+        t.entry_price,
+        t.exit_price || "Active",
+        sl,
+        tp,
+        atr,
+        t.exit_reason || "Active",
+        t.pnl_usdt !== undefined ? t.pnl_usdt : "Active",
+        t.leverage,
+        t.hold_duration_seconds,
+        t.fees_paid_usdt,
+        t.max_favorable_excursion,
+        t.max_adverse_excursion,
+        t.sentiment_score_at_entry,
+        t.regime_at_entry || "",
+        t.entry_signal_score,
+      ].map(escapeCSVValue);
+    });
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) => row.join(",")),
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `trading_history_export_${new Date().toISOString().split("T")[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const getReasonBadgeClass = (reason: ExitReason | null) => {
     switch (reason) {
       case ExitReason.TAKE_PROFIT:
@@ -461,6 +547,17 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
             />
             <span>Show Entry ATR</span>
           </label>
+
+          {/* Export CSV Button */}
+          <button
+            onClick={exportToCSV}
+            disabled={filteredTrades.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-250 disabled:cursor-not-allowed text-indigo-600 hover:text-indigo-700 rounded-lg text-xs font-sans font-semibold border border-indigo-100 hover:border-indigo-200 transition-colors cursor-pointer"
+            title="Export filtered trade history to CSV"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export CSV
+          </button>
 
           {/* Clear History Button */}
           <button

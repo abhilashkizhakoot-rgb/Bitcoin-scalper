@@ -3793,14 +3793,28 @@ class TradingEngine {
     const atr14 = this.calculateATR(this.candles1m, 14);
     const lastAtr = atr14[closes.length - 1] || 150;
 
+    // Apply Maximum ATR Cap for Stop Loss calculation if enabled
+    let stopLossAtr = lastAtr;
+    if (config.risk_management.max_atr_for_stop_loss_enabled === true && config.risk_management.max_atr_for_stop_loss_value !== undefined) {
+      if (lastAtr > config.risk_management.max_atr_for_stop_loss_value) {
+        stopLossAtr = config.risk_management.max_atr_for_stop_loss_value;
+      }
+    }
+
     // Enforce a minimum stop loss distance floor to prevent excessively tight stop losses in BTC
     const usdFloor = config.risk_management.min_stop_loss_distance_usd !== undefined ? config.risk_management.min_stop_loss_distance_usd : 80;
     const pctFloorVal = config.risk_management.min_stop_loss_distance_pct !== undefined ? config.risk_management.min_stop_loss_distance_pct : 0.12;
     const minSlDistance = Math.max(usdFloor, currentPrice * (pctFloorVal / 100));
-    const stopLossDistance = Math.max(
-      lastAtr * config.risk_management.stop_loss_atr_multiplier,
-      minSlDistance
-    );
+    
+    const isStaticSl = config.risk_management.static_stop_loss_enabled === true;
+    const staticSlVal = config.risk_management.static_stop_loss_value_usd !== undefined ? config.risk_management.static_stop_loss_value_usd : 150;
+
+    const stopLossDistance = isStaticSl
+      ? staticSlVal
+      : Math.max(
+          stopLossAtr * config.risk_management.stop_loss_atr_multiplier,
+          minSlDistance
+        );
 
     // Use the configured default quantity (fixed standard trade size)
     const sizeMultiplier = this.getTradeSizeMultiplier();
@@ -3954,14 +3968,29 @@ class TradingEngine {
     const closes = this.candles1m.map((c) => c.close);
     const atr14 = this.calculateATR(this.candles1m, 14);
     const lastAtr = atr14[closes.length - 1] || 150;
+
+    // Apply Maximum ATR Cap for Stop Loss calculation if enabled
+    let stopLossAtr = lastAtr;
+    if (config.risk_management.max_atr_for_stop_loss_enabled === true && config.risk_management.max_atr_for_stop_loss_value !== undefined) {
+      if (lastAtr > config.risk_management.max_atr_for_stop_loss_value) {
+        stopLossAtr = config.risk_management.max_atr_for_stop_loss_value;
+      }
+    }
+
     // Apply the same minimum stop-loss distance floor to prevent excessively tight SL on historical/active trades
     const usdFloor = config.risk_management.min_stop_loss_distance_usd !== undefined ? config.risk_management.min_stop_loss_distance_usd : 80;
     const pctFloorVal = config.risk_management.min_stop_loss_distance_pct !== undefined ? config.risk_management.min_stop_loss_distance_pct : 0.12;
     const minSlDistance = Math.max(usdFloor, entryPrice * (pctFloorVal / 100));
-    const stopLossDistance = Math.max(
-      lastAtr * config.risk_management.stop_loss_atr_multiplier,
-      minSlDistance
-    );
+    
+    const isStaticSl = config.risk_management.static_stop_loss_enabled === true;
+    const staticSlVal = config.risk_management.static_stop_loss_value_usd !== undefined ? config.risk_management.static_stop_loss_value_usd : 150;
+
+    const stopLossDistance = isStaticSl
+      ? staticSlVal
+      : Math.max(
+          stopLossAtr * config.risk_management.stop_loss_atr_multiplier,
+          minSlDistance
+        );
     const takeProfitDistance = stopLossDistance * config.risk_management.take_profit_ratio;
 
     let stopLossPrice = direction === TradeDirection.LONG ? entryPrice - stopLossDistance : entryPrice + stopLossDistance;

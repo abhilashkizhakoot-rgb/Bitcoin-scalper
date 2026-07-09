@@ -183,9 +183,16 @@ export default function CheckpointsPage({ status, onRefresh, onTabChange }: Chec
       {/* ================= HEADER AND HEALTH SCORE ================= */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <span className="flex h-2.5 w-2.5 rounded-full bg-indigo-600 animate-pulse" />
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`flex h-2.5 w-2.5 rounded-full ${status.is_trading_active ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`} />
             <h1 className="font-sans font-bold text-lg text-slate-800 tracking-tight">Checkpoints Radar Tracker</h1>
+            <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md ${
+              status.is_trading_active 
+                ? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
+                : "bg-rose-50 text-rose-700 border border-rose-200"
+            } border`}>
+              {status.is_trading_active ? "ENGINE ACTIVE" : "ENGINE STOPPED"}
+            </span>
           </div>
           <p className="text-xs text-slate-500">
             Real-time scanner analyzing {conditions.length} strict quantitative, qualitative, and technical trade entry gating conditions.
@@ -230,6 +237,32 @@ export default function CheckpointsPage({ status, onRefresh, onTabChange }: Chec
           </div>
         </div>
       </div>
+
+      {/* ================= ENGINE STOPPED WARNING BANNER ================= */}
+      {!status.is_trading_active && (
+        <div className="bg-rose-50 border border-rose-200/80 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row items-start gap-4" id="engine-stopped-radar-warning">
+          <div className="p-3 bg-rose-100 border border-rose-200 text-rose-700 rounded-xl shrink-0">
+            <XCircle className="w-6 h-6 animate-pulse" />
+          </div>
+          <div className="space-y-1.5 flex-1">
+            <p className="text-[10px] font-mono font-bold text-rose-600 uppercase tracking-wider">Trading Engine Status Indicator</p>
+            <h2 className="font-sans font-bold text-base text-rose-900 tracking-tight">
+              AUTOMATED ROUTING ENGINE STOPPED / OFFLINE
+            </h2>
+            <p className="text-xs text-rose-700/90 leading-relaxed">
+              The automated execution engine is currently turned off. The Checkpoints Radar will continue to scan the live market and update indicators in real-time, but all order routing, position entries, and active strategy decisions are locked.
+            </p>
+            <div className="pt-1">
+              <button
+                onClick={() => onTabChange("config")}
+                className="flex items-center gap-1.5 font-bold text-xs text-indigo-600 hover:text-indigo-800 transition-colors bg-white border border-rose-100 hover:border-indigo-200 rounded-lg px-3 py-1.5 shadow-xs cursor-pointer"
+              >
+                Go to Configurations & Start Engine <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ================= REGIME & POLLING STATUS BANNER ================= */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4" id="checkpoints-status-banner">

@@ -814,6 +814,68 @@ export default function ConfigPage({
                     Absolute minimum stop loss percentage from the entry price. Protects trade executions from micro stop placements that fail to accommodate regular spread volatility and local exchange order routing slippage (Default: 0.12%).
                   </p>
                 </div>
+
+                <div className="space-y-2 col-span-1 md:col-span-2 border-t border-slate-100 pt-4 mt-2">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none text-xs font-semibold text-slate-700 uppercase">
+                    <input
+                      type="checkbox"
+                      checked={riskConfig.static_stop_loss_enabled === true}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, static_stop_loss_enabled: e.target.checked })}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                    />
+                    Enable Static Stop Loss Override
+                  </label>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    When enabled, the dynamic ATR-based calculation is bypassed, and a fixed static stop loss price distance (configured below) is applied to all trades.
+                  </p>
+                </div>
+
+                {riskConfig.static_stop_loss_enabled && (
+                  <div className="space-y-1.5 col-span-1 md:col-span-2">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Static Stop Loss Value (USD Distance)</label>
+                    <input
+                      type="number"
+                      step="10"
+                      value={riskConfig.static_stop_loss_value_usd !== undefined ? riskConfig.static_stop_loss_value_usd : 150}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, static_stop_loss_value_usd: Math.max(10, parseFloat(e.target.value) || 10) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      Fixed USD price distance from the entry price to place the static stop loss (e.g., $150 means the stop loss will always be placed exactly $150 away from the entry price regardless of current ATR volatility).
+                    </p>
+                  </div>
+                )}
+
+                <div className="space-y-2 col-span-1 md:col-span-2 border-t border-slate-100 pt-4 mt-2">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none text-xs font-semibold text-slate-700 uppercase">
+                    <input
+                      type="checkbox"
+                      checked={riskConfig.max_atr_for_stop_loss_enabled === true}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, max_atr_for_stop_loss_enabled: e.target.checked })}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                    />
+                    Enable Maximum ATR Stop Loss Cap
+                  </label>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    When enabled, if the current market ATR exceeds the Maximum ATR value defined below, the capped Maximum ATR value is used to calculate the trade entry's stop loss instead of the higher market ATR. This helps prevent excessively wide stop losses during sudden high-volatility spikes, and is not used for any other trade entry signals or strategy filters.
+                  </p>
+                </div>
+
+                {riskConfig.max_atr_for_stop_loss_enabled && (
+                  <div className="space-y-1.5 col-span-1 md:col-span-2">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Maximum ATR Value Cap</label>
+                    <input
+                      type="number"
+                      step="5"
+                      value={riskConfig.max_atr_for_stop_loss_value !== undefined ? riskConfig.max_atr_for_stop_loss_value : 100}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, max_atr_for_stop_loss_value: Math.max(1, parseFloat(e.target.value) || 1) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      The maximum capped ATR value used for multiplying by the stop loss ATR multiplier on trade entry.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 

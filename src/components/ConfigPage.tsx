@@ -1040,7 +1040,7 @@ export default function ConfigPage({
             {/* Commit Button */}
             <div className="border-t border-slate-200 pt-5 flex justify-end">
               <button
-                onClick={() => handleSaveCategory("risk_management", riskConfig)}
+                onClick={handleSaveRiskAndGeneral}
                 className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-sans font-semibold px-5 py-2.5 rounded-lg transition-colors duration-150 cursor-pointer shadow-sm"
               >
                 COMMIT RISK PARAMETERS

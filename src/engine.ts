@@ -3735,8 +3735,38 @@ class TradingEngine {
     if (config.general.enable_block_logging !== false) {
       try {
         const logTime = new Date().toISOString();
-        const disqualifiedGates = failedConditions.length > 0 ? failedConditions.join(", ") : "None (All qualified)";
-        const logLine = `${logTime} | Polling Direction: ${signalDirection} | Disqualified Gates: [${disqualifiedGates}]\n`;
+        let blockDetails = "";
+
+        if (signalDirection === "NEUTRAL") {
+          let neutralReason = "No strategy setup triggered.";
+          if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
+            neutralReason = "Trading is deactivated in low-volatility regimes to prevent chop losses.";
+          } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
+            neutralReason = "Price is inside the range boundaries; no mean-reversion range-support reversal, range-resistance reversal, or range breakout/breakdown triggered.";
+          } else {
+            neutralReason = "No valid pullback/retest of the 20/50 EMA detected, or the trend structure is not aligned with the required ML probability thresholds.";
+          }
+          blockDetails = `  * Neutral Strategy State: ${neutralReason}`;
+        } else if (!allConditionsMet) {
+          blockDetails = "  * Disqualified Gates Detail:\n" + conditions
+            .filter((c) => !c.met)
+            .map((c) => `    - [${c.name}]: Current = "${c.current_value}" | Required = "${c.required}"`)
+            .join("\n");
+        } else {
+          blockDetails = "  * Status: All gating conditions passed! Ready for execution / executed.";
+        }
+
+        const logHeader = `================================================================================\n`;
+        const logTimeStr = `TIMESTAMP: ${logTime}\n`;
+        const logStatus = `STATUS: ${allConditionsMet && signalDirection !== "NEUTRAL" ? "QUALIFIED" : "BLOCKED"}\n`;
+        const logDir = `POLLING DIRECTION: ${signalDirection}\n`;
+        const logRegime = `MARKET REGIME: ${this.currentRegime}\n`;
+        const logPrice = `CURRENT PRICE: $${currentClose.toFixed(2)} | ADX: ${adxValue.toFixed(1)} | Rel Volume: ${relVolume.toFixed(2)}x\n`;
+        const logBody = `${blockDetails}\n`;
+        const logFooter = `================================================================================\n\n`;
+
+        const logLine = `${logHeader}${logTimeStr}${logStatus}${logDir}${logRegime}${logPrice}${logBody}${logFooter}`;
+
         const DATA_DIR = process.env.DATA_DIR || process.cwd();
         fs.appendFileSync(path.join(DATA_DIR, "trade_block_log"), logLine, "utf-8");
       } catch (e) {

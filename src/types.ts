@@ -227,6 +227,25 @@ export interface StrategyConfig {
     max_atr_for_stop_loss_enabled?: boolean; // Enable/disable maximum ATR cap for stop loss calculation
     max_atr_for_stop_loss_value?: number; // Maximum ATR value to cap at
   };
+  market_structure: {
+    min_breakout_body_ratio: number; // e.g. 0.22 (22% body ratio)
+    allow_immediate_breakout: boolean; // e.g. true (momentum chasing)
+    hf_momentum_adx_threshold: number; // e.g. 30 (strong ADX breakout threshold)
+    hf_orderflow_taker_buy_ratio_long: number; // e.g. 0.58 (Taker Buy Ratio for immediate entry)
+    hf_orderflow_imbalance_ratio_long: number; // e.g. 0.30 (Imbalance Ratio for immediate entry)
+    hf_orderflow_taker_buy_ratio_short: number; // e.g. 0.42 (Taker Buy Ratio for immediate entry)
+    hf_orderflow_imbalance_ratio_short: number; // e.g. -0.30 (Imbalance Ratio for immediate entry)
+    pullback_multiplier_limit: number; // e.g. 0.6 (Minimum allowed retrace factor)
+    ema_retrace_multiplier_limit: number; // e.g. 0.4 (EMA dynamic support/resistance)
+    bypass_ema200_on_momentum: boolean; // e.g. true (By-pass EMA 200 restriction on strong ADX/orderflow)
+    ema200_proximity_divisor: number; // e.g. 3.0 (Scale down proximity barriers)
+    weak_trend_adx_threshold: number; // e.g. 25 (Threshold above which trend EMAs are fast-aligned)
+    trend_alignment_adx_threshold?: number; // ADX threshold for strong trend alignment (default: 30)
+    super_trend_adx_threshold?: number; // ADX threshold for super strong trend (default: 35)
+    fast_ema_period?: number; // Fast EMA period (default: 20)
+    medium_ema_period?: number; // Medium EMA period (default: 50)
+    slow_ema_period?: number; // Slow EMA period (default: 200)
+  };
 }
 
 export interface ConfigHistoryEntry {

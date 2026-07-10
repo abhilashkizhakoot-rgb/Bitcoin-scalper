@@ -183,6 +183,25 @@ const DEFAULT_CONFIG: StrategyConfig = {
     max_atr_for_stop_loss_enabled: false,
     max_atr_for_stop_loss_value: 100,
   },
+  market_structure: {
+    min_breakout_body_ratio: 0.22,
+    allow_immediate_breakout: true,
+    hf_momentum_adx_threshold: 30,
+    hf_orderflow_taker_buy_ratio_long: 0.58,
+    hf_orderflow_imbalance_ratio_long: 0.30,
+    hf_orderflow_taker_buy_ratio_short: 0.42,
+    hf_orderflow_imbalance_ratio_short: -0.30,
+    pullback_multiplier_limit: 0.6,
+    ema_retrace_multiplier_limit: 0.4,
+    bypass_ema200_on_momentum: true,
+    ema200_proximity_divisor: 3.0,
+    weak_trend_adx_threshold: 25,
+    trend_alignment_adx_threshold: 30,
+    super_trend_adx_threshold: 35,
+    fast_ema_period: 20,
+    medium_ema_period: 50,
+    slow_ema_period: 200,
+  },
 };
 
 const DEFAULT_CREDENTIALS: ExchangeCredentials = {
@@ -914,6 +933,31 @@ class DatabaseManager {
         this.cache.config.risk_management.max_atr_for_stop_loss_value = 100;
         changed = true;
       }
+    }
+
+    if (!this.cache?.config?.market_structure) {
+      this.cache!.config.market_structure = { ...DEFAULT_CONFIG.market_structure };
+      changed = true;
+    } else {
+      const ms = this.cache!.config.market_structure;
+      const def = DEFAULT_CONFIG.market_structure;
+      if (ms.min_breakout_body_ratio === undefined) { ms.min_breakout_body_ratio = def.min_breakout_body_ratio; changed = true; }
+      if (ms.allow_immediate_breakout === undefined) { ms.allow_immediate_breakout = def.allow_immediate_breakout; changed = true; }
+      if (ms.hf_momentum_adx_threshold === undefined) { ms.hf_momentum_adx_threshold = def.hf_momentum_adx_threshold; changed = true; }
+      if (ms.hf_orderflow_taker_buy_ratio_long === undefined) { ms.hf_orderflow_taker_buy_ratio_long = def.hf_orderflow_taker_buy_ratio_long; changed = true; }
+      if (ms.hf_orderflow_imbalance_ratio_long === undefined) { ms.hf_orderflow_imbalance_ratio_long = def.hf_orderflow_imbalance_ratio_long; changed = true; }
+      if (ms.hf_orderflow_taker_buy_ratio_short === undefined) { ms.hf_orderflow_taker_buy_ratio_short = def.hf_orderflow_taker_buy_ratio_short; changed = true; }
+      if (ms.hf_orderflow_imbalance_ratio_short === undefined) { ms.hf_orderflow_imbalance_ratio_short = def.hf_orderflow_imbalance_ratio_short; changed = true; }
+      if (ms.pullback_multiplier_limit === undefined) { ms.pullback_multiplier_limit = def.pullback_multiplier_limit; changed = true; }
+      if (ms.ema_retrace_multiplier_limit === undefined) { ms.ema_retrace_multiplier_limit = def.ema_retrace_multiplier_limit; changed = true; }
+      if (ms.bypass_ema200_on_momentum === undefined) { ms.bypass_ema200_on_momentum = def.bypass_ema200_on_momentum; changed = true; }
+      if (ms.ema200_proximity_divisor === undefined) { ms.ema200_proximity_divisor = def.ema200_proximity_divisor; changed = true; }
+      if (ms.weak_trend_adx_threshold === undefined) { ms.weak_trend_adx_threshold = def.weak_trend_adx_threshold; changed = true; }
+      if (ms.trend_alignment_adx_threshold === undefined) { ms.trend_alignment_adx_threshold = def.trend_alignment_adx_threshold || 30; changed = true; }
+      if (ms.super_trend_adx_threshold === undefined) { ms.super_trend_adx_threshold = def.super_trend_adx_threshold || 35; changed = true; }
+      if (ms.fast_ema_period === undefined) { ms.fast_ema_period = def.fast_ema_period || 20; changed = true; }
+      if (ms.medium_ema_period === undefined) { ms.medium_ema_period = def.medium_ema_period || 50; changed = true; }
+      if (ms.slow_ema_period === undefined) { ms.slow_ema_period = def.slow_ema_period || 200; changed = true; }
     }
 
     if (changed) {

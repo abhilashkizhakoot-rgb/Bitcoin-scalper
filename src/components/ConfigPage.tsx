@@ -55,7 +55,7 @@ export default function ConfigPage({
   history,
   onRefresh,
 }: ConfigPageProps) {
-  const [activeTab, setActiveTab] = useState<"general" | "ml" | "sentiment" | "risk" | "profiles" | "history">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "ml" | "sentiment" | "risk" | "profiles" | "history" | "market_structure">("general");
   const [newProfileName, setNewProfileName] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [isRetraining, setIsRetraining] = useState(false);
@@ -102,13 +102,35 @@ export default function ConfigPage({
   const [mlConfig, setMlConfig] = useState(config.ml_settings);
   const [sentimentConfig, setSentimentConfig] = useState(config.sentiment_settings);
   const [riskConfig, setRiskConfig] = useState(config.risk_management);
+  const [msConfig, setMsConfig] = useState(config.market_structure || {
+    min_breakout_body_ratio: 0.22,
+    allow_immediate_breakout: true,
+    hf_momentum_adx_threshold: 30,
+    hf_orderflow_taker_buy_ratio_long: 0.58,
+    hf_orderflow_imbalance_ratio_long: 0.30,
+    hf_orderflow_taker_buy_ratio_short: 0.42,
+    hf_orderflow_imbalance_ratio_short: -0.30,
+    pullback_multiplier_limit: 0.6,
+    ema_retrace_multiplier_limit: 0.4,
+    bypass_ema200_on_momentum: true,
+    ema200_proximity_divisor: 3.0,
+    weak_trend_adx_threshold: 25,
+    trend_alignment_adx_threshold: 30,
+    super_trend_adx_threshold: 35,
+    fast_ema_period: 20,
+    medium_ema_period: 50,
+    slow_ema_period: 200,
+  });
 
   useEffect(() => {
     setGeneralConfig(config.general);
     setMlConfig(config.ml_settings);
     setSentimentConfig(config.sentiment_settings);
     setRiskConfig(config.risk_management);
-  }, []); // Run only on mount to prevent background refreshes from clearing user edits
+    if (config.market_structure) {
+      setMsConfig(config.market_structure);
+    }
+  }, [config]); // Run on config update
 
   const handleSaveCategory = async (category: string, data: any) => {
     try {
@@ -189,6 +211,9 @@ export default function ConfigPage({
         setMlConfig(loaded.ml_settings);
         setSentimentConfig(loaded.sentiment_settings);
         setRiskConfig(loaded.risk_management);
+        if (loaded.market_structure) {
+          setMsConfig(loaded.market_structure);
+        }
         onRefresh();
         alert(`Strategy Profile "${name}" successfully compiled and hot-deployed.`);
       }
@@ -268,6 +293,16 @@ export default function ConfigPage({
         >
           <Globe className="w-4 h-4" />
           Sentiment & News Filter
+        </button>
+
+        <button
+          onClick={() => setActiveTab("market_structure")}
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg text-xs font-sans font-semibold transition-all duration-150 cursor-pointer ${
+            activeTab === "market_structure" ? "bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          <TrendingUp className="w-4 h-4" />
+          Market Structure Setup
         </button>
 
         <button
@@ -1478,6 +1513,330 @@ export default function ConfigPage({
                   <p className="text-slate-400 font-mono text-center text-xs italic py-10 col-span-2">No stored profiles found...</p>
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MARKET STRUCTURE SETUP TAB ================= */}
+        {activeTab === "market_structure" && (
+          <div className="space-y-6">
+            <div>
+              <h3 className="font-sans font-bold text-sm text-slate-800">Market Structure Setup</h3>
+              <p className="text-xs text-slate-400 font-sans mt-1">
+                Configure breakout confirmation metrics, immediate entry triggers, order flow softener bypass levels, and dynamic long-term EMA filters.
+              </p>
+            </div>
+
+            {/* Section 1: Breakout & Body Confirmations */}
+            <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm">
+              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans border-b border-slate-100 pb-2">
+                Level Breakthrough & Body Confirmations
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Min Breakout Body Ratio</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max="1.0"
+                    value={msConfig.min_breakout_body_ratio}
+                    onChange={(e) => setMsConfig({ ...msConfig, min_breakout_body_ratio: parseFloat(e.target.value) || 0.22 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    The minimum percentage of the breakout candle's total range (high to low) that must be comprised of the solid body (open to close). Values below this threshold suggest weak breakout volume/sweep wicks (Standard: 0.22).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Weak Trend ADX Limit</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="5"
+                    max="50"
+                    value={msConfig.weak_trend_adx_threshold}
+                    onChange={(e) => setMsConfig({ ...msConfig, weak_trend_adx_threshold: parseInt(e.target.value) || 25 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Under moderate or weak momentum (ADX below this value), fast structures require secondary confirmation, such as price being strictly aligned with the long-term EMA 100 or 200 (Standard: 25).
+                  </p>
+                </div>
+
+                <div className="space-y-2 flex flex-col justify-end pb-1">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                    <input
+                      type="checkbox"
+                      checked={msConfig.allow_immediate_breakout}
+                      onChange={(e) => setMsConfig({ ...msConfig, allow_immediate_breakout: e.target.checked })}
+                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
+                    />
+                    <span className="text-xs font-semibold text-slate-700">Allow Immediate Breakout Entry</span>
+                  </label>
+                  <p className="text-[10px] text-slate-400 leading-relaxed pl-6.5">
+                    Permits the scalper engine to immediately chase breakouts on the very first candle break of Higher Highs or Lower Lows, provided strong high-frequency momentum or buy/sell pressure is actively confirmed.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: High Frequency Momentum & Order Flow Settings */}
+            <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm">
+              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans border-b border-slate-100 pb-2">
+                High-Frequency Momentum & Order Flow Settings
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">HF Momentum ADX Threshold</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="10"
+                    max="60"
+                    value={msConfig.hf_momentum_adx_threshold}
+                    onChange={(e) => setMsConfig({ ...msConfig, hf_momentum_adx_threshold: parseInt(e.target.value) || 30 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    The ADX threshold representing extreme velocity. If ADX is higher than this value, the system considers the trend parabolic and bypasses standard pullback confirmations to lock entries immediately (Standard: 30).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Pullback Zone ATR Limit Floor</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0.1"
+                    max="2.5"
+                    value={msConfig.pullback_multiplier_limit}
+                    onChange={(e) => setMsConfig({ ...msConfig, pullback_multiplier_limit: parseFloat(e.target.value) || 0.6 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    The minimum allowed ATR-based pullback distance coefficient. Keeps the pullback entry zones sufficiently wide to filter out normal tick noise (Standard: 0.6).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">EMA Retrace Zone ATR Limit Floor</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0.1"
+                    max="2.0"
+                    value={msConfig.ema_retrace_multiplier_limit}
+                    onChange={(e) => setMsConfig({ ...msConfig, ema_retrace_multiplier_limit: parseFloat(e.target.value) || 0.4 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    The minimum ATR-based retrace coefficient allowed for EMA pushback support/resistance confirmations (Standard: 0.4).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Taker Buy Ratio Limit (Long)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.3"
+                    max="0.8"
+                    value={msConfig.hf_orderflow_taker_buy_ratio_long}
+                    onChange={(e) => setMsConfig({ ...msConfig, hf_orderflow_taker_buy_ratio_long: parseFloat(e.target.value) || 0.58 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Orderflow taker buy volume percentage above which extreme buying pressure triggers immediate breakout entry bypasses (Standard: 0.58).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Order Book Imbalance Bid Skew (Long)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.1"
+                    max="0.9"
+                    value={msConfig.hf_orderflow_imbalance_ratio_long}
+                    onChange={(e) => setMsConfig({ ...msConfig, hf_orderflow_imbalance_ratio_long: parseFloat(e.target.value) || 0.30 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Order book depth bid skew percentage required to justify immediate bullish momentum chase (Standard: 0.30).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Taker Buy Ratio Limit (Short)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.2"
+                    max="0.7"
+                    value={msConfig.hf_orderflow_taker_buy_ratio_short}
+                    onChange={(e) => setMsConfig({ ...msConfig, hf_orderflow_taker_buy_ratio_short: parseFloat(e.target.value) || 0.42 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Orderflow taker buy volume percentage below which extreme selling pressure triggers immediate breakdown entry bypasses (Standard: 0.42).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Order Book Imbalance Ask Skew (Short)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="-0.9"
+                    max="-0.1"
+                    value={msConfig.hf_orderflow_imbalance_ratio_short}
+                    onChange={(e) => setMsConfig({ ...msConfig, hf_orderflow_imbalance_ratio_short: parseFloat(e.target.value) || -0.30 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Order book depth ask skew percentage (negative value) required to justify immediate bearish momentum chase (Standard: -0.30).
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 3: EMA 200 Proximity & Protection Settings */}
+            <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm">
+              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans border-b border-slate-100 pb-2">
+                EMA 200 Proximity Protection & Barrier Bypasses
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">EMA 200 Proximity Divisor</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="1.0"
+                    max="10.0"
+                    value={msConfig.ema200_proximity_divisor}
+                    onChange={(e) => setMsConfig({ ...msConfig, ema200_proximity_divisor: parseFloat(e.target.value) || 3.0 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    In high-frequency scalping conditions (when ADX is moderate but not yet bypassing EMA 200), we compress the proximity protection barrier width by dividing it by this coefficient to allow closer entries (Standard: 3.0).
+                  </p>
+                </div>
+
+                <div className="space-y-2 flex flex-col justify-end pb-1 col-span-1">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                    <input
+                      type="checkbox"
+                      checked={msConfig.bypass_ema200_on_momentum}
+                      onChange={(e) => setMsConfig({ ...msConfig, bypass_ema200_on_momentum: e.target.checked })}
+                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
+                    />
+                    <span className="text-xs font-semibold text-slate-700">Bypass EMA 200 Barrier on High ADX</span>
+                  </label>
+                  <p className="text-[10px] text-slate-400 leading-relaxed pl-6.5">
+                    Permits the strategy to completely bypass long-term EMA 200 proximity barrier limits when ADX momentum is higher than the HF ADX Threshold, letting trade entries pass immediately.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 4: Trend Alignment & Strength */}
+            <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm">
+              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans border-b border-slate-100 pb-2">
+                Trend Alignment & Strength Setup (EMA/ADX)
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Trend Alignment ADX Threshold</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="5"
+                    max="60"
+                    value={msConfig.trend_alignment_adx_threshold !== undefined ? msConfig.trend_alignment_adx_threshold : 30}
+                    onChange={(e) => setMsConfig({ ...msConfig, trend_alignment_adx_threshold: parseInt(e.target.value) || 30 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    The ADX threshold representing strong trend alignment. If ADX is higher than this value, trend-following filters are activated (Standard: 30).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Super Trend ADX Threshold</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="5"
+                    max="60"
+                    value={msConfig.super_trend_adx_threshold !== undefined ? msConfig.super_trend_adx_threshold : 35}
+                    onChange={(e) => setMsConfig({ ...msConfig, super_trend_adx_threshold: parseInt(e.target.value) || 35 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    The ADX threshold representing an extremely strong trend, unlocking more aggressive entries or tighter trailing stops (Standard: 35).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Fast EMA Period</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="2"
+                    max="100"
+                    value={msConfig.fast_ema_period !== undefined ? msConfig.fast_ema_period : 20}
+                    onChange={(e) => setMsConfig({ ...msConfig, fast_ema_period: parseInt(e.target.value) || 20 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Fast-moving exponential moving average period used to determine short-term momentum and alignment (Standard: 20).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Medium EMA Period</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="5"
+                    max="200"
+                    value={msConfig.medium_ema_period !== undefined ? msConfig.medium_ema_period : 50}
+                    onChange={(e) => setMsConfig({ ...msConfig, medium_ema_period: parseInt(e.target.value) || 50 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Medium-moving exponential moving average period used as intermediate trend filter or support zone (Standard: 50).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Slow EMA Period</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="20"
+                    max="500"
+                    value={msConfig.slow_ema_period !== undefined ? msConfig.slow_ema_period : 200}
+                    onChange={(e) => setMsConfig({ ...msConfig, slow_ema_period: parseInt(e.target.value) || 200 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Slow-moving exponential moving average period representing long-term trend direction and baseline support/resistance (Standard: 200).
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Commit Button */}
+            <div className="border-t border-slate-200 pt-5 flex justify-end">
+              <button
+                onClick={() => handleSaveCategory("market_structure", msConfig)}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-sans font-semibold px-5 py-2.5 rounded-lg transition-colors duration-150 cursor-pointer shadow-sm"
+              >
+                COMMIT MARKET STRUCTURE PARAMETERS
+              </button>
             </div>
           </div>
         )}

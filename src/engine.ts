@@ -587,6 +587,25 @@ class TradingEngine {
 
   public getCurrentCheckpoints() {
     const config = dbManager.getConfig();
+    const ms = config.market_structure || {
+      min_breakout_body_ratio: 0.22,
+      allow_immediate_breakout: true,
+      hf_momentum_adx_threshold: 30,
+      hf_orderflow_taker_buy_ratio_long: 0.58,
+      hf_orderflow_imbalance_ratio_long: 0.30,
+      hf_orderflow_taker_buy_ratio_short: 0.42,
+      hf_orderflow_imbalance_ratio_short: -0.30,
+      pullback_multiplier_limit: 0.6,
+      ema_retrace_multiplier_limit: 0.4,
+      bypass_ema200_on_momentum: true,
+      ema200_proximity_divisor: 3.0,
+      weak_trend_adx_threshold: 25,
+      trend_alignment_adx_threshold: 30,
+      super_trend_adx_threshold: 35,
+      fast_ema_period: 20,
+      medium_ema_period: 50,
+      slow_ema_period: 200,
+    };
     const relVolThreshold = config.general.relative_volume_threshold !== undefined ? config.general.relative_volume_threshold : 1.3;
     const adxThreshold = config.general.adx_threshold !== undefined ? config.general.adx_threshold : 22.0;
 
@@ -598,7 +617,7 @@ class TradingEngine {
 
     const ema9 = hasEnoughData ? this.calculateEMA(closes, 9) : [this.currentPrice];
     const ema21 = hasEnoughData ? this.calculateEMA(closes, 21) : [this.currentPrice];
-    const ema50 = hasEnoughData ? this.calculateEMA(closes, 50) : [this.currentPrice];
+    const ema50 = hasEnoughData ? this.calculateEMA(closes, ms.medium_ema_period || 50) : [this.currentPrice];
     const rsi14 = hasEnoughData ? this.calculateRSI(closes, 14) : [50];
 
     const isBullAligned = hasEnoughData ? (ema9[lastIdx] > ema21[lastIdx] && ema21[lastIdx] > ema50[lastIdx]) : false;
@@ -677,8 +696,8 @@ class TradingEngine {
     const atr14_cp = hasEnoughData ? this.calculateATR(this.candles1m, 14) : [50];
     const currentAtr_cp = atr14_cp[lastIdx] || 50;
 
-    const ema20 = hasEnoughData ? this.calculateEMA(closes, 20) : [currentPrice];
-    const ema200 = hasEnoughData ? this.calculateEMA(closes, 200) : [currentPrice];
+    const ema20 = hasEnoughData ? this.calculateEMA(closes, ms.fast_ema_period || 20) : [currentPrice];
+    const ema200 = hasEnoughData ? this.calculateEMA(closes, ms.slow_ema_period || 200) : [currentPrice];
     const ema100List = hasEnoughData ? this.calculateEMA(closes, Math.min(closes.length, 100)) : [currentPrice];
     const ema20Val = ema20[lastIdx] || currentPrice;
     const ema50Val = ema50[lastIdx] || currentPrice;
@@ -687,11 +706,14 @@ class TradingEngine {
 
     const probabilityShort = Number((1 - probabilityLong).toFixed(4));
 
-    const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_UPTREND;
-    const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
-    const isSuperStrongUptrend = (this.currentRegime === MarketRegime.STRONG_UPTREND || adxValue >= 35) && 
+    const trendAlignAdx = ms.trend_alignment_adx_threshold || 30;
+    const superTrendAdx = ms.super_trend_adx_threshold || 35;
+
+    const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_UPTREND;
+    const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
+    const isSuperStrongUptrend = (this.currentRegime === MarketRegime.STRONG_UPTREND || adxValue >= superTrendAdx) && 
                                  ema20Val > ema50Val && ema50Val > ema100Val;
-    const isSuperStrongDowntrend = (this.currentRegime === MarketRegime.STRONG_DOWNTREND || adxValue >= 35) && 
+    const isSuperStrongDowntrend = (this.currentRegime === MarketRegime.STRONG_DOWNTREND || adxValue >= superTrendAdx) && 
                                    ema20Val < ema50Val && ema50Val < ema100Val;
 
     // We block any entries on lower low breakouts (SHORT) or higher high breakouts (LONG)
@@ -745,12 +767,12 @@ class TradingEngine {
       const recentPullbackToEma50Short = recentCandles.some(c => c.high >= ema50Val * 0.9985 && c.low <= ema50Val * 1.0015);
       const hasValidPushbackShort = (recentPullbackToEma20Short || recentPullbackToEma50Short) && currentPrice <= ema50Val * 1.002;
 
-      const isUptrendAligned = ema20Val > ema50Val && (adxValue >= 30 || ema50Val > ema100Val);
-      const isDowntrendAligned = ema20Val < ema50Val && (adxValue >= 30 || ema50Val < ema100Val);
+      const isUptrendAligned = ema20Val > ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val > ema100Val);
+      const isDowntrendAligned = ema20Val < ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val < ema100Val);
 
       // For high-frequency scalping, we allow breakouts (momentum chasing) if ADX is strong or there is high order flow pressure
-      const isScalperBreakoutLongAllowed = adxValue >= 30 || (this.orderFlowStats.takerBuyRatio >= 0.58 || this.orderBookStats.imbalanceRatio >= 0.30);
-      const isScalperBreakdownShortAllowed = adxValue >= 30 || (this.orderFlowStats.takerBuyRatio <= 0.42 || this.orderBookStats.imbalanceRatio <= -0.30);
+      const isScalperBreakoutLongAllowed = adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long);
+      const isScalperBreakdownShortAllowed = adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short);
 
       const isNotLongBreakout = isScalperBreakoutLongAllowed ? true : (struct.current_HH ? currentPrice <= struct.current_HH.price : true);
       const isNotShortBreakdown = isScalperBreakdownShortAllowed ? true : (struct.current_LL ? currentPrice >= struct.current_LL.price : true);
@@ -2369,6 +2391,21 @@ class TradingEngine {
     ema100Val: number,
     struct: any
   ): { confirmed: boolean; message: string } {
+    const config = dbManager.getConfig();
+    const ms = config.market_structure || {
+      min_breakout_body_ratio: 0.22,
+      allow_immediate_breakout: true,
+      hf_momentum_adx_threshold: 30,
+      hf_orderflow_taker_buy_ratio_long: 0.58,
+      hf_orderflow_imbalance_ratio_long: 0.30,
+      hf_orderflow_taker_buy_ratio_short: 0.42,
+      hf_orderflow_imbalance_ratio_short: -0.30,
+      pullback_multiplier_limit: 0.6,
+      ema_retrace_multiplier_limit: 0.4,
+      bypass_ema200_on_momentum: true,
+      ema200_proximity_divisor: 3.0,
+      weak_trend_adx_threshold: 25,
+    };
     const lastIdx = this.candles1m.length - 1;
     if (lastIdx < 0) {
       return { confirmed: false, message: "No candle data available." };
@@ -2420,7 +2457,7 @@ class TradingEngine {
         const ema5_5m_val = ema5_5m[last5mIdx];
         const ema15_5m_val = ema15_5m[last5mIdx];
         const isMtfLong = ema5_5m_val > ema15_5m_val;
-        const hasHighHFPressure = adxValue >= 32 || (direction === "LONG" ? (this.orderFlowStats.takerBuyRatio >= 0.58 || this.orderBookStats.imbalanceRatio >= 0.30) : (this.orderFlowStats.takerBuyRatio <= 0.42 || this.orderBookStats.imbalanceRatio <= -0.30));
+        const hasHighHFPressure = adxValue >= (ms.hf_momentum_adx_threshold + 2) || (direction === "LONG" ? (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long) : (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short));
         if (direction === "LONG" && !isMtfLong && !hasHighHFPressure) {
           return {
             confirmed: false,
@@ -2438,13 +2475,13 @@ class TradingEngine {
     }
 
     if (direction === "LONG") {
-      const isEmaAlignedLong = adxValue >= 25
+      const isEmaAlignedLong = adxValue >= ms.weak_trend_adx_threshold
         ? (ema20Val > ema50Val)
         : (ema20Val > ema50Val && currentPrice > ema100Val);
       if (!isEmaAlignedLong) {
         return {
           confirmed: false,
-          message: adxValue >= 25
+          message: adxValue >= ms.weak_trend_adx_threshold
             ? `Blocked: Fast Bullish EMA structure not aligned (Requires EMA 20 > EMA 50, ADX is strong: ${adxValue.toFixed(1)}).`
             : `Blocked: Full Bullish EMA structure not aligned (Requires EMA 20 > EMA 50 & Price > EMA 100 on moderate ADX: ${adxValue.toFixed(1)}).`
         };
@@ -2475,7 +2512,7 @@ class TradingEngine {
       const boRange = boCandle.high - boCandle.low;
       const boBody = Math.abs(boCandle.close - boCandle.open);
       const boBodyRatio = boRange > 0 ? boBody / boRange : 0;
-      if (boBodyRatio < 0.22) {
+      if (boBodyRatio < ms.min_breakout_body_ratio) {
         return {
           confirmed: false,
           message: `Blocked: Weak breakout candle body at $${breakoutLevel.toFixed(2)} (Body is only ${(boBodyRatio * 100).toFixed(0)}% of total range). Likely false breakout/wick sweep.`
@@ -2483,7 +2520,7 @@ class TradingEngine {
       }
 
       if (breakoutIdx === lastIdx) {
-        const hasHighHFPressure = adxValue >= 30 || (this.orderFlowStats.takerBuyRatio >= 0.58 || this.orderBookStats.imbalanceRatio >= 0.30);
+        const hasHighHFPressure = ms.allow_immediate_breakout && (adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long));
         if (hasHighHFPressure) {
           return {
             confirmed: true,
@@ -2544,8 +2581,8 @@ class TradingEngine {
       }
 
       // Setup 1: Pullback and Retest
-      const effectivePullbackMult = Math.max(pullbackMultiplier, 0.6);
-      const effectiveEmaMult = Math.max(emaRetraceMultiplier, 0.4);
+      const effectivePullbackMult = Math.max(pullbackMultiplier, ms.pullback_multiplier_limit);
+      const effectiveEmaMult = Math.max(emaRetraceMultiplier, ms.ema_retrace_multiplier_limit);
       const pullbackLimit = breakoutLevel + effectivePullbackMult * currentAtr;
       const hasPulledBackToZone = postBreakoutCandles.some(c => c.low <= pullbackLimit);
       
@@ -2597,13 +2634,13 @@ class TradingEngine {
 
     } else {
       // SHORT
-      const isEmaAlignedShort = adxValue >= 25
+      const isEmaAlignedShort = adxValue >= ms.weak_trend_adx_threshold
         ? (ema20Val < ema50Val)
         : (ema20Val < ema50Val && currentPrice < ema100Val);
       if (!isEmaAlignedShort) {
         return {
           confirmed: false,
-          message: adxValue >= 25
+          message: adxValue >= ms.weak_trend_adx_threshold
             ? `Blocked: Fast Bearish EMA structure not aligned (Requires EMA 20 < EMA 50, ADX is strong: ${adxValue.toFixed(1)}).`
             : `Blocked: Full Bearish EMA structure not aligned (Requires EMA 20 < EMA 50 & Price < EMA 100 on moderate ADX: ${adxValue.toFixed(1)}).`
         };
@@ -2634,7 +2671,7 @@ class TradingEngine {
       const boRange = boCandle.high - boCandle.low;
       const boBody = Math.abs(boCandle.close - boCandle.open);
       const boBodyRatio = boRange > 0 ? boBody / boRange : 0;
-      if (boBodyRatio < 0.22) {
+      if (boBodyRatio < ms.min_breakout_body_ratio) {
         return {
           confirmed: false,
           message: `Blocked: Weak breakout candle body at $${breakoutLevel.toFixed(2)} (Body is only ${(boBodyRatio * 100).toFixed(0)}% of total range). Likely false breakdown/wick sweep.`
@@ -2642,7 +2679,7 @@ class TradingEngine {
       }
 
       if (breakoutIdx === lastIdx) {
-        const hasHighHFPressure = adxValue >= 30 || (this.orderFlowStats.takerBuyRatio <= 0.42 || this.orderBookStats.imbalanceRatio <= -0.30);
+        const hasHighHFPressure = ms.allow_immediate_breakout && (adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short));
         if (hasHighHFPressure) {
           return {
             confirmed: true,
@@ -2703,8 +2740,8 @@ class TradingEngine {
       }
 
       // Setup 1: Pullback and Retest
-      const effectivePullbackMult = Math.max(pullbackMultiplier, 0.6);
-      const effectiveEmaMult = Math.max(emaRetraceMultiplier, 0.4);
+      const effectivePullbackMult = Math.max(pullbackMultiplier, ms.pullback_multiplier_limit);
+      const effectiveEmaMult = Math.max(emaRetraceMultiplier, ms.ema_retrace_multiplier_limit);
       const pullbackLimit = breakoutLevel - effectivePullbackMult * currentAtr;
       const hasPulledBackToZone = postBreakoutCandles.some(c => c.high >= pullbackLimit);
       
@@ -2829,14 +2866,28 @@ class TradingEngine {
 
     // 2. Adaptive Proximity & Chop Protection Rules
     const config = dbManager.getConfig();
+    const ms = config.market_structure || {
+      min_breakout_body_ratio: 0.22,
+      allow_immediate_breakout: true,
+      hf_momentum_adx_threshold: 30,
+      hf_orderflow_taker_buy_ratio_long: 0.58,
+      hf_orderflow_imbalance_ratio_long: 0.30,
+      hf_orderflow_taker_buy_ratio_short: 0.42,
+      hf_orderflow_imbalance_ratio_short: -0.30,
+      pullback_multiplier_limit: 0.6,
+      ema_retrace_multiplier_limit: 0.4,
+      bypass_ema200_on_momentum: true,
+      ema200_proximity_divisor: 3.0,
+      weak_trend_adx_threshold: 25,
+    };
     const hasExtremeRealtimePressure = (config.general.enable_orderflow_softening !== false) &&
-                                       ((direction === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.58 || this.orderBookStats.imbalanceRatio >= 0.30)) ||
-                                       (direction === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.42 || this.orderBookStats.imbalanceRatio <= -0.30)));
+                                       ((direction === "LONG" && (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long)) ||
+                                       (direction === "SHORT" && (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short)));
 
     const adx14 = this.calculateADX(this.candles1m, 14);
     const adxValue = lastIdx >= 0 && adx14.length > lastIdx ? adx14[lastIdx] : 25;
 
-    if (adxValue >= 30 || hasExtremeRealtimePressure) {
+    if ((ms.bypass_ema200_on_momentum && adxValue >= ms.hf_momentum_adx_threshold) || hasExtremeRealtimePressure) {
       // Symmetrically bypass EMA 200 proximity restrictions under strong scalping momentum
       return result;
     }
@@ -2859,7 +2910,7 @@ class TradingEngine {
     }
 
     // Scale down the proximity barrier for high-frequency scalping under moderate momentum
-    proximityMultiplier = proximityMultiplier / 3.0;
+    proximityMultiplier = proximityMultiplier / ms.ema200_proximity_divisor;
 
     const proximityThreshold = proximityMultiplier * currentAtr;
 
@@ -3358,6 +3409,25 @@ class TradingEngine {
   // Layer 3: CatBoost Prediction and Entry Scanners
   private runScanners() {
     const config = dbManager.getConfig();
+    const ms = config.market_structure || {
+      min_breakout_body_ratio: 0.22,
+      allow_immediate_breakout: true,
+      hf_momentum_adx_threshold: 30,
+      hf_orderflow_taker_buy_ratio_long: 0.58,
+      hf_orderflow_imbalance_ratio_long: 0.30,
+      hf_orderflow_taker_buy_ratio_short: 0.42,
+      hf_orderflow_imbalance_ratio_short: -0.30,
+      pullback_multiplier_limit: 0.6,
+      ema_retrace_multiplier_limit: 0.4,
+      bypass_ema200_on_momentum: true,
+      ema200_proximity_divisor: 3.0,
+      weak_trend_adx_threshold: 25,
+      trend_alignment_adx_threshold: 30,
+      super_trend_adx_threshold: 35,
+      fast_ema_period: 20,
+      medium_ema_period: 50,
+      slow_ema_period: 200,
+    };
     const relVolThreshold = config.general.relative_volume_threshold !== undefined ? config.general.relative_volume_threshold : 1.3;
     const adxThreshold = config.general.adx_threshold !== undefined ? config.general.adx_threshold : 22.0;
 
@@ -3376,7 +3446,7 @@ class TradingEngine {
 
     const ema9 = this.calculateEMA(closes, 9);
     const ema21 = this.calculateEMA(closes, 21);
-    const ema50 = this.calculateEMA(closes, 50);
+    const ema50 = this.calculateEMA(closes, ms.medium_ema_period || 50);
     const rsi14 = this.calculateRSI(closes, 14);
 
     const isBullAligned = ema9[lastIdx] > ema21[lastIdx] && ema21[lastIdx] > ema50[lastIdx];
@@ -3456,19 +3526,22 @@ class TradingEngine {
     const atr14 = this.calculateATR(this.candles1m, 14);
     const currentAtr = atr14[lastIdx] || 150;
 
-    const ema20 = this.calculateEMA(closes, 20);
-    const ema200 = this.calculateEMA(closes, 200);
+    const ema20 = this.calculateEMA(closes, ms.fast_ema_period || 20);
+    const ema200 = this.calculateEMA(closes, ms.slow_ema_period || 200);
     const ema100List = this.calculateEMA(closes, Math.min(closes.length, 100));
     const ema20Val = ema20[lastIdx] || currentClose;
     const ema50Val = ema50[lastIdx] || currentClose;
     const ema100Val = ema100List[lastIdx] !== undefined ? ema100List[lastIdx] : currentClose;
     const ema200Val = ema200[lastIdx] || currentClose;
 
-    const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_UPTREND;
-    const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= 30 && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
-    const isSuperStrongUptrend = (this.currentRegime === MarketRegime.STRONG_UPTREND || adxValue >= 35) && 
+    const trendAlignAdx = ms.trend_alignment_adx_threshold || 30;
+    const superTrendAdx = ms.super_trend_adx_threshold || 35;
+
+    const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_UPTREND;
+    const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
+    const isSuperStrongUptrend = (this.currentRegime === MarketRegime.STRONG_UPTREND || adxValue >= superTrendAdx) && 
                                  ema20Val > ema50Val && ema50Val > ema100Val;
-    const isSuperStrongDowntrend = (this.currentRegime === MarketRegime.STRONG_DOWNTREND || adxValue >= 35) && 
+    const isSuperStrongDowntrend = (this.currentRegime === MarketRegime.STRONG_DOWNTREND || adxValue >= superTrendAdx) && 
                                    ema20Val < ema50Val && ema50Val < ema100Val;
 
     let signalDirection: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL";
@@ -3524,12 +3597,12 @@ class TradingEngine {
       const recentPullbackToEma50Short = recentCandles.some(c => c.high >= ema50Val * 0.9985 && c.low <= ema50Val * 1.0015);
       const hasValidPushbackShort = (recentPullbackToEma20Short || recentPullbackToEma50Short) && currentClose <= ema50Val * 1.002;
 
-      const isUptrendAligned = ema20Val > ema50Val && (adxValue >= 30 || ema50Val > ema100Val);
-      const isDowntrendAligned = ema20Val < ema50Val && (adxValue >= 30 || ema50Val < ema100Val);
+      const isUptrendAligned = ema20Val > ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val > ema100Val);
+      const isDowntrendAligned = ema20Val < ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val < ema100Val);
 
       // For high-frequency scalping, we allow breakouts (momentum chasing) if ADX is strong or there is high order flow pressure
-      const isScalperBreakoutLongAllowed = adxValue >= 30 || (this.orderFlowStats.takerBuyRatio >= 0.58 || this.orderBookStats.imbalanceRatio >= 0.30);
-      const isScalperBreakdownShortAllowed = adxValue >= 30 || (this.orderFlowStats.takerBuyRatio <= 0.42 || this.orderBookStats.imbalanceRatio <= -0.30);
+      const isScalperBreakoutLongAllowed = adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long);
+      const isScalperBreakdownShortAllowed = adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short);
 
       const isNotLongBreakout = isScalperBreakoutLongAllowed ? true : (struct.current_HH ? currentClose <= struct.current_HH.price : true);
       const isNotShortBreakdown = isScalperBreakdownShortAllowed ? true : (struct.current_LL ? currentClose >= struct.current_LL.price : true);

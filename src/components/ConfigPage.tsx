@@ -49,6 +49,14 @@ interface ConfigPageProps {
   onRefresh: () => void;
 }
 
+const parseInputNumber = (val: string, isFloat = false) => {
+  if (val === "" || val === "-" || val === "." || val === "-." || val.endsWith(".")) {
+    return val as any;
+  }
+  const parsed = isFloat ? parseFloat(val) : parseInt(val);
+  return isNaN(parsed) ? val as any : parsed;
+};
+
 export default function ConfigPage({
   config,
   profiles,
@@ -98,6 +106,7 @@ export default function ConfigPage({
   };
 
   // Sub-tab State Mirroring
+  const [lastSyncedConfig, setLastSyncedConfig] = useState(config);
   const [generalConfig, setGeneralConfig] = useState(config.general);
   const [mlConfig, setMlConfig] = useState(config.ml_settings);
   const [sentimentConfig, setSentimentConfig] = useState(config.sentiment_settings);
@@ -123,21 +132,138 @@ export default function ConfigPage({
   });
 
   useEffect(() => {
-    setGeneralConfig(config.general);
-    setMlConfig(config.ml_settings);
-    setSentimentConfig(config.sentiment_settings);
-    setRiskConfig(config.risk_management);
-    if (config.market_structure) {
-      setMsConfig(config.market_structure);
+    if (JSON.stringify(generalConfig) === JSON.stringify(lastSyncedConfig.general)) {
+      setGeneralConfig(config.general);
     }
-  }, [config]); // Run on config update
+    if (JSON.stringify(mlConfig) === JSON.stringify(lastSyncedConfig.ml_settings)) {
+      setMlConfig(config.ml_settings);
+    }
+    if (JSON.stringify(sentimentConfig) === JSON.stringify(lastSyncedConfig.sentiment_settings)) {
+      setSentimentConfig(config.sentiment_settings);
+    }
+    if (JSON.stringify(riskConfig) === JSON.stringify(lastSyncedConfig.risk_management)) {
+      setRiskConfig(config.risk_management);
+    }
+    if (config.market_structure) {
+      const lastMs = lastSyncedConfig.market_structure || {};
+      if (JSON.stringify(msConfig) === JSON.stringify(lastMs)) {
+        setMsConfig(config.market_structure);
+      }
+    }
+    setLastSyncedConfig(config);
+  }, [config]);
+
+  const sanitizeCategoryData = (category: string, data: any) => {
+    const cleaned = { ...data };
+
+    const defaultsMap: Record<string, Record<string, any>> = {
+      general: {
+        regime_candle_interval_minutes: 3,
+        max_trades_per_day: 8,
+        cooldown_minutes: 30,
+      },
+      risk_management: {
+        default_quantity_btc: 0.001,
+        risk_per_trade_pct: 0.1,
+        max_risk_per_trade_pct: 1.0,
+        leverage: 20,
+        stop_loss_atr_multiplier: 1.0,
+        take_profit_ratio: 3.5,
+        min_stop_loss_distance_usd: 0,
+        min_stop_loss_distance_pct: 0,
+        static_stop_loss_value_usd: 10,
+        max_atr_for_stop_loss_value: 1,
+        trailing_stop_loss_distance_atr: 1.8,
+        trailing_stop_loss_activation_ratio: 1.2,
+        max_consecutive_losses: 3,
+        consecutive_losses_cooldown_minutes: 30,
+        daily_loss_limit_pct: 2.0,
+        weekly_loss_limit_pct: 5.0,
+        intra_trade_drawdown_limit_pct: 1.5,
+      },
+      ml_settings: {
+        entry_threshold_long: 0.8,
+        entry_threshold_short: 0.2,
+        model_version: "v2.4.1",
+        training_window_months: 6,
+      },
+      sentiment_settings: {
+        entry_threshold_long: 0.25,
+        entry_threshold_short: -0.25,
+        protection_window_minutes: 15,
+      },
+      market_structure: {
+        min_breakout_body_ratio: 0.22,
+        allow_immediate_breakout: true,
+        hf_momentum_adx_threshold: 30,
+        hf_orderflow_taker_buy_ratio_long: 0.58,
+        hf_orderflow_imbalance_ratio_long: 0.30,
+        hf_orderflow_taker_buy_ratio_short: 0.42,
+        hf_orderflow_imbalance_ratio_short: -0.30,
+        pullback_multiplier_limit: 0.6,
+        ema_retrace_multiplier_limit: 0.4,
+        bypass_ema200_on_momentum: true,
+        ema200_proximity_divisor: 3.0,
+        weak_trend_adx_threshold: 25,
+        trend_alignment_adx_threshold: 30,
+        super_trend_adx_threshold: 35,
+        fast_ema_period: 20,
+        medium_ema_period: 50,
+        slow_ema_period: 200,
+      }
+    };
+
+    const categoryDefaults = defaultsMap[category];
+    if (categoryDefaults) {
+      for (const key of Object.keys(categoryDefaults)) {
+        if (typeof categoryDefaults[key] === "number") {
+          const val = cleaned[key];
+          if (val === "" || val === undefined || val === null || isNaN(Number(val))) {
+            cleaned[key] = categoryDefaults[key];
+          } else {
+            cleaned[key] = Number(val);
+          }
+        }
+      }
+    }
+
+    if (category === "sentiment_settings") {
+      if (cleaned.weights) {
+        const cleanedWeights = { ...cleaned.weights };
+        for (const k of Object.keys(cleanedWeights)) {
+          const val = cleanedWeights[k];
+          if (val === "" || val === undefined || val === null || isNaN(Number(val))) {
+            cleanedWeights[k] = 20;
+          } else {
+            cleanedWeights[k] = Number(val);
+          }
+        }
+        cleaned.weights = cleanedWeights;
+      }
+      if (cleaned.refresh_rates_min) {
+        const cleanedIntervals = { ...cleaned.refresh_rates_min };
+        for (const k of Object.keys(cleanedIntervals)) {
+          const val = cleanedIntervals[k];
+          if (val === "" || val === undefined || val === null || isNaN(Number(val))) {
+            cleanedIntervals[k] = 5;
+          } else {
+            cleanedIntervals[k] = Number(val);
+          }
+        }
+        cleaned.refresh_rates_min = cleanedIntervals;
+      }
+    }
+
+    return cleaned;
+  };
 
   const handleSaveCategory = async (category: string, data: any) => {
     try {
+      const sanitizedData = sanitizeCategoryData(category, data);
       const res = await apiFetch(`/api/config/${category}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify(sanitizedData),
       });
       if (res.ok) {
         onRefresh();
@@ -150,15 +276,17 @@ export default function ConfigPage({
 
   const handleSaveRiskAndGeneral = async () => {
     try {
+      const sanitizedGeneral = sanitizeCategoryData("general", generalConfig);
+      const sanitizedRisk = sanitizeCategoryData("risk_management", riskConfig);
       const resGeneral = await apiFetch(`/api/config/general`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(generalConfig),
+        body: JSON.stringify(sanitizedGeneral),
       });
       const resRisk = await apiFetch(`/api/config/risk_management`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(riskConfig),
+        body: JSON.stringify(sanitizedRisk),
       });
       if (resGeneral.ok && resRisk.ok) {
         onRefresh();
@@ -455,8 +583,8 @@ export default function ConfigPage({
                     type="number"
                     step="0.05"
                     min="0.1"
-                    value={generalConfig.relative_volume_threshold !== undefined ? generalConfig.relative_volume_threshold : 1.3}
-                    onChange={(e) => setGeneralConfig({ ...generalConfig, relative_volume_threshold: parseFloat(e.target.value) || 1.3 })}
+                    value={generalConfig.relative_volume_threshold}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, relative_volume_threshold: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                     id="config-relative-volume-threshold"
                   />
@@ -472,8 +600,8 @@ export default function ConfigPage({
                     step="0.5"
                     min="0.0"
                     max="100.0"
-                    value={generalConfig.adx_threshold !== undefined ? generalConfig.adx_threshold : 22.0}
-                    onChange={(e) => setGeneralConfig({ ...generalConfig, adx_threshold: parseFloat(e.target.value) || 22.0 })}
+                    value={generalConfig.adx_threshold}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, adx_threshold: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                     id="config-adx-threshold"
                   />
@@ -488,8 +616,8 @@ export default function ConfigPage({
                     type="number"
                     step="0.5"
                     min="0.1"
-                    value={generalConfig.order_book_min_depth !== undefined ? generalConfig.order_book_min_depth : 4.0}
-                    onChange={(e) => setGeneralConfig({ ...generalConfig, order_book_min_depth: parseFloat(e.target.value) || 4.0 })}
+                    value={generalConfig.order_book_min_depth}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, order_book_min_depth: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                     id="config-order-book-min-depth"
                   />
@@ -505,8 +633,8 @@ export default function ConfigPage({
                     step="0.05"
                     min="0.0"
                     max="1.0"
-                    value={generalConfig.order_book_max_imbalance !== undefined ? generalConfig.order_book_max_imbalance : 0.35}
-                    onChange={(e) => setGeneralConfig({ ...generalConfig, order_book_max_imbalance: parseFloat(e.target.value) || 0.35 })}
+                    value={generalConfig.order_book_max_imbalance}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, order_book_max_imbalance: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                     id="config-order-book-max-imbalance"
                   />
@@ -701,8 +829,8 @@ export default function ConfigPage({
                     type="number"
                     step="0.0001"
                     min="0.0001"
-                    value={riskConfig.default_quantity_btc !== undefined ? riskConfig.default_quantity_btc : 0.001}
-                    onChange={(e) => setRiskConfig({ ...riskConfig, default_quantity_btc: parseFloat(e.target.value) || 0.001 })}
+                    value={riskConfig.default_quantity_btc}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, default_quantity_btc: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                     id="config-default-quantity-btc"
                   />
@@ -717,7 +845,7 @@ export default function ConfigPage({
                     type="number"
                     step="0.05"
                     value={riskConfig.risk_per_trade_pct}
-                    onChange={(e) => setRiskConfig({ ...riskConfig, risk_per_trade_pct: parseFloat(e.target.value) || 0.1 })}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, risk_per_trade_pct: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -731,7 +859,7 @@ export default function ConfigPage({
                     type="number"
                     step="0.1"
                     value={riskConfig.max_risk_per_trade_pct}
-                    onChange={(e) => setRiskConfig({ ...riskConfig, max_risk_per_trade_pct: parseFloat(e.target.value) || 1.0 })}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, max_risk_per_trade_pct: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -744,7 +872,7 @@ export default function ConfigPage({
                   <input
                     type="number"
                     value={generalConfig.max_trades_per_day}
-                    onChange={(e) => setGeneralConfig({ ...generalConfig, max_trades_per_day: parseInt(e.target.value) || 8 })}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, max_trades_per_day: parseInputNumber(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -769,7 +897,7 @@ export default function ConfigPage({
                       max="100"
                       step="1"
                       value={riskConfig.leverage || 20}
-                      onChange={(e) => setRiskConfig({ ...riskConfig, leverage: parseInt(e.target.value) || 20 })}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, leverage: parseInputNumber(e.target.value) })}
                       className="flex-1 h-1.5 bg-indigo-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                     />
                     <input
@@ -777,7 +905,14 @@ export default function ConfigPage({
                       min="1"
                       max="100"
                       value={riskConfig.leverage || 20}
-                      onChange={(e) => setRiskConfig({ ...riskConfig, leverage: Math.max(1, Math.min(100, parseInt(e.target.value) || 1)) })}
+                      onChange={(e) => {
+                        const parsed = parseInputNumber(e.target.value);
+                        if (typeof parsed === "number") {
+                          setRiskConfig({ ...riskConfig, leverage: Math.max(1, Math.min(100, parsed)) });
+                        } else {
+                          setRiskConfig({ ...riskConfig, leverage: parsed });
+                        }
+                      }}
                       className="w-16 bg-white border border-slate-200 rounded-lg p-1.5 text-center text-xs font-mono font-bold text-slate-800 focus:ring-1 focus:ring-indigo-400 outline-none"
                     />
                   </div>
@@ -800,7 +935,7 @@ export default function ConfigPage({
                     type="number"
                     step="0.1"
                     value={riskConfig.stop_loss_atr_multiplier}
-                    onChange={(e) => setRiskConfig({ ...riskConfig, stop_loss_atr_multiplier: parseFloat(e.target.value) || 1.0 })}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, stop_loss_atr_multiplier: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -814,7 +949,7 @@ export default function ConfigPage({
                     type="number"
                     step="0.1"
                     value={riskConfig.take_profit_ratio}
-                    onChange={(e) => setRiskConfig({ ...riskConfig, take_profit_ratio: parseFloat(e.target.value) || 3.5 })}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, take_profit_ratio: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -827,8 +962,15 @@ export default function ConfigPage({
                   <input
                     type="number"
                     step="5"
-                    value={riskConfig.min_stop_loss_distance_usd !== undefined ? riskConfig.min_stop_loss_distance_usd : 80}
-                    onChange={(e) => setRiskConfig({ ...riskConfig, min_stop_loss_distance_usd: Math.max(0, parseFloat(e.target.value) || 0) })}
+                    value={riskConfig.min_stop_loss_distance_usd}
+                    onChange={(e) => {
+                      const parsed = parseInputNumber(e.target.value, true);
+                      if (typeof parsed === "number") {
+                        setRiskConfig({ ...riskConfig, min_stop_loss_distance_usd: Math.max(0, parsed) });
+                      } else {
+                        setRiskConfig({ ...riskConfig, min_stop_loss_distance_usd: parsed });
+                      }
+                    }}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -841,8 +983,15 @@ export default function ConfigPage({
                   <input
                     type="number"
                     step="0.01"
-                    value={riskConfig.min_stop_loss_distance_pct !== undefined ? riskConfig.min_stop_loss_distance_pct : 0.12}
-                    onChange={(e) => setRiskConfig({ ...riskConfig, min_stop_loss_distance_pct: Math.max(0, parseFloat(e.target.value) || 0) })}
+                    value={riskConfig.min_stop_loss_distance_pct}
+                    onChange={(e) => {
+                      const parsed = parseInputNumber(e.target.value, true);
+                      if (typeof parsed === "number") {
+                        setRiskConfig({ ...riskConfig, min_stop_loss_distance_pct: Math.max(0, parsed) });
+                      } else {
+                        setRiskConfig({ ...riskConfig, min_stop_loss_distance_pct: parsed });
+                      }
+                    }}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -871,8 +1020,15 @@ export default function ConfigPage({
                     <input
                       type="number"
                       step="10"
-                      value={riskConfig.static_stop_loss_value_usd !== undefined ? riskConfig.static_stop_loss_value_usd : 150}
-                      onChange={(e) => setRiskConfig({ ...riskConfig, static_stop_loss_value_usd: Math.max(10, parseFloat(e.target.value) || 10) })}
+                      value={riskConfig.static_stop_loss_value_usd}
+                      onChange={(e) => {
+                        const parsed = parseInputNumber(e.target.value, true);
+                        if (typeof parsed === "number") {
+                          setRiskConfig({ ...riskConfig, static_stop_loss_value_usd: Math.max(10, parsed) });
+                        } else {
+                          setRiskConfig({ ...riskConfig, static_stop_loss_value_usd: parsed });
+                        }
+                      }}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                     />
                     <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -902,8 +1058,15 @@ export default function ConfigPage({
                     <input
                       type="number"
                       step="5"
-                      value={riskConfig.max_atr_for_stop_loss_value !== undefined ? riskConfig.max_atr_for_stop_loss_value : 100}
-                      onChange={(e) => setRiskConfig({ ...riskConfig, max_atr_for_stop_loss_value: Math.max(1, parseFloat(e.target.value) || 1) })}
+                      value={riskConfig.max_atr_for_stop_loss_value}
+                      onChange={(e) => {
+                        const parsed = parseInputNumber(e.target.value, true);
+                        if (typeof parsed === "number") {
+                          setRiskConfig({ ...riskConfig, max_atr_for_stop_loss_value: Math.max(1, parsed) });
+                        } else {
+                          setRiskConfig({ ...riskConfig, max_atr_for_stop_loss_value: parsed });
+                        }
+                      }}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                     />
                     <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -942,8 +1105,8 @@ export default function ConfigPage({
                       <input
                         type="number"
                         step="0.1"
-                        value={riskConfig.trailing_stop_loss_distance_atr !== undefined ? riskConfig.trailing_stop_loss_distance_atr : 1.8}
-                        onChange={(e) => setRiskConfig({ ...riskConfig, trailing_stop_loss_distance_atr: parseFloat(e.target.value) || 1.8 })}
+                        value={riskConfig.trailing_stop_loss_distance_atr}
+                        onChange={(e) => setRiskConfig({ ...riskConfig, trailing_stop_loss_distance_atr: parseInputNumber(e.target.value, true) })}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                       />
                       <p className="text-[9px] text-slate-400 leading-relaxed text-slate-500">
@@ -956,8 +1119,8 @@ export default function ConfigPage({
                       <input
                         type="number"
                         step="0.1"
-                        value={riskConfig.trailing_stop_loss_activation_ratio !== undefined ? riskConfig.trailing_stop_loss_activation_ratio : 1.2}
-                        onChange={(e) => setRiskConfig({ ...riskConfig, trailing_stop_loss_activation_ratio: parseFloat(e.target.value) || 1.2 })}
+                        value={riskConfig.trailing_stop_loss_activation_ratio}
+                        onChange={(e) => setRiskConfig({ ...riskConfig, trailing_stop_loss_activation_ratio: parseInputNumber(e.target.value, true) })}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                       />
                       <p className="text-[9px] text-slate-400 leading-relaxed text-slate-500">
@@ -1047,8 +1210,8 @@ export default function ConfigPage({
                   <label className="text-xs font-mono text-slate-400 uppercase">General System Cooldown (Minutes)</label>
                   <input
                     type="number"
-                    value={generalConfig.cooldown_minutes !== undefined ? generalConfig.cooldown_minutes : 30}
-                    onChange={(e) => setGeneralConfig({ ...generalConfig, cooldown_minutes: parseInt(e.target.value) || 30 })}
+                    value={generalConfig.cooldown_minutes}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, cooldown_minutes: parseInputNumber(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1061,7 +1224,7 @@ export default function ConfigPage({
                   <input
                     type="number"
                     value={riskConfig.max_consecutive_losses}
-                    onChange={(e) => setRiskConfig({ ...riskConfig, max_consecutive_losses: parseInt(e.target.value) || 3 })}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, max_consecutive_losses: parseInputNumber(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1073,8 +1236,8 @@ export default function ConfigPage({
                   <label className="text-xs font-mono text-slate-400 uppercase">Loss Cooldown (Minutes)</label>
                   <input
                     type="number"
-                    value={riskConfig.consecutive_losses_cooldown_minutes !== undefined ? riskConfig.consecutive_losses_cooldown_minutes : 30}
-                    onChange={(e) => setRiskConfig({ ...riskConfig, consecutive_losses_cooldown_minutes: parseInt(e.target.value) || 30 })}
+                    value={riskConfig.consecutive_losses_cooldown_minutes}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, consecutive_losses_cooldown_minutes: parseInputNumber(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1163,7 +1326,7 @@ export default function ConfigPage({
                   min="0.5"
                   max="0.99"
                   value={mlConfig.entry_threshold_long}
-                  onChange={(e) => setMlConfig({ ...mlConfig, entry_threshold_long: parseFloat(e.target.value) || 0.8 })}
+                  onChange={(e) => setMlConfig({ ...mlConfig, entry_threshold_long: parseInputNumber(e.target.value, true) })}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                 />
                 <p className="text-[10px] text-slate-400">Minimum P(LONG) probability to allow buy order entry (Recommended: 0.80)</p>
@@ -1177,7 +1340,7 @@ export default function ConfigPage({
                   min="0.01"
                   max="0.5"
                   value={mlConfig.entry_threshold_short}
-                  onChange={(e) => setMlConfig({ ...mlConfig, entry_threshold_short: parseFloat(e.target.value) || 0.2 })}
+                  onChange={(e) => setMlConfig({ ...mlConfig, entry_threshold_short: parseInputNumber(e.target.value, true) })}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                 />
                 <p className="text-[10px] text-slate-400">Maximum P(LONG) threshold to allow short sell entry (Recommended: 0.20)</p>
@@ -1201,8 +1364,8 @@ export default function ConfigPage({
                   step="1"
                   min="1"
                   max="36"
-                  value={mlConfig.training_window_months !== undefined ? mlConfig.training_window_months : 6}
-                  onChange={(e) => setMlConfig({ ...mlConfig, training_window_months: parseInt(e.target.value) || 6 })}
+                  value={mlConfig.training_window_months}
+                  onChange={(e) => setMlConfig({ ...mlConfig, training_window_months: parseInputNumber(e.target.value) })}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                 />
                 <p className="text-[10px] text-slate-400">Historical dataset length used during walk-forward retraining (Recommended: 6 months)</p>
@@ -1281,7 +1444,7 @@ export default function ConfigPage({
                   type="number"
                   step="0.05"
                   value={sentimentConfig.entry_threshold_long}
-                  onChange={(e) => setSentimentConfig({ ...sentimentConfig, entry_threshold_long: parseFloat(e.target.value) || 0.25 })}
+                  onChange={(e) => setSentimentConfig({ ...sentimentConfig, entry_threshold_long: parseInputNumber(e.target.value, true) })}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                 />
                 <p className="text-[10px] text-slate-400">Weighted average threshold needed to buy (Default: +0.25)</p>
@@ -1293,7 +1456,7 @@ export default function ConfigPage({
                   type="number"
                   step="0.05"
                   value={sentimentConfig.entry_threshold_short}
-                  onChange={(e) => setSentimentConfig({ ...sentimentConfig, entry_threshold_short: parseFloat(e.target.value) || -0.25 })}
+                  onChange={(e) => setSentimentConfig({ ...sentimentConfig, entry_threshold_short: parseInputNumber(e.target.value, true) })}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                 />
                 <p className="text-[10px] text-slate-400">Weighted average threshold needed to short sell (Default: -0.25)</p>
@@ -1341,8 +1504,8 @@ export default function ConfigPage({
                   type="number"
                   step="1"
                   min="1"
-                  value={sentimentConfig.protection_window_minutes !== undefined ? sentimentConfig.protection_window_minutes : 15}
-                  onChange={(e) => setSentimentConfig({ ...sentimentConfig, protection_window_minutes: parseInt(e.target.value) || 15 })}
+                  value={sentimentConfig.protection_window_minutes}
+                  onChange={(e) => setSentimentConfig({ ...sentimentConfig, protection_window_minutes: parseInputNumber(e.target.value) })}
                   className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 outline-none font-mono"
                 />
                 <p className="text-[10px] text-slate-400">Lock duration (minutes) for bypassing trade entries after critical keyword match.</p>
@@ -1371,9 +1534,9 @@ export default function ConfigPage({
                             type="number"
                             min="0"
                             max="100"
-                            value={sentimentConfig.weights[src] !== undefined ? sentimentConfig.weights[src] : 20}
+                            value={sentimentConfig.weights[src]}
                             onChange={(e) => {
-                              const updatedWeights = { ...sentimentConfig.weights, [src]: parseInt(e.target.value) || 0 };
+                              const updatedWeights = { ...sentimentConfig.weights, [src]: parseInputNumber(e.target.value) };
                               setSentimentConfig({ ...sentimentConfig, weights: updatedWeights });
                             }}
                             className="w-full bg-slate-50 border border-slate-200 rounded-md p-1.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 outline-none font-mono"
@@ -1385,9 +1548,9 @@ export default function ConfigPage({
                             type="number"
                             min="1"
                             max="1440"
-                            value={sentimentConfig.refresh_rates_min && sentimentConfig.refresh_rates_min[src] !== undefined ? sentimentConfig.refresh_rates_min[src] : 5}
+                            value={sentimentConfig.refresh_rates_min && sentimentConfig.refresh_rates_min[src]}
                             onChange={(e) => {
-                              const updatedIntervals = { ...sentimentConfig.refresh_rates_min, [src]: parseInt(e.target.value) || 5 };
+                              const updatedIntervals = { ...sentimentConfig.refresh_rates_min, [src]: parseInputNumber(e.target.value) };
                               setSentimentConfig({ ...sentimentConfig, refresh_rates_min: updatedIntervals });
                             }}
                             className="w-full bg-slate-50 border border-slate-200 rounded-md p-1.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 outline-none font-mono"
@@ -1541,7 +1704,7 @@ export default function ConfigPage({
                     min="0.01"
                     max="1.0"
                     value={msConfig.min_breakout_body_ratio}
-                    onChange={(e) => setMsConfig({ ...msConfig, min_breakout_body_ratio: parseFloat(e.target.value) || 0.22 })}
+                    onChange={(e) => setMsConfig({ ...msConfig, min_breakout_body_ratio: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1557,7 +1720,7 @@ export default function ConfigPage({
                     min="5"
                     max="50"
                     value={msConfig.weak_trend_adx_threshold}
-                    onChange={(e) => setMsConfig({ ...msConfig, weak_trend_adx_threshold: parseInt(e.target.value) || 25 })}
+                    onChange={(e) => setMsConfig({ ...msConfig, weak_trend_adx_threshold: parseInputNumber(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1596,7 +1759,7 @@ export default function ConfigPage({
                     min="10"
                     max="60"
                     value={msConfig.hf_momentum_adx_threshold}
-                    onChange={(e) => setMsConfig({ ...msConfig, hf_momentum_adx_threshold: parseInt(e.target.value) || 30 })}
+                    onChange={(e) => setMsConfig({ ...msConfig, hf_momentum_adx_threshold: parseInputNumber(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1612,7 +1775,7 @@ export default function ConfigPage({
                     min="0.1"
                     max="2.5"
                     value={msConfig.pullback_multiplier_limit}
-                    onChange={(e) => setMsConfig({ ...msConfig, pullback_multiplier_limit: parseFloat(e.target.value) || 0.6 })}
+                    onChange={(e) => setMsConfig({ ...msConfig, pullback_multiplier_limit: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1628,7 +1791,7 @@ export default function ConfigPage({
                     min="0.1"
                     max="2.0"
                     value={msConfig.ema_retrace_multiplier_limit}
-                    onChange={(e) => setMsConfig({ ...msConfig, ema_retrace_multiplier_limit: parseFloat(e.target.value) || 0.4 })}
+                    onChange={(e) => setMsConfig({ ...msConfig, ema_retrace_multiplier_limit: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1644,7 +1807,7 @@ export default function ConfigPage({
                     min="0.3"
                     max="0.8"
                     value={msConfig.hf_orderflow_taker_buy_ratio_long}
-                    onChange={(e) => setMsConfig({ ...msConfig, hf_orderflow_taker_buy_ratio_long: parseFloat(e.target.value) || 0.58 })}
+                    onChange={(e) => setMsConfig({ ...msConfig, hf_orderflow_taker_buy_ratio_long: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1660,7 +1823,7 @@ export default function ConfigPage({
                     min="0.1"
                     max="0.9"
                     value={msConfig.hf_orderflow_imbalance_ratio_long}
-                    onChange={(e) => setMsConfig({ ...msConfig, hf_orderflow_imbalance_ratio_long: parseFloat(e.target.value) || 0.30 })}
+                    onChange={(e) => setMsConfig({ ...msConfig, hf_orderflow_imbalance_ratio_long: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1676,7 +1839,7 @@ export default function ConfigPage({
                     min="0.2"
                     max="0.7"
                     value={msConfig.hf_orderflow_taker_buy_ratio_short}
-                    onChange={(e) => setMsConfig({ ...msConfig, hf_orderflow_taker_buy_ratio_short: parseFloat(e.target.value) || 0.42 })}
+                    onChange={(e) => setMsConfig({ ...msConfig, hf_orderflow_taker_buy_ratio_short: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1692,7 +1855,7 @@ export default function ConfigPage({
                     min="-0.9"
                     max="-0.1"
                     value={msConfig.hf_orderflow_imbalance_ratio_short}
-                    onChange={(e) => setMsConfig({ ...msConfig, hf_orderflow_imbalance_ratio_short: parseFloat(e.target.value) || -0.30 })}
+                    onChange={(e) => setMsConfig({ ...msConfig, hf_orderflow_imbalance_ratio_short: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1716,7 +1879,7 @@ export default function ConfigPage({
                     min="1.0"
                     max="10.0"
                     value={msConfig.ema200_proximity_divisor}
-                    onChange={(e) => setMsConfig({ ...msConfig, ema200_proximity_divisor: parseFloat(e.target.value) || 3.0 })}
+                    onChange={(e) => setMsConfig({ ...msConfig, ema200_proximity_divisor: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1754,8 +1917,8 @@ export default function ConfigPage({
                     step="1"
                     min="5"
                     max="60"
-                    value={msConfig.trend_alignment_adx_threshold !== undefined ? msConfig.trend_alignment_adx_threshold : 30}
-                    onChange={(e) => setMsConfig({ ...msConfig, trend_alignment_adx_threshold: parseInt(e.target.value) || 30 })}
+                    value={msConfig.trend_alignment_adx_threshold}
+                    onChange={(e) => setMsConfig({ ...msConfig, trend_alignment_adx_threshold: parseInputNumber(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1770,8 +1933,8 @@ export default function ConfigPage({
                     step="1"
                     min="5"
                     max="60"
-                    value={msConfig.super_trend_adx_threshold !== undefined ? msConfig.super_trend_adx_threshold : 35}
-                    onChange={(e) => setMsConfig({ ...msConfig, super_trend_adx_threshold: parseInt(e.target.value) || 35 })}
+                    value={msConfig.super_trend_adx_threshold}
+                    onChange={(e) => setMsConfig({ ...msConfig, super_trend_adx_threshold: parseInputNumber(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1786,8 +1949,8 @@ export default function ConfigPage({
                     step="1"
                     min="2"
                     max="100"
-                    value={msConfig.fast_ema_period !== undefined ? msConfig.fast_ema_period : 20}
-                    onChange={(e) => setMsConfig({ ...msConfig, fast_ema_period: parseInt(e.target.value) || 20 })}
+                    value={msConfig.fast_ema_period}
+                    onChange={(e) => setMsConfig({ ...msConfig, fast_ema_period: parseInputNumber(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1802,8 +1965,8 @@ export default function ConfigPage({
                     step="1"
                     min="5"
                     max="200"
-                    value={msConfig.medium_ema_period !== undefined ? msConfig.medium_ema_period : 50}
-                    onChange={(e) => setMsConfig({ ...msConfig, medium_ema_period: parseInt(e.target.value) || 50 })}
+                    value={msConfig.medium_ema_period}
+                    onChange={(e) => setMsConfig({ ...msConfig, medium_ema_period: parseInputNumber(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1818,8 +1981,8 @@ export default function ConfigPage({
                     step="1"
                     min="20"
                     max="500"
-                    value={msConfig.slow_ema_period !== undefined ? msConfig.slow_ema_period : 200}
-                    onChange={(e) => setMsConfig({ ...msConfig, slow_ema_period: parseInt(e.target.value) || 200 })}
+                    value={msConfig.slow_ema_period}
+                    onChange={(e) => setMsConfig({ ...msConfig, slow_ema_period: parseInputNumber(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">

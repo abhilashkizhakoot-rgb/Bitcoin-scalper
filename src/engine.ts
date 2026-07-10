@@ -420,6 +420,7 @@ class TradingEngine {
       active_ml_model: this.getActiveMLModelName(),
       trade_size_multiplier: this.getTradeSizeMultiplier(),
       market_structure: this.getTrendMarketStructure(),
+      market_structure_config: config.market_structure || null,
     };
   }
 
@@ -862,29 +863,38 @@ class TradingEngine {
       requiredStr = "LONG: Not strongly bearish (isBearAligned), SHORT: Not strongly bullish (isBullAligned)";
     } else {
       if (hasExtremeRealtimePressure) {
+        const fastEma = ms.fast_ema_period || 20;
+        const medEma = ms.medium_ema_period || 50;
         trendAligned = signalDirection === "NEUTRAL" ? true : (
           signalDirection === "LONG" ? (ema20Val > ema50Val) : (ema20Val < ema50Val)
         );
         adxMet = adxValue >= 20;
         currentTrendStr = `EMA Structure: FAST_ALIGNED (Extreme Real-time Flow Pressure) | ADX: ${adxValue.toFixed(1)} (Threshold softened to >= 20)`;
-        requiredStr = `LONG: Fast EMA20 > EMA50 & ADX >= 20 (Softened via Order Flow), SHORT: Fast EMA20 < EMA50 & ADX >= 20`;
+        requiredStr = `LONG: Fast EMA${fastEma} > EMA${medEma} & ADX >= 20 (Softened via Order Flow), SHORT: Fast EMA${fastEma} < EMA${medEma} & ADX >= 20`;
       } else {
+        const fastEma = ms.fast_ema_period || 20;
+        const medEma = ms.medium_ema_period || 50;
+        const slowEma = ms.slow_ema_period || 200;
         trendAligned = signalDirection === "NEUTRAL" ? true : (
           (signalDirection === "LONG" && isUptrendAligned) ||
           (signalDirection === "SHORT" && isDowntrendAligned)
         );
-        adxMet = adxValue >= 30;
+        adxMet = adxValue >= trendAlignAdx;
         currentTrendStr = `EMA Structure: ${isUptrendAligned ? "BULLISH_TREND" : isDowntrendAligned ? "BEARISH_TREND" : "MIXED/FLAT"}`;
-        requiredStr = `LONG: EMA20 > EMA50 > EMA200 & ADX >= 30 & STRONG_UPTREND, SHORT: EMA20 < EMA50 < EMA200 & ADX >= 30 & STRONG_DOWNTREND`;
+        requiredStr = `LONG: EMA${fastEma} > EMA${medEma} > EMA${slowEma} & ADX >= ${trendAlignAdx} & STRONG_UPTREND, SHORT: EMA${fastEma} < EMA${medEma} < EMA${slowEma} & ADX >= ${trendAlignAdx} & STRONG_DOWNTREND`;
       }
     }
+
+    const fastEma = ms.fast_ema_period || 20;
+    const medEma = ms.medium_ema_period || 50;
+    const slowEma = ms.slow_ema_period || 200;
 
     conditions.push({
       name: "Trend Alignment & Strength (EMA/ADX)",
       met: trendAligned && adxMet,
       current_value: `${currentTrendStr} | ADX: ${adxValue.toFixed(1)}`,
       required: requiredStr,
-      description: "Confirms overall strong trend alignment (EMA 20/50/200) and high trend strength (ADX >= 30) or checks safety locks during range bound.",
+      description: `Confirms overall strong trend alignment (EMA ${fastEma}/${medEma}/${slowEma}) and high trend strength (ADX >= ${trendAlignAdx}) or checks safety locks during range bound.`,
       priority: "HIGH",
     });
 
@@ -3696,20 +3706,25 @@ class TradingEngine {
       requiredStr = "LONG: Not strongly bearish (isBearAligned), SHORT: Not strongly bullish (isBullAligned)";
     } else {
       if (hasExtremeRealtimePressure) {
+        const fastEma = ms.fast_ema_period || 20;
+        const medEma = ms.medium_ema_period || 50;
         trendAligned = signalDirection === "NEUTRAL" ? true : (
           signalDirection === "LONG" ? (ema20Val > ema50Val) : (ema20Val < ema50Val)
         );
         adxMet = adxValue >= 20;
         currentTrendStr = `EMA Structure: FAST_ALIGNED (Extreme Real-time Flow Pressure) | ADX: ${adxValue.toFixed(1)} (Threshold softened to >= 20)`;
-        requiredStr = `LONG: Fast EMA20 > EMA50 & ADX >= 20 (Softened via Order Flow), SHORT: Fast EMA20 < EMA50 & ADX >= 20`;
+        requiredStr = `LONG: Fast EMA${fastEma} > EMA${medEma} & ADX >= 20 (Softened via Order Flow), SHORT: Fast EMA${fastEma} < EMA${medEma} & ADX >= 20`;
       } else {
+        const fastEma = ms.fast_ema_period || 20;
+        const medEma = ms.medium_ema_period || 50;
+        const slowEma = ms.slow_ema_period || 200;
         trendAligned = signalDirection === "NEUTRAL" ? true : (
           (signalDirection === "LONG" && isUptrendAligned) ||
           (signalDirection === "SHORT" && isDowntrendAligned)
         );
-        adxMet = adxValue >= 30;
+        adxMet = adxValue >= trendAlignAdx;
         currentTrendStr = `EMA Structure: ${isUptrendAligned ? "BULLISH_TREND" : isDowntrendAligned ? "BEARISH_TREND" : "MIXED/FLAT"}`;
-        requiredStr = `LONG: EMA20 > EMA50 > EMA200 & ADX >= 30 & STRONG_UPTREND, SHORT: EMA20 < EMA50 < EMA200 & ADX >= 30 & STRONG_DOWNTREND`;
+        requiredStr = `LONG: EMA${fastEma} > EMA${medEma} > EMA${slowEma} & ADX >= ${trendAlignAdx} & STRONG_UPTREND, SHORT: EMA${fastEma} < EMA${medEma} < EMA${slowEma} & ADX >= ${trendAlignAdx} & STRONG_DOWNTREND`;
       }
     }
 

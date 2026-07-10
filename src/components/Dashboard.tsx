@@ -426,13 +426,13 @@ export default function Dashboard({
                 <div className="flex justify-between">
                   <span className="text-slate-400">Long Pullback Met:</span>
                   <span className={`font-semibold ${status.market_structure?.pullbackLongMet ? "text-emerald-600" : "text-slate-500"}`}>
-                    {status.market_structure?.pullbackLongMet ? "YES (Retest/Fib/EMA20)" : "Waiting..."}
+                    {status.market_structure?.pullbackLongMet ? `YES (Retest/Fib/EMA${status.market_structure_config?.fast_ema_period || 20})` : "Waiting..."}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Short Pullback Met:</span>
                   <span className={`font-semibold ${status.market_structure?.pullbackShortMet ? "text-rose-600" : "text-slate-500"}`}>
-                    {status.market_structure?.pullbackShortMet ? "YES (Retest/Fib/EMA20)" : "Waiting..."}
+                    {status.market_structure?.pullbackShortMet ? `YES (Retest/Fib/EMA${status.market_structure_config?.fast_ema_period || 20})` : "Waiting..."}
                   </span>
                 </div>
               </div>

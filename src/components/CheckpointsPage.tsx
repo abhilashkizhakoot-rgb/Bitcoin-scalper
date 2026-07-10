@@ -53,6 +53,7 @@ interface CheckpointsPageProps {
       all_conditions_met: boolean;
       rejection_reason: string | null;
     };
+    market_structure_config?: any;
   };
   onRefresh: () => void;
   onTabChange: (tab: any) => void;
@@ -60,6 +61,17 @@ interface CheckpointsPageProps {
 
 export default function CheckpointsPage({ status, onRefresh, onTabChange }: CheckpointsPageProps) {
   const checkpointsData = status.checkpoints;
+
+  const ms = status.market_structure_config || {
+    fast_ema_period: 20,
+    medium_ema_period: 50,
+    slow_ema_period: 200,
+    trend_alignment_adx_threshold: 30,
+  };
+  const fastEma = ms.fast_ema_period || 20;
+  const medEma = ms.medium_ema_period || 50;
+  const slowEma = ms.slow_ema_period || 200;
+  const trendAlignAdx = ms.trend_alignment_adx_threshold || 30;
 
   // Fallback checks if checkpoints are not yet loaded from backend status
   const fallbackConditions: Checkpoint[] = [
@@ -83,8 +95,8 @@ export default function CheckpointsPage({ status, onRefresh, onTabChange }: Chec
       name: "Trend Alignment & Strength (EMA/ADX)",
       met: true,
       current_value: "EMA: PASSING | ADX: 24.5",
-      required: "EMA20 > EMA50 > EMA200 & ADX >= 30 (Softens to EMA20 > EMA50 & ADX >= 20 under extreme order flow pressure)",
-      description: "Confirms overall strong trend alignment (EMA 20/50/200) and high trend strength (ADX >= 30) or checks safety locks during range bound, with dynamic softening when leading order indicators confirm breakout.",
+      required: `EMA${fastEma} > EMA${medEma} > EMA${slowEma} & ADX >= ${trendAlignAdx} (Softens to EMA${fastEma} > EMA${medEma} & ADX >= 20 under extreme order flow pressure)`,
+      description: `Confirms overall strong trend alignment (EMA ${fastEma}/${medEma}/${slowEma}) and high trend strength (ADX >= ${trendAlignAdx}) or checks safety locks during range bound, with dynamic softening when leading order indicators confirm breakout.`,
       priority: "HIGH",
     },
     {

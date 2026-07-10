@@ -41,16 +41,15 @@ import AnalyticsPage from "./components/AnalyticsPage.tsx";
 import ManualTradingPage from "./components/ManualTradingPage.tsx";
 import ApiAnalyzer from "./components/ApiAnalyzer.tsx";
 import CheckpointsPage from "./components/CheckpointsPage.tsx";
-import BacktestPage from "./components/BacktestPage.tsx";
 
 export default function App() {
-  const [activeTab, setActiveTabState] = useState<"dashboard" | "analytics" | "trades" | "config" | "manual" | "api_analyzer" | "checkpoints" | "backtest">(() => {
+  const [activeTab, setActiveTabState] = useState<"dashboard" | "analytics" | "trades" | "config" | "manual" | "api_analyzer" | "checkpoints">(() => {
     const saved = localStorage.getItem("scalper_active_tab");
-    const allowed = ["dashboard", "analytics", "trades", "config", "manual", "api_analyzer", "checkpoints", "backtest"];
+    const allowed = ["dashboard", "analytics", "trades", "config", "manual", "api_analyzer", "checkpoints"];
     return (saved && allowed.includes(saved)) ? (saved as any) : "dashboard";
   });
 
-  const setActiveTab = (tab: "dashboard" | "analytics" | "trades" | "config" | "manual" | "api_analyzer" | "checkpoints" | "backtest") => {
+  const setActiveTab = (tab: "dashboard" | "analytics" | "trades" | "config" | "manual" | "api_analyzer" | "checkpoints") => {
     localStorage.setItem("scalper_active_tab", tab);
     setActiveTabState(tab);
   };
@@ -353,15 +352,6 @@ export default function App() {
             id="tab-checkpoints"
           >
             <CheckCircle2 className="w-3.5 h-3.5" /> Checkpoints radar
-          </button>
-          <button
-            onClick={() => setActiveTab("backtest")}
-            className={`flex items-center gap-2 px-4 py-2 text-xs font-medium font-sans rounded-lg transition-all cursor-pointer ${
-              activeTab === "backtest" ? "bg-white text-indigo-600 font-semibold shadow-sm border border-slate-200/50" : "text-slate-500 hover:text-slate-800"
-            }`}
-            id="tab-backtest"
-          >
-            <RefreshCw className="w-3.5 h-3.5" /> Backtest Engine
           </button>
           <button
             onClick={() => setActiveTab("config")}
@@ -687,13 +677,6 @@ export default function App() {
                 status={status}
                 onRefresh={fetchAllData}
                 onTabChange={setActiveTab}
-              />
-            )}
-
-            {activeTab === "backtest" && (
-              <BacktestPage
-                onRefresh={fetchAllData}
-                config={config}
               />
             )}
 

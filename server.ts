@@ -11,7 +11,6 @@ import { createServer as createViteServer } from "vite";
 import { dbManager } from "./src/db_sim.js";
 import { tradingEngine } from "./src/engine.js";
 import { ConnectionStatus } from "./src/types.js";
-import { BacktestEngine } from "./src/backtestEngine.js";
 
 function getRequestBaseUrl(req: express.Request): string {
   const url = getRawRequestBaseUrl(req);
@@ -370,25 +369,6 @@ async function startServer() {
       res.status(400).json(result);
     } else {
       res.json(result);
-    }
-  });
-
-  app.post("/api/trading/backtest", (req, res) => {
-    const { period_days, regime_type, starting_balance, custom_config } = req.body;
-    
-    const baseConfig = dbManager.getConfig();
-    // Allow overriding config parameter overrides from front-end backtest form
-    const activeConfig = custom_config ? { ...baseConfig, ...custom_config } : baseConfig;
-
-    try {
-      const days = parseInt(period_days || "7", 10);
-      const startBal = parseFloat(starting_balance || "100000");
-      const regime = regime_type || "MIXED";
-
-      const backtestResult = BacktestEngine.run(activeConfig, days, regime, startBal);
-      res.json(backtestResult);
-    } catch (e: any) {
-      res.status(500).json({ success: false, error: e.message || String(e) });
     }
   });
 

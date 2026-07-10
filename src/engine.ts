@@ -2589,6 +2589,7 @@ class TradingEngine {
     ema20Val: number,
     ema50Val: number,
     ema100Val: number,
+    ema200Val: number,
     struct: any
   ): { confirmed: boolean; message: string } {
     const config = dbManager.getConfig();
@@ -2676,13 +2677,13 @@ class TradingEngine {
 
     if (direction === "LONG") {
       const isEmaAlignedLong = adxValue >= ms.weak_trend_adx_threshold
-        ? (ema20Val > ema50Val)
+        ? (ema20Val > ema50Val || (ema50Val > ema100Val && currentPrice > ema200Val))
         : (ema20Val > ema50Val && currentPrice > ema100Val);
       if (!isEmaAlignedLong) {
         return {
           confirmed: false,
           message: adxValue >= ms.weak_trend_adx_threshold
-            ? `Blocked: Fast Bullish EMA structure not aligned (Requires EMA 20 > EMA 50, ADX is strong: ${adxValue.toFixed(1)}).`
+            ? `Blocked: Fast Bullish EMA structure not aligned (Requires EMA 20 > EMA 50 or 50 > 100 > 200, ADX is strong: ${adxValue.toFixed(1)}).`
             : `Blocked: Full Bullish EMA structure not aligned (Requires EMA 20 > EMA 50 & Price > EMA 100 on moderate ADX: ${adxValue.toFixed(1)}).`
         };
       }
@@ -2818,14 +2819,33 @@ class TradingEngine {
         }
       }
 
+      // Setup 3: 100/200 EMA Pushback
+      const emaRetraceThreshold100 = ema100Val + effectiveEmaMult * currentAtr;
+      const emaRetraceThreshold200 = ema200Val + effectiveEmaMult * currentAtr;
+      const hasRetracedToEmaSlower = postBreakoutCandles.some(c => c.low <= emaRetraceThreshold100 || c.low <= emaRetraceThreshold200);
+
+      const currentRejectsEma100 = currentCandle.low <= ema100Val + 0.25 * currentAtr && currentPrice >= (ema100Val - 0.2 * currentAtr) && currentCandle.close > currentCandle.open;
+      const currentRejectsEma200 = currentCandle.low <= ema200Val + 0.25 * currentAtr && currentPrice >= (ema200Val - 0.2 * currentAtr) && currentCandle.close > currentCandle.open;
+      const isEmaSlowerPushbackValid = (currentRejectsEma100 || currentRejectsEma200) && hasRetracedToEmaSlower;
+      let emaSlowerPushbackMessage = "";
+      if (isEmaSlowerPushbackValid) {
+        if (isVolumeHealthyForPullback) {
+          emaSlowerPushbackMessage = `100/200 EMA Pushback confirmed${mtfMessage}: Price rejected slow EMA support at $${(currentRejectsEma100 ? ema100Val : ema200Val).toFixed(2)} with bullish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
+        } else {
+          emaSlowerPushbackMessage = "Blocked 100/200 EMA Pushback: Abnormally high volume pullback during slower EMA retracement suggests trend failure.";
+        }
+      }
+
       if (isPullbackRetestValid && !pullbackRetestMessage.startsWith("Blocked")) {
         return { confirmed: true, message: pullbackRetestMessage };
       } else if (isEmaPushbackValid && !emaPushbackMessage.startsWith("Blocked")) {
         return { confirmed: true, message: emaPushbackMessage };
+      } else if (isEmaSlowerPushbackValid && !emaSlowerPushbackMessage.startsWith("Blocked")) {
+        return { confirmed: true, message: emaSlowerPushbackMessage };
       } else {
         const failureReason = !isVolumeHealthyForPullback
           ? "Pullback volume is abnormally high (distribution risk); waiting for volume to dry up before confirming a safe entry."
-          : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to 20/50 EMA pushback setup (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
+          : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to 20/50/100/200 EMA pushback setup (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
         return {
           confirmed: false,
           message: failureReason
@@ -2835,13 +2855,13 @@ class TradingEngine {
     } else {
       // SHORT
       const isEmaAlignedShort = adxValue >= ms.weak_trend_adx_threshold
-        ? (ema20Val < ema50Val)
+        ? (ema20Val < ema50Val || (ema50Val < ema100Val && currentPrice < ema200Val))
         : (ema20Val < ema50Val && currentPrice < ema100Val);
       if (!isEmaAlignedShort) {
         return {
           confirmed: false,
           message: adxValue >= ms.weak_trend_adx_threshold
-            ? `Blocked: Fast Bearish EMA structure not aligned (Requires EMA 20 < EMA 50, ADX is strong: ${adxValue.toFixed(1)}).`
+            ? `Blocked: Fast Bearish EMA structure not aligned (Requires EMA 20 < EMA 50 or 50 < 100 < 200, ADX is strong: ${adxValue.toFixed(1)}).`
             : `Blocked: Full Bearish EMA structure not aligned (Requires EMA 20 < EMA 50 & Price < EMA 100 on moderate ADX: ${adxValue.toFixed(1)}).`
         };
       }
@@ -2977,14 +2997,33 @@ class TradingEngine {
         }
       }
 
+      // Setup 3: 100/200 EMA Pushback
+      const emaRetraceThreshold100 = ema100Val - effectiveEmaMult * currentAtr;
+      const emaRetraceThreshold200 = ema200Val - effectiveEmaMult * currentAtr;
+      const hasRetracedToEmaSlower = postBreakoutCandles.some(c => c.high >= emaRetraceThreshold100 || c.high >= emaRetraceThreshold200);
+
+      const currentRejectsEma100 = currentCandle.high >= ema100Val - 0.25 * currentAtr && currentPrice <= (ema100Val + 0.2 * currentAtr) && currentCandle.close < currentCandle.open;
+      const currentRejectsEma200 = currentCandle.high >= ema200Val - 0.25 * currentAtr && currentPrice <= (ema200Val + 0.2 * currentAtr) && currentCandle.close < currentCandle.open;
+      const isEmaSlowerPushbackValid = (currentRejectsEma100 || currentRejectsEma200) && hasRetracedToEmaSlower;
+      let emaSlowerPushbackMessage = "";
+      if (isEmaSlowerPushbackValid) {
+        if (isVolumeHealthyForPullback) {
+          emaSlowerPushbackMessage = `100/200 EMA Pushback confirmed${mtfMessage}: Price rejected slow EMA resistance at $${(currentRejectsEma100 ? ema100Val : ema200Val).toFixed(2)} with bearish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
+        } else {
+          emaSlowerPushbackMessage = "Blocked 100/200 EMA Pushback: Abnormally high volume pullback during slower EMA retracement suggests trend failure.";
+        }
+      }
+
       if (isPullbackRetestValid && !pullbackRetestMessage.startsWith("Blocked")) {
         return { confirmed: true, message: pullbackRetestMessage };
       } else if (isEmaPushbackValid && !emaPushbackMessage.startsWith("Blocked")) {
         return { confirmed: true, message: emaPushbackMessage };
+      } else if (isEmaSlowerPushbackValid && !emaSlowerPushbackMessage.startsWith("Blocked")) {
+        return { confirmed: true, message: emaSlowerPushbackMessage };
       } else {
         const failureReason = !isVolumeHealthyForPullback
           ? "Pullback volume is abnormally high (accumulation risk); waiting for volume to dry up before confirming a safe entry."
-          : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to 20/50 EMA pushback setup (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
+          : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to 20/50/100/200 EMA pushback setup (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
         return {
           confirmed: false,
           message: failureReason
@@ -3254,18 +3293,20 @@ class TradingEngine {
     const ema20 = hasEnoughData ? this.calculateEMA(closes, 20) : [];
     const ema50 = hasEnoughData ? this.calculateEMA(closes, 50) : [];
     const ema100 = hasEnoughData ? this.calculateEMA(closes, 100) : [];
+    const ema200 = closes.length >= 200 ? this.calculateEMA(closes, 200) : [];
     
     const lastIdxVal = closes.length - 1;
     const ema20Val = lastIdxVal >= 0 && ema20.length > lastIdxVal ? ema20[lastIdxVal] : currentPrice;
     const ema50Val = lastIdxVal >= 0 && ema50.length > lastIdxVal ? ema50[lastIdxVal] : currentPrice;
     const ema100Val = lastIdxVal >= 0 && ema100.length > lastIdxVal ? ema100[lastIdxVal] : currentPrice;
+    const ema200Val = lastIdxVal >= 0 && ema200.length > lastIdxVal ? ema200[lastIdxVal] : (lastIdxVal >= 0 && ema100.length > lastIdxVal ? ema100[lastIdxVal] : currentPrice);
 
     if (signalDirection === "LONG") {
-      const result = this.evaluateTrendBreakoutSetup("LONG", currentPrice, ema20Val, ema50Val, ema100Val, struct);
+      const result = this.evaluateTrendBreakoutSetup("LONG", currentPrice, ema20Val, ema50Val, ema100Val, ema200Val, struct);
       confirmed = result.confirmed;
       message = result.message;
     } else if (signalDirection === "SHORT") {
-      const result = this.evaluateTrendBreakoutSetup("SHORT", currentPrice, ema20Val, ema50Val, ema100Val, struct);
+      const result = this.evaluateTrendBreakoutSetup("SHORT", currentPrice, ema20Val, ema50Val, ema100Val, ema200Val, struct);
       confirmed = result.confirmed;
       message = result.message;
     }
@@ -3740,8 +3781,10 @@ class TradingEngine {
     const trendAlignAdx = ms.trend_alignment_adx_threshold || 30;
     const superTrendAdx = ms.super_trend_adx_threshold || 35;
 
-    const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_UPTREND;
-    const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
+    const isUptrendAligned = (ema20Val > ema50Val || (ema50Val > ema100Val && ema100Val > ema200Val)) && 
+                             (adxValue >= trendAlignAdx || this.currentRegime === MarketRegime.STRONG_UPTREND);
+    const isDowntrendAligned = (ema20Val < ema50Val || (ema50Val < ema100Val && ema100Val < ema200Val)) && 
+                               (adxValue >= trendAlignAdx || this.currentRegime === MarketRegime.STRONG_DOWNTREND);
     const isSuperStrongUptrend = (this.currentRegime === MarketRegime.STRONG_UPTREND || adxValue >= superTrendAdx) && 
                                  ema20Val > ema50Val && ema50Val > ema100Val;
     const isSuperStrongDowntrend = (this.currentRegime === MarketRegime.STRONG_DOWNTREND || adxValue >= superTrendAdx) && 
@@ -3794,14 +3837,22 @@ class TradingEngine {
 
       const recentPullbackToEma20Long = recentCandles.some(c => c.low <= ema20Val * 1.0015 && c.high >= ema20Val * 0.9985);
       const recentPullbackToEma50Long = recentCandles.some(c => c.low <= ema50Val * 1.0015 && c.high >= ema50Val * 0.9985);
-      const hasValidPushbackLong = (recentPullbackToEma20Long || recentPullbackToEma50Long) && currentClose >= ema50Val * 0.998;
+      const recentPullbackToEma100Long = recentCandles.some(c => c.low <= ema100Val * 1.0015 && c.high >= ema100Val * 0.9985);
+      const recentPullbackToEma200Long = recentCandles.some(c => c.low <= ema200Val * 1.0015 && c.high >= ema200Val * 0.9985);
+      const hasValidPushbackLong = (recentPullbackToEma20Long || recentPullbackToEma50Long || recentPullbackToEma100Long || recentPullbackToEma200Long) && 
+                                   (currentClose >= ema50Val * 0.998 || currentClose >= ema100Val * 0.998 || currentClose >= ema200Val * 0.998);
 
       const recentPullbackToEma20Short = recentCandles.some(c => c.high >= ema20Val * 0.9985 && c.low <= ema20Val * 1.0015);
       const recentPullbackToEma50Short = recentCandles.some(c => c.high >= ema50Val * 0.9985 && c.low <= ema50Val * 1.0015);
-      const hasValidPushbackShort = (recentPullbackToEma20Short || recentPullbackToEma50Short) && currentClose <= ema50Val * 1.002;
+      const recentPullbackToEma100Short = recentCandles.some(c => c.high >= ema100Val * 0.9985 && c.low <= ema100Val * 1.0015);
+      const recentPullbackToEma200Short = recentCandles.some(c => c.high >= ema200Val * 0.9985 && c.low <= ema200Val * 1.0015);
+      const hasValidPushbackShort = (recentPullbackToEma20Short || recentPullbackToEma50Short || recentPullbackToEma100Short || recentPullbackToEma200Short) && 
+                                    (currentClose <= ema50Val * 1.002 || currentClose <= ema100Val * 1.002 || currentClose <= ema200Val * 1.002);
 
-      const isUptrendAligned = ema20Val > ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val > ema100Val);
-      const isDowntrendAligned = ema20Val < ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val < ema100Val);
+      const isUptrendAligned = (ema20Val > ema50Val || (ema50Val > ema100Val && ema100Val > ema200Val)) && 
+                               (adxValue >= ms.hf_momentum_adx_threshold || ema50Val > ema100Val || ema100Val > ema200Val);
+      const isDowntrendAligned = (ema20Val < ema50Val || (ema50Val < ema100Val && ema100Val < ema200Val)) && 
+                                 (adxValue >= ms.hf_momentum_adx_threshold || ema50Val < ema100Val || ema100Val < ema200Val);
 
       // For high-frequency scalping, we allow breakouts (momentum chasing) if ADX is strong or there is high order flow pressure
       const isScalperBreakoutLongAllowed = adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long);

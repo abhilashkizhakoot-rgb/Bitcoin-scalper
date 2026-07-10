@@ -49,6 +49,7 @@ class TradingEngine {
     imbalanceRatio: 0.012,
     lastUpdateSecs: 0,
   };
+  private orderBookImbalanceHistory: number[] = [];
 
   public resetFeatureDrift() {
     this.log(`[ML-Retraining] Resetting feature drift parameters.`);
@@ -281,6 +282,178 @@ class TradingEngine {
         (name.toLowerCase().includes("imbalance") && g.toLowerCase().includes("orderbook")) ||
         ((name.toLowerCase().includes("ema 100") || name.toLowerCase().includes("ema")) && g.toLowerCase().includes("ema100"))
     );
+  }
+
+  /**
+   * Calculates a unified order flow confluence score ranging from 0 to 100.
+   * Rather than a hard binary pass/fail cutoff at 0.51, this implements a continuous
+   * fuzzy rating system that blends taker buy volume ratios and order book bid/ask depth imbalance.
+   */
+  private getOrderFlowScore(direction: "LONG" | "SHORT" | "NEUTRAL"): {
+    score: number;
+    takerBuyRatio: number;
+    imbalanceRatio: number;
+    label: string;
+    description: string;
+  } {
+    const takerBuyRatio = this.orderFlowStats.takerBuyRatio;
+    const imbalanceRatio = this.orderBookStats.imbalanceRatio; // ranges from -1.0 to 1.0 (bid depth vs ask depth)
+
+    if (direction === "NEUTRAL") {
+      return {
+        score: 50,
+        takerBuyRatio,
+        imbalanceRatio,
+        label: "Neutral",
+        description: "No trade direction is actively selected to measure order flow alignment."
+      };
+    }
+
+    let ofAlignment = 0.5;
+    let obAlignment = 0.0;
+
+    if (direction === "LONG") {
+      // Scale taker buy ratio. Standard is 0.51. Let's map [0.45, 0.65] to [0, 100]
+      ofAlignment = Math.max(0, Math.min(100, ((takerBuyRatio - 0.45) / 0.20) * 100));
+      // Scale order book imbalance. Bid depth is positive bid-ask imbalance. Map [-0.30, 0.30] to [0, 100]
+      obAlignment = Math.max(0, Math.min(100, ((imbalanceRatio - (-0.30)) / 0.60) * 100));
+    } else { // SHORT
+      // Scale taker sell ratio (1 - takerBuyRatio). Standard is <= 0.49. Map [0.35, 0.55] for taker buy ratio to [100, 0] sell pressure
+      const takerSellRatio = 1.0 - takerBuyRatio;
+      ofAlignment = Math.max(0, Math.min(100, ((takerSellRatio - 0.45) / 0.20) * 100));
+      // Scale order book imbalance for short. Negative is bid < ask depth. Map [-0.30, 0.30] of ask-bid to [0, 100]
+      // which is mapping imbalanceRatio from +0.30 (worst for short) to -0.30 (best for short)
+      obAlignment = Math.max(0, Math.min(100, (((-imbalanceRatio) - (-0.30)) / 0.60) * 100));
+    }
+
+    // Blend: 70% active market taker volume (aggressive flow), 30% passive order book depth (limit order flow)
+    let score = Math.round(ofAlignment * 0.70 + obAlignment * 0.30);
+    score = Math.max(0, Math.min(100, score));
+
+    let label = "Neutral";
+    let description = "";
+
+    if (score >= 75) {
+      label = "Extreme Conflow";
+      description = direction === "LONG"
+        ? "Aggressive market buys and heavy bid depth indicate immediate upward momentum. Dynamic bypass is active."
+        : "Heavy market selling and wall of asks suggest severe downside acceleration. Dynamic bypass is active.";
+    } else if (score >= 52) {
+      label = "Strongly Aligned";
+      description = direction === "LONG"
+        ? "Consistent buyer participation and bid-side buffer confirm a solid long entry flow."
+        : "Consistent seller pressure and ask-side weight confirm a solid short entry flow.";
+    } else if (score >= 43) {
+      label = "Acceptable Confluence";
+      description = "Order flow displays moderate supportive activity. Acceptable under high confidence technical setup.";
+    } else if (score >= 30) {
+      label = "Mixed / Divergent";
+      description = "Order flow lacks a strong trend alignment. Entries restricted unless supported by exceptional AI consensus.";
+    } else {
+      label = "Counter-Trend Risk";
+      description = "Critical liquidity resistance or strong counter-pressure detected. Entry highly restricted.";
+    }
+
+    return {
+      score,
+      takerBuyRatio,
+      imbalanceRatio,
+      label,
+      description
+    };
+  }
+
+  /**
+   * Evaluates order book stability and filters out high-frequency order book spoofing/flickering.
+   * Compares order depth to executed market volume and historical imbalance volatility.
+   */
+  private getOrderBookStability(direction: "LONG" | "SHORT" | "NEUTRAL"): {
+    spoofRisk: number;
+    stabilityIndex: number;
+    adjustedImbalance: number;
+    avgImbalance: number;
+    imbalanceVolatility: number;
+    flickeringScore: number;
+    volumeMismatchScore: number;
+    status: string;
+    description: string;
+  } {
+    const instantImbalance = this.orderBookStats.imbalanceRatio;
+    const takerBuyRatio = this.orderFlowStats.takerBuyRatio;
+    const history = this.orderBookImbalanceHistory;
+
+    if (history.length < 3) {
+      return {
+        spoofRisk: 0,
+        stabilityIndex: 100,
+        adjustedImbalance: instantImbalance,
+        avgImbalance: instantImbalance,
+        imbalanceVolatility: 0,
+        flickeringScore: 0,
+        volumeMismatchScore: 0,
+        status: "STABLE",
+        description: "Initializing order book history tracking (insufficient samples yet)."
+      };
+    }
+
+    // 1. Calculate Average & Volatility of the Imbalance (Standard Deviation)
+    const sum = history.reduce((a, b) => a + b, 0);
+    const avgImbalance = sum / history.length;
+    const variance = history.reduce((acc, val) => acc + Math.pow(val - avgImbalance, 2), 0) / history.length;
+    const imbalanceVolatility = Math.sqrt(variance);
+
+    // 2. Calculate Flickering (Average first-difference rate of change)
+    let changeSum = 0;
+    for (let i = 1; i < history.length; i++) {
+      changeSum += Math.abs(history[i] - history[i - 1]);
+    }
+    const avgChange = changeSum / (history.length - 1);
+    // Standard avgChange threshold: values above 0.15 indicate fast flickering of bid/ask size
+    const flickeringScore = Math.min(100, Math.round((avgChange / 0.18) * 100));
+
+    // 3. Calculate Volume Mismatch (Divergence with actual taker executed trades)
+    // Positive imbalance means bids > asks. If bids > asks, we expect buy pressure (takerBuyRatio > 0.5)
+    // If bids > asks (+0.5 imbalance) but market is heavy selling (takerBuyRatio = 0.35), that's a massive mismatch
+    // Same for bids < asks (negative imbalance) but market is heavy buying (takerBuyRatio = 0.65)
+    const imbalanceNormalized = instantImbalance; // ranges -1.0 to 1.0
+    const netTakerPressure = takerBuyRatio * 2 - 1; // ranges -1.0 to 1.0
+    
+    // Mismatch magnitude
+    const volumeMismatch = Math.abs(imbalanceNormalized - netTakerPressure); // range 0 to 2.0
+    const volumeMismatchScore = Math.min(100, Math.round((volumeMismatch / 1.2) * 100));
+
+    // 4. Calculate Combined Spoof Risk (0 to 100)
+    // High flickering or high divergence under thin order flow means a high probability of institutional walls being fake/spoofs
+    const spoofRisk = Math.round(flickeringScore * 0.4 + volumeMismatchScore * 0.6);
+    const stabilityIndex = Math.max(0, 100 - spoofRisk);
+
+    // 5. Compute Adjusted Imbalance
+    // If spoof risk is high, we damp the instant imbalance toward the historical average or closer to 0 (neutralizing the fake wall)
+    const dampingFactor = Math.max(0, Math.min(1, (100 - spoofRisk) / 100));
+    const adjustedImbalance = instantImbalance * dampingFactor + avgImbalance * (1 - dampingFactor);
+
+    let status = "STABLE";
+    let description = "Order book depth profiles are stable and backed by concurrent market trade volumes.";
+
+    if (spoofRisk >= 70) {
+      status = "HIGH_SPOOF_ALERT";
+      description = "Extremely unstable order book profile detected! Limit order walls are rapidly flashing and contradict actual trade executions. Likely false wall spoofing. Symmetrical gating thresholds are tightened.";
+    } else if (spoofRisk >= 40) {
+      status = "MODERATE_SPOOF_RISK";
+      description = "Moderate divergence or rapid size changes. Portions of limit depth may be transient. Gates are slightly damped for safety.";
+    }
+
+    return {
+      spoofRisk,
+      stabilityIndex,
+      adjustedImbalance,
+      avgImbalance,
+      imbalanceVolatility,
+      flickeringScore,
+      volumeMismatchScore,
+      status,
+      description
+    };
   }
 
   constructor() {
@@ -1166,22 +1339,20 @@ class TradingEngine {
 
     // C17: Binance Order Flow Confirmation
     let ofMet = true;
-    let ofVal = `Taker Buy Ratio: ${(this.orderFlowStats.takerBuyRatio * 100).toFixed(1)}% (CVD: ${this.orderFlowStats.netCVD.toFixed(2)} BTC)`;
-    let ofReq = "Taker Buy Ratio >= 51.0% for LONG, <= 49.0% for SHORT";
+    const flowRes = this.getOrderFlowScore(signalDirection);
+    let ofVal = `Score: ${flowRes.score}/100 [${flowRes.label}] | Taker Buy: ${(flowRes.takerBuyRatio * 100).toFixed(1)}% | Imbalance: ${(flowRes.imbalanceRatio * 100).toFixed(1)}%`;
+    let ofReq = "Dynamic Score >= 45/100 (Softenable to 30/100 if CatBoost AI probability >= 85.0%)";
 
-    if (signalDirection === "LONG") {
-      ofMet = this.orderFlowStats.takerBuyRatio >= 0.51;
+    if (signalDirection !== "NEUTRAL") {
+      const activeProb = signalDirection === "LONG" ? probabilityLong : probabilityShort;
+      const isExtremeAiConfidence = activeProb >= 0.85;
+      const hurdleScore = isExtremeAiConfidence ? 30 : 45;
+      ofMet = flowRes.score >= hurdleScore;
       if (!ofMet) {
-        ofVal = `${ofVal} - BLOCKED (Insufficient Buy Pressure)`;
+        ofVal = `${ofVal} - BLOCKED (${flowRes.description})`;
       } else {
-        ofVal = `${ofVal} - PASSED (Strong Buy Pressure)`;
-      }
-    } else if (signalDirection === "SHORT") {
-      ofMet = this.orderFlowStats.takerBuyRatio <= 0.49;
-      if (!ofMet) {
-        ofVal = `${ofVal} - BLOCKED (Insufficient Sell Pressure)`;
-      } else {
-        ofVal = `${ofVal} - PASSED (Strong Sell Pressure)`;
+        const softState = flowRes.score < 45 ? " - SOFTENED BY AI" : "";
+        ofVal = `${ofVal} - PASSED${softState} (${flowRes.description})`;
       }
     }
 
@@ -1190,7 +1361,7 @@ class TradingEngine {
       met: ofMet,
       current_value: ofVal,
       required: ofReq,
-      description: "Requires taker buy ratio from active market trades to be aligned with the signal direction (e.g. >= 51% for LONG, <= 49% for SHORT) to confirm volume-based momentum.",
+      description: "Applies a continuous fuzzy confluence score blending taker volume buy/sell ratio (70% weight) and order book bid/ask depth imbalance (30% weight) with adaptive soft-gates based on AI prediction confidence.",
       priority: "HIGH",
     });
 
@@ -1231,26 +1402,35 @@ class TradingEngine {
     const obMaxImbalance = config.general.order_book_max_imbalance !== undefined ? config.general.order_book_max_imbalance : 0.35;
 
     const obTotalDepth = this.orderBookStats.bidDepthBTC + this.orderBookStats.askDepthBTC;
-    const obImbalancePct = this.orderBookStats.imbalanceRatio * 100;
-    let obVal = `Bids Depth: ${this.orderBookStats.bidDepthBTC.toFixed(1)} BTC | Asks Depth: ${this.orderBookStats.askDepthBTC.toFixed(1)} BTC (Imbalance: ${obImbalancePct >= 0 ? "+" : ""}${obImbalancePct.toFixed(1)}%)`;
-    let obReq = `Top-10 book depth >= ${obMinDepth.toFixed(1)} BTC; Imbalance >= -${(obMaxImbalance * 100).toFixed(0)}% for LONG, <= +${(obMaxImbalance * 100).toFixed(0)}% for SHORT`;
+    const stability = this.getOrderBookStability(signalDirection);
+    
+    // Use adjusted/damped imbalance ratio to nullify spoofed limit orders
+    const evaluatedImbalance = stability.adjustedImbalance;
+    const obImbalancePct = evaluatedImbalance * 100;
+    const rawImbalancePct = this.orderBookStats.imbalanceRatio * 100;
+
+    let obVal = `Bids: ${this.orderBookStats.bidDepthBTC.toFixed(1)} | Asks: ${this.orderBookStats.askDepthBTC.toFixed(1)} BTC | Imbalance: ${rawImbalancePct >= 0 ? "+" : ""}${rawImbalancePct.toFixed(1)}% (Adjusted: ${obImbalancePct >= 0 ? "+" : ""}${obImbalancePct.toFixed(1)}%, Stability: ${stability.stabilityIndex}%, Spoof Risk: ${stability.spoofRisk}%)`;
+    let obReq = `Top-10 book depth >= ${obMinDepth.toFixed(1)} BTC; Adjusted Imbalance >= -${(obMaxImbalance * 100).toFixed(0)}% for LONG, <= +${(obMaxImbalance * 100).toFixed(0)}% for SHORT`;
 
     if (obTotalDepth < obMinDepth) {
       obMet = false;
       obVal = `${obVal} - BLOCKED (Insufficient Book Liquidity: ${obTotalDepth.toFixed(1)} < ${obMinDepth.toFixed(1)} BTC)`;
     } else if (signalDirection === "LONG") {
-      obMet = this.orderBookStats.imbalanceRatio >= -obMaxImbalance;
+      // Dynamic tightening of threshold under high spoof risk
+      const dynamicHurdle = stability.spoofRisk >= 70 ? (-obMaxImbalance * 0.5) : -obMaxImbalance;
+      obMet = evaluatedImbalance >= dynamicHurdle;
       if (!obMet) {
-        obVal = `${obVal} - BLOCKED (Heavy Ask Wall / Negative Imbalance)`;
+        obVal = `${obVal} - BLOCKED (${stability.spoofRisk >= 70 ? "High Spoofing / Unstable Ask Wall" : "Heavy Ask Wall / Negative Imbalance"})`;
       } else {
-        obVal = `${obVal} - PASSED (Strong Bid Support)`;
+        obVal = `${obVal} - PASSED (${stability.spoofRisk >= 40 ? "Damped Bid Support" : "Strong Bid Support"})`;
       }
     } else if (signalDirection === "SHORT") {
-      obMet = this.orderBookStats.imbalanceRatio <= obMaxImbalance;
+      const dynamicHurdle = stability.spoofRisk >= 70 ? (obMaxImbalance * 0.5) : obMaxImbalance;
+      obMet = evaluatedImbalance <= dynamicHurdle;
       if (!obMet) {
-        obVal = `${obVal} - BLOCKED (Heavy Bid Floor / Positive Imbalance)`;
+        obVal = `${obVal} - BLOCKED (${stability.spoofRisk >= 70 ? "High Spoofing / Unstable Bid Wall" : "Heavy Bid Floor / Positive Imbalance"})`;
       } else {
-        obVal = `${obVal} - PASSED (Strong Sell Pressure / Ask Dominance)`;
+        obVal = `${obVal} - PASSED (${stability.spoofRisk >= 40 ? "Damped Ask Wall" : "Strong Sell Pressure / Ask Dominance"})`;
       }
     }
 
@@ -1259,7 +1439,7 @@ class TradingEngine {
       met: obMet,
       current_value: obVal,
       required: obReq,
-      description: `Verifies near-book liquidity depth (minimum ${obMinDepth.toFixed(1)} BTC cumulative top-10 levels) and ensures top-10 level bid/ask order book imbalance aligns with the entry direction to avoid buying directly into massive ask walls or selling into heavy bid walls.`,
+      description: `Verifies near-book liquidity depth and evaluates stability/spoofing risks (stability index: ${stability.stabilityIndex}%, spoof risk: ${stability.spoofRisk}%). Applies a continuous, volume-mismatch filtered EMA imbalance to reject fleeting, spoofed limit wall orders designed by market-makers to trigger false signals.`,
       priority: "HIGH",
     });
 
@@ -1579,6 +1759,11 @@ class TradingEngine {
             imbalanceRatio,
             lastUpdateSecs: Math.floor(Date.now() / 1000),
           };
+
+          this.orderBookImbalanceHistory.push(imbalanceRatio);
+          if (this.orderBookImbalanceHistory.length > 15) {
+            this.orderBookImbalanceHistory.shift();
+          }
         }
       } else {
         throw new Error(`HTTP Error ${res.status}`);
@@ -1597,6 +1782,11 @@ class TradingEngine {
         imbalanceRatio: imbalance,
         lastUpdateSecs: Math.floor(Date.now() / 1000),
       };
+
+      this.orderBookImbalanceHistory.push(imbalance);
+      if (this.orderBookImbalanceHistory.length > 15) {
+        this.orderBookImbalanceHistory.shift();
+      }
     }
   }
 
@@ -3452,7 +3642,7 @@ class TradingEngine {
     if (closes.length < 50) return;
 
     const lastIdx = closes.length - 1;
-    const currentClose = closes[lastIdx];
+    const currentClose = this.currentPrice;
 
     const ema9 = this.calculateEMA(closes, 9);
     const ema21 = this.calculateEMA(closes, 21);
@@ -3530,7 +3720,10 @@ class TradingEngine {
     // Determine signal direction using HH/HL breakout strategy for trending markets:
     const struct = this.getTrendMarketStructure();
     const opens = this.candles1m.map((c) => c.open);
-    const averageBodySize = closes.slice(-20).map((c, idx) => Math.abs(c - opens[idx])).reduce((a, b) => a + b, 0) / 20;
+    const averageBodySize = closes.slice(-20).map((c, idx) => {
+      const openVal = opens[closes.length - 20 + idx] !== undefined ? opens[closes.length - 20 + idx] : c;
+      return Math.abs(c - openVal);
+    }).reduce((a, b) => a + b, 0) / 20;
     const currentCandle = this.candles1m[lastIdx];
     const currentBodySize = Math.abs(currentCandle.close - currentCandle.open);
     const atr14 = this.calculateATR(this.candles1m, 14);
@@ -3981,22 +4174,20 @@ class TradingEngine {
 
     // C17: Binance Order Flow Confirmation
     let ofMet = true;
-    let ofVal = `Taker Buy Ratio: ${(this.orderFlowStats.takerBuyRatio * 100).toFixed(1)}% (CVD: ${this.orderFlowStats.netCVD.toFixed(2)} BTC)`;
-    let ofReq = "Taker Buy Ratio >= 51.0% for LONG, <= 49.0% for SHORT";
+    const flowRes = this.getOrderFlowScore(signalDirection);
+    let ofVal = `Score: ${flowRes.score}/100 [${flowRes.label}] | Taker Buy: ${(flowRes.takerBuyRatio * 100).toFixed(1)}% | Imbalance: ${(flowRes.imbalanceRatio * 100).toFixed(1)}%`;
+    let ofReq = "Dynamic Score >= 45/100 (Softenable to 30/100 if CatBoost AI probability >= 85.0%)";
 
-    if (signalDirection === "LONG") {
-      ofMet = this.orderFlowStats.takerBuyRatio >= 0.51;
+    if (signalDirection !== "NEUTRAL") {
+      const activeProb = signalDirection === "LONG" ? probabilityLong : probabilityShort;
+      const isExtremeAiConfidence = activeProb >= 0.85;
+      const hurdleScore = isExtremeAiConfidence ? 30 : 45;
+      ofMet = flowRes.score >= hurdleScore;
       if (!ofMet) {
-        ofVal = `${ofVal} - BLOCKED (Insufficient Buy Pressure)`;
+        ofVal = `${ofVal} - BLOCKED (${flowRes.description})`;
       } else {
-        ofVal = `${ofVal} - PASSED (Strong Buy Pressure)`;
-      }
-    } else if (signalDirection === "SHORT") {
-      ofMet = this.orderFlowStats.takerBuyRatio <= 0.49;
-      if (!ofMet) {
-        ofVal = `${ofVal} - BLOCKED (Insufficient Sell Pressure)`;
-      } else {
-        ofVal = `${ofVal} - PASSED (Strong Sell Pressure)`;
+        const softState = flowRes.score < 45 ? " - SOFTENED BY AI" : "";
+        ofVal = `${ofVal} - PASSED${softState} (${flowRes.description})`;
       }
     }
 
@@ -4042,26 +4233,35 @@ class TradingEngine {
     const obMaxImbalance = config.general.order_book_max_imbalance !== undefined ? config.general.order_book_max_imbalance : 0.35;
 
     const obTotalDepth = this.orderBookStats.bidDepthBTC + this.orderBookStats.askDepthBTC;
-    const obImbalancePct = this.orderBookStats.imbalanceRatio * 100;
-    let obVal = `Bids Depth: ${this.orderBookStats.bidDepthBTC.toFixed(1)} BTC | Asks Depth: ${this.orderBookStats.askDepthBTC.toFixed(1)} BTC (Imbalance: ${obImbalancePct >= 0 ? "+" : ""}${obImbalancePct.toFixed(1)}%)`;
-    let obReq = `Top-10 book depth >= ${obMinDepth.toFixed(1)} BTC; Imbalance >= -${(obMaxImbalance * 100).toFixed(0)}% for LONG, <= +${(obMaxImbalance * 100).toFixed(0)}% for SHORT`;
+    const stability = this.getOrderBookStability(signalDirection);
+    
+    // Use adjusted/damped imbalance ratio to nullify spoofed limit orders
+    const evaluatedImbalance = stability.adjustedImbalance;
+    const obImbalancePct = evaluatedImbalance * 100;
+    const rawImbalancePct = this.orderBookStats.imbalanceRatio * 100;
+
+    let obVal = `Bids: ${this.orderBookStats.bidDepthBTC.toFixed(1)} | Asks: ${this.orderBookStats.askDepthBTC.toFixed(1)} BTC | Imbalance: ${rawImbalancePct >= 0 ? "+" : ""}${rawImbalancePct.toFixed(1)}% (Adjusted: ${obImbalancePct >= 0 ? "+" : ""}${obImbalancePct.toFixed(1)}%, Stability: ${stability.stabilityIndex}%, Spoof Risk: ${stability.spoofRisk}%)`;
+    let obReq = `Top-10 book depth >= ${obMinDepth.toFixed(1)} BTC; Adjusted Imbalance >= -${(obMaxImbalance * 100).toFixed(0)}% for LONG, <= +${(obMaxImbalance * 100).toFixed(0)}% for SHORT`;
 
     if (obTotalDepth < obMinDepth) {
       obMet = false;
       obVal = `${obVal} - BLOCKED (Insufficient Book Liquidity: ${obTotalDepth.toFixed(1)} < ${obMinDepth.toFixed(1)} BTC)`;
     } else if (signalDirection === "LONG") {
-      obMet = this.orderBookStats.imbalanceRatio >= -obMaxImbalance;
+      // Dynamic tightening of threshold under high spoof risk
+      const dynamicHurdle = stability.spoofRisk >= 70 ? (-obMaxImbalance * 0.5) : -obMaxImbalance;
+      obMet = evaluatedImbalance >= dynamicHurdle;
       if (!obMet) {
-        obVal = `${obVal} - BLOCKED (Heavy Ask Wall / Negative Imbalance)`;
+        obVal = `${obVal} - BLOCKED (${stability.spoofRisk >= 70 ? "High Spoofing / Unstable Ask Wall" : "Heavy Ask Wall / Negative Imbalance"})`;
       } else {
-        obVal = `${obVal} - PASSED (Strong Bid Support)`;
+        obVal = `${obVal} - PASSED (${stability.spoofRisk >= 40 ? "Damped Bid Support" : "Strong Bid Support"})`;
       }
     } else if (signalDirection === "SHORT") {
-      obMet = this.orderBookStats.imbalanceRatio <= obMaxImbalance;
+      const dynamicHurdle = stability.spoofRisk >= 70 ? (obMaxImbalance * 0.5) : obMaxImbalance;
+      obMet = evaluatedImbalance <= dynamicHurdle;
       if (!obMet) {
-        obVal = `${obVal} - BLOCKED (Heavy Bid Floor / Positive Imbalance)`;
+        obVal = `${obVal} - BLOCKED (${stability.spoofRisk >= 70 ? "High Spoofing / Unstable Bid Wall" : "Heavy Bid Floor / Positive Imbalance"})`;
       } else {
-        obVal = `${obVal} - PASSED (Strong Sell Pressure / Ask Dominance)`;
+        obVal = `${obVal} - PASSED (${stability.spoofRisk >= 40 ? "Damped Ask Wall" : "Strong Sell Pressure / Ask Dominance"})`;
       }
     }
 

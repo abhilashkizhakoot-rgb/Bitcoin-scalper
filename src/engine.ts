@@ -788,13 +788,13 @@ class TradingEngine {
     });
 
     const hasExtremeRealtimePressure = (config.general.enable_orderflow_softening !== false) &&
-                                       ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.55 || this.orderBookStats.imbalanceRatio >= 0.25)) ||
-                                       (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.45 || this.orderBookStats.imbalanceRatio <= -0.25)));
+                                       ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.68 || this.orderBookStats.imbalanceRatio >= 0.45)) ||
+                                       (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.32 || this.orderBookStats.imbalanceRatio <= -0.45)));
 
     const isLowVolatility = this.currentRegime === MarketRegime.LOW_VOLATILITY;
     const hasSoftenRegimePressure = (config.general.enable_orderflow_softening !== false) &&
-                                    ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.60 || this.orderBookStats.imbalanceRatio >= 0.40)) ||
-                                    (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.40 || this.orderBookStats.imbalanceRatio <= -0.40))) &&
+                                    ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.60 || this.orderBookStats.imbalanceRatio >= 0.35)) ||
+                                    (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.40 || this.orderBookStats.imbalanceRatio <= -0.35))) &&
                                     (relVolume > 1.1);
 
     // C2: Market Regime lock
@@ -2539,7 +2539,7 @@ class TradingEngine {
       let pullbackRetestMessage = "";
       if (hasPulledBackToZone) {
         const isRejection = (currentCandle.close > currentCandle.open) || ((currentCandle.close - currentCandle.low) >= 0.3 * (currentCandle.high - currentCandle.low));
-        const isContinuation = currentCandle.close > currentCandle.open && currentPrice >= breakoutLevel - 0.1 * currentAtr;
+        const isContinuation = currentCandle.close > currentCandle.open && currentCandle.close >= breakoutLevel;
         if (isRejection && isContinuation) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
@@ -2688,7 +2688,7 @@ class TradingEngine {
       let pullbackRetestMessage = "";
       if (hasPulledBackToZone) {
         const isRejection = (currentCandle.close < currentCandle.open) || ((currentCandle.high - currentCandle.close) >= 0.3 * (currentCandle.high - currentCandle.low));
-        const isContinuation = currentCandle.close < currentCandle.open && currentPrice <= breakoutLevel + 0.1 * currentAtr;
+        const isContinuation = currentCandle.close < currentCandle.open && currentCandle.close <= breakoutLevel;
         if (isRejection && isContinuation) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
@@ -3533,13 +3533,13 @@ class TradingEngine {
     });
 
     const hasExtremeRealtimePressure = (config.general.enable_orderflow_softening !== false) &&
-                                       ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.55 || this.orderBookStats.imbalanceRatio >= 0.25)) ||
-                                       (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.45 || this.orderBookStats.imbalanceRatio <= -0.25)));
+                                       ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.68 || this.orderBookStats.imbalanceRatio >= 0.45)) ||
+                                       (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.32 || this.orderBookStats.imbalanceRatio <= -0.45)));
 
     const isLowVolatility = this.currentRegime === MarketRegime.LOW_VOLATILITY;
     const hasSoftenRegimePressure = (config.general.enable_orderflow_softening !== false) &&
-                                    ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.60 || this.orderBookStats.imbalanceRatio >= 0.40)) ||
-                                    (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.40 || this.orderBookStats.imbalanceRatio <= -0.40))) &&
+                                    ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.60 || this.orderBookStats.imbalanceRatio >= 0.35)) ||
+                                    (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.40 || this.orderBookStats.imbalanceRatio <= -0.35))) &&
                                     (relVolume > 1.1);
 
     // C2: Market Regime lock

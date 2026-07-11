@@ -2748,50 +2748,110 @@ class TradingEngine {
     const adxValue = adx14[lastIdx] || 25;
 
     let adxLabel = "Moderate Trend";
-    let pullbackMultiplier = 0.4; // Default
-    let emaRetraceMultiplier = 0.25; // Default
-    let invalidationMultiplier = 0.25; // Default
-
-    if (adxValue < 20) {
-      adxLabel = "Weak / Choppy";
-      pullbackMultiplier = 0.2;       // Requires very deep pullback to broken level to avoid buying top
-      emaRetraceMultiplier = 0.15;     // Requires tight touch of EMA
-      invalidationMultiplier = 0.15;   // Tight invalidation to cut false breakout losses fast
-    } else if (adxValue >= 20 && adxValue < 30) {
-      adxLabel = "Normal Trend";
-      pullbackMultiplier = 0.4;
-      emaRetraceMultiplier = 0.25;
-      invalidationMultiplier = 0.25;
-    } else if (adxValue >= 30 && adxValue < 40) {
-      adxLabel = "Strong Trend";
-      pullbackMultiplier = 0.6;       // Shallow pullback allowed (price is highly bid)
-      emaRetraceMultiplier = 0.4;      // Shallow EMA pullback allowed
-      invalidationMultiplier = 0.35;   // Room to breathe to avoid wicks shaking us out
-    } else { // adxValue >= 40
-      adxLabel = "Parabolic Trend";
-      pullbackMultiplier = 0.8;       // Very shallow pullback allowed
-      emaRetraceMultiplier = 0.55;     // Very shallow EMA pullback allowed
-      invalidationMultiplier = 0.45;   // Max breathing room for high-volatility trend extension
-    }
+    if (adxValue < 20) adxLabel = "Weak / Choppy";
+    else if (adxValue >= 20 && adxValue < 30) adxLabel = "Normal Trend";
+    else if (adxValue >= 30 && adxValue < 40) adxLabel = "Strong Trend";
+    else adxLabel = "Parabolic Trend";
 
     const closes = this.candles1m.map(c => c.close);
-    const ema200 = this.calculateEMA(closes, Math.min(closes.length, 200));
-    const ema200Val = ema200[lastIdx] || currentPrice;
+    const ema20Series = this.calculateEMA(closes, 20);
+    const ema50Series = this.calculateEMA(closes, 50);
+    const ema100Series = this.calculateEMA(closes, 100);
+    const ema200Series = this.calculateEMA(closes, Math.min(closes.length, 200));
 
-    // Dynamic selection of the active EMA zones based on ADX (Normal Trend [20-30]: 100/200 EMA; Strong Trend [30-40]: 20/50 EMA)
-    let firstEmaVal = ema20Val;
-    let secondEmaVal = ema50Val;
-    let emaZoneLabel = "20/50 EMA";
+    const ema20ValComputed = ema20Series[lastIdx] || ema20Val;
+    const ema50ValComputed = ema50Series[lastIdx] || ema50Val;
+    const ema100ValComputed = ema100Series[lastIdx] || ema100Val;
+    const ema200ValComputed = ema200Series[lastIdx] || currentPrice;
 
-    if (adxValue < 30) {
-      firstEmaVal = ema100Val;
-      secondEmaVal = ema200Val;
-      emaZoneLabel = "100/200 EMA";
-    } else {
-      firstEmaVal = ema20Val;
-      secondEmaVal = ema50Val;
-      emaZoneLabel = "20/50 EMA";
+    // 1. EMA Slope of EMA20 (over last 5 candles)
+    const slopePeriod = 5;
+    let ema20SlopePct = 0;
+    if (lastIdx >= slopePeriod && ema20Series[lastIdx] && ema20Series[lastIdx - slopePeriod]) {
+      const slopeRaw = (ema20Series[lastIdx] - ema20Series[lastIdx - slopePeriod]) / slopePeriod;
+      ema20SlopePct = (slopeRaw / currentPrice) * 100;
     }
+
+    // 2. Trend Acceleration (change in slope over prior 5 candles)
+    let ema20AccelerationPct = 0;
+    if (lastIdx >= slopePeriod * 2 && ema20Series[lastIdx - slopePeriod] && ema20Series[lastIdx - slopePeriod * 2]) {
+      const slopePrevRaw = (ema20Series[lastIdx - slopePeriod] - ema20Series[lastIdx - slopePeriod * 2]) / slopePeriod;
+      const slopePrevPct = (slopePrevRaw / currentPrice) * 100;
+      ema20AccelerationPct = ema20SlopePct - slopePrevPct;
+    }
+
+    // 3. Trend Momentum (EMA Spread)
+    const emaSpreadPct = (Math.abs(ema20ValComputed - ema50ValComputed) / currentPrice) * 100;
+
+    // 4. Distance from EMA200 (Stretch)
+    const distanceToEma200Pct = (Math.abs(currentPrice - ema200ValComputed) / currentPrice) * 100;
+
+    // 5. Volatility (ATR relative to price)
+    const relativeAtrPct = (currentAtr / currentPrice) * 100;
+
+    // Point-based classification system for expected pullback depth
+    let depthPoints = 0;
+
+    // ADX Influence
+    if (adxValue >= 35) depthPoints += 2;
+    else if (adxValue >= 25) depthPoints += 1;
+
+    // Slope Influence (strong slope in the correct direction favors shallow pullback)
+    if (direction === "LONG") {
+      if (ema20SlopePct > 0.04) depthPoints += 2;
+      else if (ema20SlopePct > 0.015) depthPoints += 1;
+    } else { // SHORT
+      if (ema20SlopePct < -0.04) depthPoints += 2;
+      else if (ema20SlopePct < -0.015) depthPoints += 1;
+    }
+
+    // Acceleration Influence
+    if (direction === "LONG") {
+      if (ema20AccelerationPct > 0.005) depthPoints += 1;
+    } else { // SHORT
+      if (ema20AccelerationPct < -0.005) depthPoints += 1;
+    }
+
+    // Spread/Momentum Influence
+    if (emaSpreadPct >= 0.4) depthPoints += 1;
+    else if (emaSpreadPct < 0.15) depthPoints -= 1;
+
+    // Distance to EMA200 (Mean-reversion risk favors deeper pullbacks)
+    if (distanceToEma200Pct > 2.5) depthPoints -= 2;
+    else if (distanceToEma200Pct > 1.2) depthPoints -= 1;
+
+    // Relative Volatility (high volatility favors deeper retracements)
+    if (relativeAtrPct > 0.5) depthPoints -= 1;
+
+    // Pullback depth classification and EMA zone selection
+    let classifiedDepth: "Shallow" | "Medium" | "Deep" = "Medium";
+    let firstEmaVal = ema50ValComputed;
+    let secondEmaVal = ema100ValComputed;
+    let emaZoneLabel = "50/100 EMA";
+
+    let pullbackMultiplier = 0.45;
+    let emaRetraceMultiplier = 0.30;
+    let invalidationMultiplier = 0.25;
+
+    if (depthPoints >= 3) {
+      classifiedDepth = "Shallow";
+      firstEmaVal = ema20ValComputed;
+      secondEmaVal = ema50ValComputed;
+      emaZoneLabel = "20/50 EMA";
+      pullbackMultiplier = 0.7;
+      emaRetraceMultiplier = 0.45;
+      invalidationMultiplier = 0.40;
+    } else if (depthPoints < 0) {
+      classifiedDepth = "Deep";
+      firstEmaVal = ema100ValComputed;
+      secondEmaVal = ema200ValComputed;
+      emaZoneLabel = "100/200 EMA";
+      pullbackMultiplier = 0.25;
+      emaRetraceMultiplier = 0.18;
+      invalidationMultiplier = 0.15;
+    }
+
+    const ema200Val = ema200ValComputed;
 
     // --- FEATURE 3: Multi-Timeframe (5m) Trend Structure Alignment ---
     const candles5m = this.aggregateCandles(this.candles1m, 5);
@@ -2928,6 +2988,64 @@ class TradingEngine {
         }
       }
 
+      // Objective Candle Rejection Evaluation for LONG (Support)
+      const range = currentCandle.high - currentCandle.low;
+      const body = Math.abs(currentCandle.close - currentCandle.open);
+      const upperWick = currentCandle.high - Math.max(currentCandle.close, currentCandle.open);
+      const lowerWick = Math.min(currentCandle.close, currentCandle.open) - currentCandle.low;
+      const isBullish = currentCandle.close > currentCandle.open;
+      const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
+
+      // 1. Classic Pin Bar (Bullish)
+      const isPinBar = range > 0 && lowerWick >= 0.5 * range && upperWick <= 0.25 * range;
+
+      // 2. Strong Close (Top 30% of candle range)
+      const hasStrongClose = range > 0 && (currentCandle.close - currentCandle.low) / range >= 0.70;
+
+      // 3. Bullish Engulfing
+      const isBullishEngulfing = prevCandle && 
+        (prevCandle.close < prevCandle.open) && 
+        isBullish && 
+        (currentCandle.close >= prevCandle.open) && 
+        (currentCandle.open <= prevCandle.close);
+
+      // 4. Momentum Candle (Large bullish body relative to average range)
+      const isMomentumCandle = isBullish && body >= 0.7 * currentAtr;
+
+      // 5. Multi-Candle Double Bottom / Multi-Wick Rejection
+      const hasMultiWickRejection = prevCandle && 
+        (lowerWick >= 0.35 * range) && 
+        ((Math.min(prevCandle.close, prevCandle.open) - prevCandle.low) >= 0.35 * (prevCandle.high - prevCandle.low)) && 
+        Math.abs(currentCandle.low - prevCandle.low) < 0.15 * currentAtr;
+
+      // 6. Indecision check (Reject weak spinning tops and Dojis)
+      const isIndecision = range > 0 && (body / range < 0.15) && !isPinBar;
+
+      // Combine into robust rejection check
+      let isLongRejectionConfirmed = false;
+      let longRejectionType = "";
+
+      if (isPinBar) {
+        isLongRejectionConfirmed = true;
+        longRejectionType = "Bullish Pin Bar";
+      } else if (isBullishEngulfing) {
+        isLongRejectionConfirmed = true;
+        longRejectionType = "Bullish Engulfing Pattern";
+      } else if (hasMultiWickRejection) {
+        isLongRejectionConfirmed = true;
+        longRejectionType = "Multi-Candle Wick Rejection";
+      } else if (isMomentumCandle && hasStrongClose) {
+        isLongRejectionConfirmed = true;
+        longRejectionType = "Bullish Momentum Candle";
+      } else if (hasStrongClose && (lowerWick > upperWick || isBullish)) {
+        isLongRejectionConfirmed = true;
+        longRejectionType = "Strong Close Support Rejection";
+      }
+
+      if (isIndecision) {
+        isLongRejectionConfirmed = false; // Override and reject weak indecision
+      }
+
       // Setup 1: Pullback and Retest
       const effectivePullbackMult = Math.max(pullbackMultiplier, ms.pullback_multiplier_limit);
       const effectiveEmaMult = Math.max(emaRetraceMultiplier, ms.ema_retrace_multiplier_limit);
@@ -2937,30 +3055,33 @@ class TradingEngine {
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
       if (hasPulledBackToZone) {
-        const isRejection = (currentCandle.close > currentCandle.open) || ((currentCandle.close - currentCandle.low) >= 0.3 * (currentCandle.high - currentCandle.low));
-        const isContinuation = currentCandle.close > currentCandle.open && currentCandle.close >= breakoutLevel;
+        const isRejection = isLongRejectionConfirmed;
+        const isContinuation = currentCandle.close > currentCandle.open && (currentCandle.close >= breakoutLevel || isPinBar || isBullishEngulfing || hasMultiWickRejection);
         if (isRejection && isContinuation) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
-            pullbackRetestMessage = `Pullback & Retest setup confirmed${mtfMessage}: Price pulled back to broken HH level ($${breakoutLevel.toFixed(2)}) on declining volume and rejected it as support with bullish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], Retrace limit: +${effectivePullbackMult.toFixed(1)} * ATR).`;
+            pullbackRetestMessage = `Pullback & Retest setup confirmed via [${longRejectionType}]${mtfMessage}: Price pulled back to broken HH level ($${breakoutLevel.toFixed(2)}) on declining volume and rejected it as support with bullish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], Retrace limit: +${effectivePullbackMult.toFixed(1)} * ATR).`;
           } else {
             pullbackRetestMessage = "Blocked Retest: Pullback volume is abnormally high, indicating excessive distribution/selling pressure.";
           }
         }
       }
 
-      // Setup 2: Adaptive EMA Pushback Zone (based on ADX)
+      // Setup 2: Adaptive EMA Pushback Zone
       const emaRetraceThresholdFirst = firstEmaVal + effectiveEmaMult * currentAtr;
       const emaRetraceThresholdSecond = secondEmaVal + effectiveEmaMult * currentAtr;
       const hasRetracedToEMA = postBreakoutCandles.some(c => c.low <= emaRetraceThresholdFirst || c.low <= emaRetraceThresholdSecond);
       
-      const currentRejectsFirst = currentCandle.low <= firstEmaVal + 0.2 * currentAtr && currentPrice >= (firstEmaVal - 0.15 * currentAtr) && currentCandle.close > currentCandle.open;
-      const currentRejectsSecond = currentCandle.low <= secondEmaVal + 0.2 * currentAtr && currentPrice >= (secondEmaVal - 0.15 * currentAtr) && currentCandle.close > currentCandle.open;
-      const isEmaPushbackValid = (currentRejectsFirst || currentRejectsSecond) && hasRetracedToEMA;
+      // Touch or rejection proximity to dynamic EMA zone
+      const touchesFirstEma = currentCandle.low <= firstEmaVal + 0.25 * currentAtr && currentCandle.high >= firstEmaVal - 0.15 * currentAtr;
+      const touchesSecondEma = currentCandle.low <= secondEmaVal + 0.25 * currentAtr && currentCandle.high >= secondEmaVal - 0.15 * currentAtr;
+      
+      const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isLongRejectionConfirmed && hasRetracedToEMA;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
-          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed${mtfMessage}: Price rejected dynamic EMA support at $${(currentRejectsFirst ? firstEmaVal : secondEmaVal).toFixed(2)} with bullish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
+          const matchedEmaVal = touchesFirstEma ? firstEmaVal : secondEmaVal;
+          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed via [${longRejectionType}]${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected dynamic EMA support at $${matchedEmaVal.toFixed(2)} with bullish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
         } else {
           emaPushbackMessage = "Blocked EMA Pushback: Abnormally high volume pullback during EMA retracement suggests a trend failure.";
         }
@@ -2973,13 +3094,12 @@ class TradingEngine {
       } else {
         const failureReason = !isVolumeHealthyForPullback
           ? "Pullback volume is abnormally high (distribution risk); waiting for volume to dry up before confirming a safe entry."
-          : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to ${emaZoneLabel} pushback setup (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
+          : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to ${emaZoneLabel} pushback setup (Adaptive Expected Depth: ${classifiedDepth}, ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
         return {
           confirmed: false,
           message: failureReason
         };
       }
-
     } else {
       // SHORT
       const isEmaAlignedShort = adxValue >= ms.weak_trend_adx_threshold
@@ -3022,7 +3142,7 @@ class TradingEngine {
       if (boBodyRatio < ms.min_breakout_body_ratio) {
         return {
           confirmed: false,
-          message: `Blocked: Weak breakout candle body at $${breakoutLevel.toFixed(2)} (Body is only ${(boBodyRatio * 100).toFixed(0)}% of total range). Likely false breakdown/wick sweep.`
+          message: `Blocked: Weak breakout candle body at $${breakoutLevel.toFixed(2)} (Body is only ${(boBodyRatio * 100).toFixed(0)}% of total range). Likely false breakout/wick sweep.`
         };
       }
 
@@ -3087,6 +3207,64 @@ class TradingEngine {
         }
       }
 
+      // Objective Candle Rejection Evaluation for SHORT (Resistance)
+      const range = currentCandle.high - currentCandle.low;
+      const body = Math.abs(currentCandle.close - currentCandle.open);
+      const upperWick = currentCandle.high - Math.max(currentCandle.close, currentCandle.open);
+      const lowerWick = Math.min(currentCandle.close, currentCandle.open) - currentCandle.low;
+      const isBearish = currentCandle.close < currentCandle.open;
+      const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
+
+      // 1. Classic Pin Bar (Bearish)
+      const isPinBar = range > 0 && upperWick >= 0.5 * range && lowerWick <= 0.25 * range;
+
+      // 2. Strong Close (Bottom 30% of candle range)
+      const hasStrongClose = range > 0 && (currentCandle.high - currentCandle.close) / range >= 0.70;
+
+      // 3. Bearish Engulfing
+      const isBearishEngulfing = prevCandle && 
+        (prevCandle.close > prevCandle.open) && 
+        isBearish && 
+        (currentCandle.close <= prevCandle.open) && 
+        (currentCandle.open >= prevCandle.close);
+
+      // 4. Momentum Candle (Large bearish body relative to average range)
+      const isMomentumCandle = isBearish && body >= 0.7 * currentAtr;
+
+      // 5. Multi-Candle Double Top / Multi-Wick Rejection
+      const hasMultiWickRejection = prevCandle && 
+        (upperWick >= 0.35 * range) && 
+        ((prevCandle.high - Math.max(prevCandle.close, prevCandle.open)) >= 0.35 * (prevCandle.high - prevCandle.low)) && 
+        Math.abs(currentCandle.high - prevCandle.high) < 0.15 * currentAtr;
+
+      // 6. Indecision check (Reject weak spinning tops and Dojis)
+      const isIndecision = range > 0 && (body / range < 0.15) && !isPinBar;
+
+      // Combine into robust rejection check
+      let isShortRejectionConfirmed = false;
+      let shortRejectionType = "";
+
+      if (isPinBar) {
+        isShortRejectionConfirmed = true;
+        shortRejectionType = "Bearish Pin Bar";
+      } else if (isBearishEngulfing) {
+        isShortRejectionConfirmed = true;
+        shortRejectionType = "Bearish Engulfing Pattern";
+      } else if (hasMultiWickRejection) {
+        isShortRejectionConfirmed = true;
+        shortRejectionType = "Multi-Candle Wick Rejection";
+      } else if (isMomentumCandle && hasStrongClose) {
+        isShortRejectionConfirmed = true;
+        shortRejectionType = "Bearish Momentum Candle";
+      } else if (hasStrongClose && (upperWick > lowerWick || isBearish)) {
+        isShortRejectionConfirmed = true;
+        shortRejectionType = "Strong Close Resistance Rejection";
+      }
+
+      if (isIndecision) {
+        isShortRejectionConfirmed = false; // Override and reject weak indecision
+      }
+
       // Setup 1: Pullback and Retest
       const effectivePullbackMult = Math.max(pullbackMultiplier, ms.pullback_multiplier_limit);
       const effectiveEmaMult = Math.max(emaRetraceMultiplier, ms.ema_retrace_multiplier_limit);
@@ -3096,30 +3274,33 @@ class TradingEngine {
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
       if (hasPulledBackToZone) {
-        const isRejection = (currentCandle.close < currentCandle.open) || ((currentCandle.high - currentCandle.close) >= 0.3 * (currentCandle.high - currentCandle.low));
-        const isContinuation = currentCandle.close < currentCandle.open && currentCandle.close <= breakoutLevel;
+        const isRejection = isShortRejectionConfirmed;
+        const isContinuation = currentCandle.close < currentCandle.open && (currentCandle.close <= breakoutLevel || isPinBar || isBearishEngulfing || hasMultiWickRejection);
         if (isRejection && isContinuation) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
-            pullbackRetestMessage = `Pullback & Retest setup confirmed${mtfMessage}: Price pulled back to broken LL level ($${breakoutLevel.toFixed(2)}) on declining volume and rejected it as resistance with bearish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], Retrace limit: -${effectivePullbackMult.toFixed(1)} * ATR).`;
+            pullbackRetestMessage = `Pullback & Retest setup confirmed via [${shortRejectionType}]${mtfMessage}: Price pulled back to broken LL level ($${breakoutLevel.toFixed(2)}) on declining volume and rejected it as resistance with bearish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], Retrace limit: -${effectivePullbackMult.toFixed(1)} * ATR).`;
           } else {
             pullbackRetestMessage = "Blocked Retest: Pullback volume is abnormally high, indicating excessive accumulation/buying pressure.";
           }
         }
       }
 
-      // Setup 2: Adaptive EMA Pushback Zone (based on ADX)
+      // Setup 2: Adaptive EMA Pushback Zone
       const emaRetraceThresholdFirst = firstEmaVal - effectiveEmaMult * currentAtr;
       const emaRetraceThresholdSecond = secondEmaVal - effectiveEmaMult * currentAtr;
       const hasRetracedToEMA = postBreakoutCandles.some(c => c.high >= emaRetraceThresholdFirst || c.high >= emaRetraceThresholdSecond);
       
-      const currentRejectsFirst = currentCandle.high >= firstEmaVal - 0.2 * currentAtr && currentPrice <= (firstEmaVal + 0.15 * currentAtr) && currentCandle.close < currentCandle.open;
-      const currentRejectsSecond = currentCandle.high >= secondEmaVal - 0.2 * currentAtr && currentPrice <= (secondEmaVal + 0.15 * currentAtr) && currentCandle.close < currentCandle.open;
-      const isEmaPushbackValid = (currentRejectsFirst || currentRejectsSecond) && hasRetracedToEMA;
+      // Touch or rejection proximity to dynamic EMA zone
+      const touchesFirstEma = currentCandle.high >= firstEmaVal - 0.25 * currentAtr && currentCandle.low <= firstEmaVal + 0.15 * currentAtr;
+      const touchesSecondEma = currentCandle.high >= secondEmaVal - 0.25 * currentAtr && currentCandle.low <= secondEmaVal + 0.15 * currentAtr;
+      
+      const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isShortRejectionConfirmed && hasRetracedToEMA;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
-          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed${mtfMessage}: Price rejected dynamic EMA resistance at $${(currentRejectsFirst ? firstEmaVal : secondEmaVal).toFixed(2)} with bearish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
+          const matchedEmaVal = touchesFirstEma ? firstEmaVal : secondEmaVal;
+          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed via [${shortRejectionType}]${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected dynamic EMA resistance at $${matchedEmaVal.toFixed(2)} with bearish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
         } else {
           emaPushbackMessage = "Blocked EMA Pushback: Abnormally high volume pullback during EMA retracement suggests a trend failure.";
         }
@@ -3132,7 +3313,7 @@ class TradingEngine {
       } else {
         const failureReason = !isVolumeHealthyForPullback
           ? "Pullback volume is abnormally high (accumulation risk); waiting for volume to dry up before confirming a safe entry."
-          : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to ${emaZoneLabel} pushback setup (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
+          : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to ${emaZoneLabel} pushback setup (Adaptive Expected Depth: ${classifiedDepth}, ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
         return {
           confirmed: false,
           message: failureReason

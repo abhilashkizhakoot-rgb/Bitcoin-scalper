@@ -22,7 +22,7 @@ import {
   Activity,
   Search,
 } from "lucide-react";
-import { Trade } from "../types.js";
+import { Trade, StrategyConfig } from "../types.js";
 import { safeFormatNumber } from "../utils/format";
 
 interface Checkpoint {
@@ -55,11 +55,12 @@ interface CheckpointsPageProps {
     };
     market_structure_config?: any;
   };
+  config: StrategyConfig | null;
   onRefresh: () => void;
   onTabChange: (tab: any) => void;
 }
 
-export default function CheckpointsPage({ status, onRefresh, onTabChange }: CheckpointsPageProps) {
+export default function CheckpointsPage({ status, config, onRefresh, onTabChange }: CheckpointsPageProps) {
   const checkpointsData = status.checkpoints;
 
   const ms = status.market_structure_config || {
@@ -185,6 +186,95 @@ export default function CheckpointsPage({ status, onRefresh, onTabChange }: Chec
   const signalDirection = checkpointsData?.signal_direction || "NEUTRAL";
   const entryScore = checkpointsData?.entry_score || 0;
   const allConditionsMet = checkpointsData?.all_conditions_met ?? false;
+
+  const isWeightedEnabled = config?.gate_scoring?.enabled === true;
+
+  const baseWeights = {
+    catboost_ai: config?.gate_scoring?.weights?.catboost_ai ?? 25,
+    market_regime: config?.gate_scoring?.weights?.market_regime ?? 15,
+    trend_alignment: config?.gate_scoring?.weights?.trend_alignment ?? 15,
+    relative_volume: config?.gate_scoring?.weights?.relative_volume ?? 10,
+    overextension: config?.gate_scoring?.weights?.overextension ?? 10,
+    wedge_filter: config?.gate_scoring?.weights?.wedge_filter ?? 5,
+    order_flow: config?.gate_scoring?.weights?.order_flow ?? 10,
+    squeeze_filter: config?.gate_scoring?.weights?.squeeze_filter ?? 5,
+    order_book: config?.gate_scoring?.weights?.order_book ?? 5,
+  };
+
+  const modifiers = config?.gate_scoring?.adaptive_modifiers ?? {
+    trending: { trend_alignment_weight_boost: 10, catboost_weight_boost: 5 },
+    ranging: { order_flow_weight_boost: 15, trend_alignment_weight_reduction: -10 },
+    high_volatility: { relative_volume_weight_boost: 10, overextension_weight_boost: 10 },
+    low_volatility: { squeeze_filter_weight_boost: 15 },
+  };
+
+  const activeWeights = { ...baseWeights };
+  const appliedModifiers: Record<string, { val: number; desc: string }> = {};
+
+  if (status.current_regime === "STRONG_UPTREND" || status.current_regime === "STRONG_DOWNTREND") {
+    const taBoost = modifiers.trending?.trend_alignment_weight_boost ?? 10;
+    const cbBoost = modifiers.trending?.catboost_weight_boost ?? 5;
+    activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + taBoost);
+    activeWeights.catboost_ai = Math.max(0, activeWeights.catboost_ai + cbBoost);
+    appliedModifiers.trend_alignment = { val: taBoost, desc: "Trending alignment boost" };
+    appliedModifiers.catboost_ai = { val: cbBoost, desc: "Trending AI boost" };
+  } else if (status.current_regime === "RANGE_BOUND") {
+    const ofBoost = modifiers.ranging?.order_flow_weight_boost ?? 15;
+    const taRed = modifiers.ranging?.trend_alignment_weight_reduction ?? -10;
+    activeWeights.order_flow = Math.max(0, activeWeights.order_flow + ofBoost);
+    activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + taRed);
+    appliedModifiers.order_flow = { val: ofBoost, desc: "Ranging order flow boost" };
+    appliedModifiers.trend_alignment = { val: taRed, desc: "Ranging trend reduction" };
+  } else if (status.current_regime === "HIGH_VOLATILITY") {
+    const rvBoost = modifiers.high_volatility?.relative_volume_weight_boost ?? 10;
+    const oeBoost = modifiers.high_volatility?.overextension_weight_boost ?? 10;
+    activeWeights.relative_volume = Math.max(0, activeWeights.relative_volume + rvBoost);
+    activeWeights.overextension = Math.max(0, activeWeights.overextension + oeBoost);
+    appliedModifiers.relative_volume = { val: rvBoost, desc: "High volatility volume boost" };
+    appliedModifiers.overextension = { val: oeBoost, desc: "High volatility overextension boost" };
+  } else if (status.current_regime === "LOW_VOLATILITY") {
+    const sqBoost = modifiers.low_volatility?.squeeze_filter_weight_boost ?? 15;
+    activeWeights.squeeze_filter = Math.max(0, activeWeights.squeeze_filter + sqBoost);
+    appliedModifiers.squeeze_filter = { val: sqBoost, desc: "Low volatility squeeze boost" };
+  }
+
+  const tacticalGatesMap = [
+    { condName: "CatBoost AI Prediction", weightKey: "catboost_ai", label: "CatBoost AI Engine" },
+    { condName: "Market Regime Filter", weightKey: "market_regime", label: "Market Regime Filter" },
+    { condName: "Trend Alignment & Strength (EMA/ADX)", weightKey: "trend_alignment", label: "EMA & ADX Trend Support" },
+    { condName: "Relative Volume Confirmation", weightKey: "relative_volume", label: "Relative Volume Surge" },
+    { condName: "Overextension & Level Anchors (VWAP/EMA)", weightKey: "overextension", label: "VWAP & EMA Overextension" },
+    { condName: "Wedge Pattern Filter", weightKey: "wedge_filter", label: "Wedge Pattern Lock" },
+    { condName: "Binance Order Flow Confirmation", weightKey: "order_flow", label: "Binance Order Flow Score" },
+    { condName: "Volatility Compression (Squeeze) Filter", weightKey: "squeeze_filter", label: "Bollinger Squeeze Filter" },
+    { condName: "Order Book Imbalance & Liquidity Depth Gate", weightKey: "order_book", label: "Near-Book Imbalance Gate" },
+  ];
+
+  let totalTacticalWeight = 0;
+  let earnedTacticalWeight = 0;
+
+  for (const gate of tacticalGatesMap) {
+    const cond = conditions.find(c => c.name === gate.condName);
+    const weight = activeWeights[gate.weightKey as keyof typeof activeWeights] || 0;
+    totalTacticalWeight += weight;
+    if (cond?.met) {
+      earnedTacticalWeight += weight;
+    }
+  }
+
+  const getWeightForCondition = (name: string) => {
+    if (!isWeightedEnabled) return null;
+    const gate = tacticalGatesMap.find((g) => g.condName === name);
+    if (!gate) return null;
+    const baseW = baseWeights[gate.weightKey as keyof typeof baseWeights] || 0;
+    const activeW = activeWeights[gate.weightKey as keyof typeof activeWeights] || 0;
+    const modifier = appliedModifiers[gate.weightKey];
+    return {
+      base: baseW,
+      active: activeW,
+      modifier: modifier || null,
+    };
+  };
 
   const metCount = conditions.filter((c) => c.met).length;
   const blockedCount = conditions.length - metCount;
@@ -380,6 +470,178 @@ export default function CheckpointsPage({ status, onRefresh, onTabChange }: Chec
           </div>
         </div>
       </div>
+
+      {/* ================= WEIGHTED SCORING ENGINE DASHBOARD ================= */}
+      {isWeightedEnabled && (
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm space-y-6 animate-fade-in" id="weighted-scoring-dashboard">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-100 pb-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-lg">
+                  <Sliders className="w-4 h-4" />
+                </div>
+                <h2 className="font-sans font-bold text-base text-slate-800 tracking-tight">
+                  Adaptive Weighted Gating System
+                </h2>
+                <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-600 border border-indigo-100">
+                  v2.4 ACTIVE
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                The trade engine maps tactical checkpoints to adaptive weights dynamically altered by the current market regime (<span className="font-semibold text-slate-700">{status.current_regime?.replace(/_/g, " ")}</span>).
+              </p>
+            </div>
+            
+            <div className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-1.5 text-xs font-mono">
+              <span className="text-slate-400 font-bold">Tactical Confidence Required:</span>
+              <span className="text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md font-extrabold">
+                &ge; {config?.gate_scoring?.confidence_threshold ?? 70}%
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left Column: Progress gauge */}
+            <div className="lg:col-span-5 flex flex-col justify-between">
+              <div className="bg-slate-50/50 border border-slate-100 rounded-2xl p-5 flex flex-col justify-center items-center text-center space-y-4 h-full relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500" />
+                <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider font-bold">Tactical Confidence Level</p>
+                
+                <div className="flex flex-col items-center justify-center space-y-1">
+                  <span className={`text-6xl font-sans font-black tracking-tight ${entryScore >= (config?.gate_scoring?.confidence_threshold ?? 70) ? "text-emerald-500" : "text-amber-500"}`}>
+                    {entryScore}%
+                  </span>
+                  <span className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full border ${
+                    entryScore >= (config?.gate_scoring?.confidence_threshold ?? 70)
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : "bg-amber-50 text-amber-700 border-amber-200"
+                  }`}>
+                    {entryScore >= (config?.gate_scoring?.confidence_threshold ?? 70) ? "TACTICAL MET" : "TACTICAL BLOCKED"}
+                  </span>
+                </div>
+
+                <div className="w-full space-y-2 pt-2">
+                  <div className="flex justify-between text-[10px] font-mono text-slate-400">
+                    <span>0%</span>
+                    <span className="font-bold text-slate-500">Threshold: {config?.gate_scoring?.confidence_threshold ?? 70}%</span>
+                    <span>100%</span>
+                  </div>
+                  <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden relative">
+                    <div
+                      className={`h-full rounded-full transition-all duration-1000 ${
+                        entryScore >= (config?.gate_scoring?.confidence_threshold ?? 70) ? "bg-emerald-500" : "bg-amber-500"
+                      }`}
+                      style={{ width: `${entryScore}%` }}
+                    />
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5 bg-slate-700 z-10"
+                      style={{ left: `${config?.gate_scoring?.confidence_threshold ?? 70}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-relaxed italic">
+                    Passed checkpoints contributed <span className="font-bold text-slate-700">{earnedTacticalWeight}</span> out of <span className="font-bold text-slate-700">{totalTacticalWeight}</span> total tactical weight points.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column: Weight distributions and active modifiers */}
+            <div className="lg:col-span-7 space-y-3">
+              <div className="flex items-center justify-between text-[10px] font-mono font-bold text-slate-400 px-1 uppercase tracking-wider">
+                <span>Tactical Checkpoint</span>
+                <span>Active Weight Contribution</span>
+              </div>
+              
+              <div className="space-y-1.5 max-h-[280px] overflow-y-auto pr-1">
+                {tacticalGatesMap.map((gate, i) => {
+                  const cond = conditions.find(c => c.name === gate.condName);
+                  const wInfo = getWeightForCondition(gate.condName);
+                  if (!wInfo) return null;
+
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-center justify-between p-2.5 rounded-xl border text-xs transition-colors ${
+                        cond?.met
+                          ? "bg-emerald-50/15 border-emerald-100 hover:bg-emerald-50/25"
+                          : "bg-slate-50/30 border-slate-150 hover:bg-slate-50/60"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {cond?.met ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        ) : (
+                          <div className="w-4 h-4 rounded-full border border-slate-200 flex items-center justify-center shrink-0">
+                            <span className="w-1 h-1 rounded-full bg-slate-300" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <span className="font-sans font-bold text-slate-700 block truncate">{gate.label}</span>
+                          <span className="block text-[9px] font-mono text-slate-400 leading-none mt-0.5 truncate max-w-xs sm:max-w-md">
+                            {cond?.current_value !== undefined ? String(cond.current_value) : "Waiting for tick..."}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right font-mono flex items-center gap-2 shrink-0">
+                        {wInfo.modifier && (
+                          <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-sm ${wInfo.modifier.val > 0 ? "bg-emerald-50 text-emerald-600 border border-emerald-100/30" : "bg-rose-50 text-rose-600 border border-rose-100/30"}`}>
+                            {wInfo.modifier.val > 0 ? `+` : ``}{wInfo.modifier.val} Regime
+                          </span>
+                        )}
+                        <span className={`font-bold ${cond?.met ? "text-emerald-700 bg-emerald-50/50 px-1.5 py-0.5 rounded-md" : "text-slate-400"}`}>
+                          {cond?.met ? wInfo.active : 0} <span className="text-[10px] text-slate-400 font-normal">/ {wInfo.active}</span>
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Strict Safety locks panel */}
+          <div className="bg-slate-50/30 border border-slate-150 rounded-xl p-4.5 space-y-3">
+            <div className="flex items-center gap-1.5">
+              <ShieldAlert className="w-4 h-4 text-indigo-600" />
+              <h3 className="font-sans font-bold text-xs text-slate-700 uppercase tracking-wider font-mono">
+                Strict Safety & Structure Hard-Locks
+              </h3>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Unlike the tactical checkpoints above, the following safety and structural conditions are **strict binary constraints**. Even with a 100% confidence score, if any safety/structure gate is blocked, order entry remains completely deactivated.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 pt-1">
+              {[
+                { name: "Daily Trade Count Limit", label: "Daily Trade Cap" },
+                { name: "Account Equity & API Connection Verification", label: "Equity & API" },
+                { name: "Loss Streak Cooldown Protection", label: "Streak Cooldown" },
+                { name: "Optimal Session Timing Window Check (IST)", label: "Timing Window" },
+                { name: "Market Structure Confirmation", label: "Market Structure" }
+              ].map((gate, idx) => {
+                const cond = conditions.find(c => c.name === gate.name);
+                return (
+                  <div
+                    key={idx}
+                    className={`border rounded-xl p-3 flex flex-col justify-between space-y-1.5 ${
+                      cond?.met
+                        ? "bg-emerald-50/10 border-emerald-100/60"
+                        : "bg-rose-50/10 border-rose-100/60"
+                    }`}
+                  >
+                    <span className="text-[10px] font-sans font-semibold text-slate-600 block truncate">{gate.label}</span>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className={`text-[9px] font-bold font-mono ${cond?.met ? "text-emerald-700 bg-emerald-50 border border-emerald-100/50" : "text-rose-700 bg-rose-50 border border-rose-100/50"} px-2 py-0.5 rounded-md`}>
+                        {cond?.met ? "PASSED" : "BLOCKED"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ================= ACTIVE POSITION LIVE RADAR STATUS ================= */}
       {status.active_trade && (
@@ -670,18 +932,41 @@ export default function CheckpointsPage({ status, onRefresh, onTabChange }: Chec
                 </div>
               </div>
 
-              {/* Priority badge */}
-              <div className="mt-3 flex justify-between items-center text-[10px]">
-                <span className="text-slate-400">Risk Priority:</span>
-                <span className={`font-bold font-mono px-2 py-0.5 rounded-md ${
-                  item.priority === "CRITICAL"
-                    ? "bg-rose-50 text-rose-700 border border-rose-100/50"
-                    : item.priority === "HIGH"
-                    ? "bg-amber-50 text-amber-700 border border-amber-100/30"
-                    : "bg-slate-50 text-slate-600 border border-slate-100"
-                }`}>
-                  {item.priority}
-                </span>
+              {/* Priority badge & Weighted score contribution */}
+              <div className="mt-3 flex flex-wrap gap-2 items-center justify-between border-t border-slate-50 pt-2.5">
+                <div className="flex items-center gap-1 text-[10px]">
+                  <span className="text-slate-400">Risk Priority:</span>
+                  <span className={`font-bold font-mono px-1.5 py-0.5 rounded-md ${
+                    item.priority === "CRITICAL"
+                      ? "bg-rose-50 text-rose-700 border border-rose-100/50"
+                      : item.priority === "HIGH"
+                      ? "bg-amber-50 text-amber-700 border border-amber-100/30"
+                      : "bg-slate-50 text-slate-600 border border-slate-100"
+                  }`}>
+                    {item.priority}
+                  </span>
+                </div>
+
+                {(() => {
+                  const wInfo = getWeightForCondition(item.name);
+                  if (!wInfo) return null;
+                  return (
+                    <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                      <span className="text-slate-400">Weight:</span>
+                      <span className="font-bold text-slate-700 flex items-center gap-1">
+                        {wInfo.active} pts
+                        {wInfo.modifier && (
+                          <span className={`text-[8px] font-bold px-1 rounded-sm ${wInfo.modifier.val > 0 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"}`}>
+                            {wInfo.modifier.val > 0 ? `+` : ``}{wInfo.modifier.val}
+                          </span>
+                        )}
+                        <span className={`text-[9px] font-normal ${item.met ? "text-emerald-600" : "text-slate-400"}`}>
+                          ({item.met ? "Contributed" : "Blocked"})
+                        </span>
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ))}

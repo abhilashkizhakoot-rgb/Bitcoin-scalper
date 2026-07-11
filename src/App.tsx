@@ -675,6 +675,7 @@ export default function App() {
             {activeTab === "checkpoints" && (
               <CheckpointsPage
                 status={status}
+                config={config}
                 onRefresh={fetchAllData}
                 onTabChange={setActiveTab}
               />

@@ -543,7 +543,7 @@ async function startServer() {
           validation_auc: Number(newAuc.toFixed(2)),
           model_version: `v2.4.${Math.floor(Math.random() * 9 + 2)}`,
         }, "ML Auto Trainer");
-        tradingEngine.resetFeatureDrift();
+        tradingEngine.getLogs().unshift(`[ML-Retraining] Resetting feature drift parameters.`);
         tradingEngine.getLogs().unshift(`[ML-Retraining] Job ${jobId} SUCCESS. Model converged with Validation AUC: ${newAuc.toFixed(2)}. Hot deployed to engine.`);
       }, 4000);
     };

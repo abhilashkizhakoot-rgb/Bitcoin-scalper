@@ -202,6 +202,38 @@ const DEFAULT_CONFIG: StrategyConfig = {
     medium_ema_period: 50,
     slow_ema_period: 200,
   },
+  gate_scoring: {
+    enabled: true,
+    confidence_threshold: 70,
+    weights: {
+      catboost_ai: 25,
+      market_regime: 15,
+      trend_alignment: 15,
+      relative_volume: 10,
+      overextension: 10,
+      wedge_filter: 5,
+      order_flow: 10,
+      squeeze_filter: 5,
+      order_book: 5,
+    },
+    adaptive_modifiers: {
+      trending: {
+        trend_alignment_weight_boost: 10,
+        catboost_weight_boost: 5,
+      },
+      ranging: {
+        order_flow_weight_boost: 15,
+        trend_alignment_weight_reduction: -10,
+      },
+      high_volatility: {
+        relative_volume_weight_boost: 10,
+        overextension_weight_boost: 10,
+      },
+      low_volatility: {
+        squeeze_filter_weight_boost: 15,
+      },
+    },
+  },
 };
 
 const DEFAULT_CREDENTIALS: ExchangeCredentials = {
@@ -775,10 +807,6 @@ class DatabaseManager {
     return newSignal;
   }
 
-  public getRegimeLogs(): RegimeLog[] {
-    return this.cache!.regime_logs;
-  }
-
   public addRegimeLog(log: Omit<RegimeLog, "id" | "created_at">): RegimeLog {
     const newLog: RegimeLog = {
       ...log,
@@ -791,10 +819,6 @@ class DatabaseManager {
     }
     this.save();
     return newLog;
-  }
-
-  public getSentimentLogs(): SentimentLog[] {
-    return this.cache!.sentiment_logs;
   }
 
   public addSentimentLog(log: Omit<SentimentLog, "id" | "created_at">): SentimentLog {
@@ -958,6 +982,34 @@ class DatabaseManager {
       if (ms.fast_ema_period === undefined) { ms.fast_ema_period = def.fast_ema_period || 20; changed = true; }
       if (ms.medium_ema_period === undefined) { ms.medium_ema_period = def.medium_ema_period || 50; changed = true; }
       if (ms.slow_ema_period === undefined) { ms.slow_ema_period = def.slow_ema_period || 200; changed = true; }
+    }
+
+    if (!this.cache?.config?.gate_scoring) {
+      this.cache!.config.gate_scoring = { ...DEFAULT_CONFIG.gate_scoring };
+      changed = true;
+    } else {
+      const gs = this.cache!.config.gate_scoring;
+      const def = DEFAULT_CONFIG.gate_scoring;
+      if (gs.enabled === undefined) { gs.enabled = def.enabled; changed = true; }
+      if (gs.confidence_threshold === undefined) { gs.confidence_threshold = def.confidence_threshold; changed = true; }
+      if (!gs.weights) {
+        gs.weights = { ...def.weights };
+        changed = true;
+      } else {
+        if (gs.weights.catboost_ai === undefined) { gs.weights.catboost_ai = def.weights.catboost_ai; changed = true; }
+        if (gs.weights.market_regime === undefined) { gs.weights.market_regime = def.weights.market_regime; changed = true; }
+        if (gs.weights.trend_alignment === undefined) { gs.weights.trend_alignment = def.weights.trend_alignment; changed = true; }
+        if (gs.weights.relative_volume === undefined) { gs.weights.relative_volume = def.weights.relative_volume; changed = true; }
+        if (gs.weights.overextension === undefined) { gs.weights.overextension = def.weights.overextension; changed = true; }
+        if (gs.weights.wedge_filter === undefined) { gs.weights.wedge_filter = def.weights.wedge_filter; changed = true; }
+        if (gs.weights.order_flow === undefined) { gs.weights.order_flow = def.weights.order_flow; changed = true; }
+        if (gs.weights.squeeze_filter === undefined) { gs.weights.squeeze_filter = def.weights.squeeze_filter; changed = true; }
+        if (gs.weights.order_book === undefined) { gs.weights.order_book = def.weights.order_book; changed = true; }
+      }
+      if (!gs.adaptive_modifiers) {
+        gs.adaptive_modifiers = { ...def.adaptive_modifiers };
+        changed = true;
+      }
     }
 
     if (changed) {

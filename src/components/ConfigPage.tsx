@@ -19,6 +19,7 @@ import {
   Clock,
   Globe,
   Sliders,
+  Layers,
 } from "lucide-react";
 import { StrategyConfig, ConfigHistoryEntry, NewsSource } from "../types.js";
 
@@ -111,6 +112,38 @@ export default function ConfigPage({
   const [mlConfig, setMlConfig] = useState(config.ml_settings);
   const [sentimentConfig, setSentimentConfig] = useState(config.sentiment_settings);
   const [riskConfig, setRiskConfig] = useState(config.risk_management);
+  const [gateScoringConfig, setGateScoringConfig] = useState(config.gate_scoring || {
+    enabled: true,
+    confidence_threshold: 70,
+    weights: {
+      catboost_ai: 25,
+      market_regime: 15,
+      trend_alignment: 15,
+      relative_volume: 10,
+      overextension: 10,
+      wedge_filter: 5,
+      order_flow: 10,
+      squeeze_filter: 5,
+      order_book: 5,
+    },
+    adaptive_modifiers: {
+      trending: {
+        trend_alignment_weight_boost: 10,
+        catboost_weight_boost: 5,
+      },
+      ranging: {
+        order_flow_weight_boost: 15,
+        trend_alignment_weight_reduction: -10,
+      },
+      high_volatility: {
+        relative_volume_weight_boost: 10,
+        overextension_weight_boost: 10,
+      },
+      low_volatility: {
+        squeeze_filter_weight_boost: 15,
+      },
+    },
+  });
   const [msConfig, setMsConfig] = useState(config.market_structure || {
     min_breakout_body_ratio: 0.22,
     allow_immediate_breakout: true,
@@ -148,6 +181,12 @@ export default function ConfigPage({
       const lastMs = lastSyncedConfig.market_structure || {};
       if (JSON.stringify(msConfig) === JSON.stringify(lastMs)) {
         setMsConfig(config.market_structure);
+      }
+    }
+    if (config.gate_scoring) {
+      const lastGs = lastSyncedConfig.gate_scoring || {};
+      if (JSON.stringify(gateScoringConfig) === JSON.stringify(lastGs)) {
+        setGateScoringConfig(config.gate_scoring);
       }
     }
     setLastSyncedConfig(config);
@@ -255,6 +294,30 @@ export default function ConfigPage({
           }
         }
         cleaned.refresh_rates_min = cleanedIntervals;
+      }
+    }
+
+    if (category === "gate_scoring") {
+      if (cleaned.confidence_threshold !== undefined) {
+        cleaned.confidence_threshold = Number(cleaned.confidence_threshold);
+      }
+      if (cleaned.weights) {
+        const cleanedWeights = { ...cleaned.weights };
+        for (const k of Object.keys(cleanedWeights)) {
+          cleanedWeights[k] = Number(cleanedWeights[k]);
+        }
+        cleaned.weights = cleanedWeights;
+      }
+      if (cleaned.adaptive_modifiers) {
+        const cleanedModifiers = { ...cleaned.adaptive_modifiers };
+        for (const regime of Object.keys(cleanedModifiers)) {
+          const subModifiers = { ...cleanedModifiers[regime] };
+          for (const k of Object.keys(subModifiers)) {
+            subModifiers[k] = Number(subModifiers[k]);
+          }
+          cleanedModifiers[regime] = subModifiers;
+        }
+        cleaned.adaptive_modifiers = cleanedModifiers;
       }
     }
 
@@ -435,6 +498,16 @@ export default function ConfigPage({
         >
           <TrendingUp className="w-4 h-4" />
           Market Structure Setup
+        </button>
+
+        <button
+          onClick={() => setActiveTab("gate_scoring" as any)}
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg text-xs font-sans font-semibold transition-all duration-150 cursor-pointer ${
+            activeTab === ("gate_scoring" as any) ? "bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          Weighted Gate Scoring
         </button>
 
         <button
@@ -2007,6 +2080,446 @@ export default function ConfigPage({
             </div>
           </div>
         )}
+
+        {/* ================= WEIGHTED GATE SCORING TAB ================= */}
+        {activeTab === ("gate_scoring" as any) && (() => {
+          const totalWeight = Object.values(gateScoringConfig.weights || {}).reduce((sum: number, w: any) => sum + Number(w || 0), 0);
+          return (
+            <div className="space-y-6">
+              <div>
+                <h3 className="font-sans font-semibold text-sm text-slate-800">Weighted Gate Scoring Engine</h3>
+                <p className="text-xs text-slate-400 font-sans mt-1">
+                  Replace rigid binary trade filtering with a weighted confidence scoring model. All critical safety and regulatory limits remain mandatory, but tactical gates contribute to a cumulative confidence score.
+                </p>
+              </div>
+
+              {/* Master Switch and Threshold */}
+              <div className="bg-slate-50/50 border border-slate-200 rounded-xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-700">Enable Weighted Gate Scoring</span>
+                    <p className="text-[10px] text-slate-400">When enabled, tactical gates are evaluated via confidence weights instead of strict binary pass/fail filters.</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={gateScoringConfig.enabled}
+                    onChange={(e) => setGateScoringConfig({ ...gateScoringConfig, enabled: e.target.checked })}
+                    className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded cursor-pointer"
+                  />
+                </div>
+
+                {gateScoringConfig.enabled && (
+                  <div className="border-t border-slate-200/60 pt-4 space-y-2">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>Cumulative Confidence Entry Threshold</span>
+                      <span className="text-indigo-600 font-semibold">{gateScoringConfig.confidence_threshold}%</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="10"
+                      max="100"
+                      step="5"
+                      value={gateScoringConfig.confidence_threshold}
+                      onChange={(e) => setGateScoringConfig({ ...gateScoringConfig, confidence_threshold: Number(e.target.value) })}
+                      className="w-full accent-indigo-600 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      The minimum overall confidence score (out of 100%) required from passed tactical gates to permit trade initiation. The Market Structure Confirmation remains a mandatory final filter regardless of this threshold.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Gate Weights Section */}
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h4 className="font-sans font-semibold text-xs text-slate-800">Tactical Gate Base Weights</h4>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Assign custom relative weights to each tactical market filter.</p>
+                  </div>
+                  <div className={`px-2.5 py-1 rounded text-xs font-mono font-semibold ${totalWeight === 100 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-amber-50 text-amber-700 border border-amber-200"}`}>
+                    Total Sum: {totalWeight}% {totalWeight === 100 ? "✓ (Balanced)" : "⚠️ (Adjust to 100%)"}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>CatBoost AI Prediction</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.catboost_ai}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, catboost_ai: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of machine learning price model direction/probability validation.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>Market Regime Filter</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.market_regime}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, market_regime: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of macro trend regime validation (e.g. Trend vs Ranging checks).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>Trend Alignment (EMA/ADX)</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.trend_alignment}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, trend_alignment: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of short-term EMA alignments and ADX momentum gates.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>Relative Volume Confirmation</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.relative_volume}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, relative_volume: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of relative volume multiplier threshold requirements.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>Overextension & Anchors</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.overextension}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, overextension: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of key anchor levels and VWAP proximity bands.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>Wedge Pattern Filter</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.wedge_filter}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, wedge_filter: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of active wedge breakout structural validations.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>Order Flow Confirmation</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.order_flow}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, order_flow: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of Taker Buy ratios and imbalance deltas.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>Squeeze (Volatility Compression)</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.squeeze_filter}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, squeeze_filter: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of volatility compression and Bollinger Band squeeze releases.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>Order Book Imbalance Depth</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.order_book}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, order_book: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of bid/ask imbalance at core depth levels.</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Adaptive Modifiers Section */}
+              <div className="border-t border-slate-200/60 pt-5 space-y-4">
+                <div>
+                  <h4 className="font-sans font-semibold text-xs text-slate-800">Dynamic Market Condition Modifiers</h4>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Configure how gate weights adapt in real-time to trending, ranging, high volatility, and low volatility conditions.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {/* Trending Modifier */}
+                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 space-y-3">
+                    <span className="text-xs font-semibold text-slate-700 block">Trending Conditions</span>
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Trend Alignment Weight Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.trending?.trend_alignment_weight_boost ?? 10}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.trending?.trend_alignment_weight_boost ?? 10}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              trending: {
+                                ...gateScoringConfig.adaptive_modifiers?.trending,
+                                trend_alignment_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>CatBoost Weight Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.trending?.catboost_weight_boost ?? 5}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.trending?.catboost_weight_boost ?? 5}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              trending: {
+                                ...gateScoringConfig.adaptive_modifiers?.trending,
+                                catboost_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Ranging Modifier */}
+                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 space-y-3">
+                    <span className="text-xs font-semibold text-slate-700 block">Ranging Conditions</span>
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Order Flow Weight Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.ranging?.order_flow_weight_boost ?? 15}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.ranging?.order_flow_weight_boost ?? 15}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              ranging: {
+                                ...gateScoringConfig.adaptive_modifiers?.ranging,
+                                order_flow_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Trend Alignment Weight Reduction</span>
+                          <span className="text-indigo-600 font-semibold font-mono">{gateScoringConfig.adaptive_modifiers?.ranging?.trend_alignment_weight_reduction ?? -10}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.ranging?.trend_alignment_weight_reduction ?? -10}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              ranging: {
+                                ...gateScoringConfig.adaptive_modifiers?.ranging,
+                                trend_alignment_weight_reduction: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* High Volatility Modifier */}
+                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 space-y-3">
+                    <span className="text-xs font-semibold text-slate-700 block">High Volatility Conditions</span>
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Relative Volume Weight Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.high_volatility?.relative_volume_weight_boost ?? 10}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.high_volatility?.relative_volume_weight_boost ?? 10}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              high_volatility: {
+                                ...gateScoringConfig.adaptive_modifiers?.high_volatility,
+                                relative_volume_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Overextension Weight Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.high_volatility?.overextension_weight_boost ?? 10}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.high_volatility?.overextension_weight_boost ?? 10}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              high_volatility: {
+                                ...gateScoringConfig.adaptive_modifiers?.high_volatility,
+                                overextension_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Low Volatility Modifier */}
+                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 space-y-3">
+                    <span className="text-xs font-semibold text-slate-700 block">Low Volatility Conditions</span>
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Squeeze Filter Weight Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.low_volatility?.squeeze_filter_weight_boost ?? 15}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.low_volatility?.squeeze_filter_weight_boost ?? 15}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              low_volatility: {
+                                ...gateScoringConfig.adaptive_modifiers?.low_volatility,
+                                squeeze_filter_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Commit Button */}
+              <div className="border-t border-slate-200 pt-5 flex justify-end">
+                <button
+                  onClick={() => handleSaveCategory("gate_scoring", gateScoringConfig)}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-sans font-semibold px-5 py-2.5 rounded-lg transition-colors duration-150 cursor-pointer shadow-sm"
+                >
+                  COMMIT SCORING PARAMETERS
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ================= ROLLBACK AUDIT HISTORY TAB ================= */}
         {activeTab === "history" && (

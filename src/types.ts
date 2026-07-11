@@ -246,6 +246,38 @@ export interface StrategyConfig {
     medium_ema_period?: number; // Medium EMA period (default: 50)
     slow_ema_period?: number; // Slow EMA period (default: 200)
   };
+  gate_scoring?: {
+    enabled: boolean;
+    confidence_threshold: number; // e.g., 70
+    weights: {
+      catboost_ai: number;
+      market_regime: number;
+      trend_alignment: number;
+      relative_volume: number;
+      overextension: number;
+      wedge_filter: number;
+      order_flow: number;
+      squeeze_filter: number;
+      order_book: number;
+    };
+    adaptive_modifiers?: {
+      trending: {
+        trend_alignment_weight_boost: number;
+        catboost_weight_boost: number;
+      };
+      ranging: {
+        order_flow_weight_boost: number;
+        trend_alignment_weight_reduction: number;
+      };
+      high_volatility: {
+        relative_volume_weight_boost: number;
+        overextension_weight_boost: number;
+      };
+      low_volatility: {
+        squeeze_filter_weight_boost: number;
+      };
+    };
+  };
 }
 
 export interface ConfigHistoryEntry {

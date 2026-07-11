@@ -51,10 +51,6 @@ class TradingEngine {
   };
   private orderBookImbalanceHistory: number[] = [];
 
-  public resetFeatureDrift() {
-    this.log(`[ML-Retraining] Resetting feature drift parameters.`);
-  }
-
   public getTradeSizeMultiplier(): number {
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
       return 0.5; // Reduce position size by 50% under low volatility to preserve capital
@@ -1451,21 +1447,126 @@ class TradingEngine {
       }
     }
 
-    // Calculate overall entry score
+    // Calculate overall entry score and check conditions
     let entryScore = 0;
-    if (signalDirection !== "NEUTRAL") {
-      if (pLongMet || pShortMet || this.isGateSkipped(config, "CatBoost AI Prediction")) entryScore += 40;
-      if ((regimeValid && regimeAligned) || this.isGateSkipped(config, "Market Regime Filter")) entryScore += 20;
-      if ((trendAligned && adxMet) || this.isGateSkipped(config, "Trend Alignment & Strength (EMA/ADX)")) entryScore += 30;
-      if (relVolume > requiredRelVol || this.isGateSkipped(config, "Relative Volume Confirmation")) entryScore += 10;
+    let allConditionsMet = false;
+    let failedConditions: string[] = [];
+
+    const isWeightedEnabled = config.gate_scoring?.enabled === true;
+
+    if (isWeightedEnabled) {
+      // Weighted scoring evaluation
+      let confidenceScore = 0;
+      let confidenceThreshold = config.gate_scoring?.confidence_threshold ?? 70;
+      let tacticalConfidenceMet = true;
+
+      const safetyGates = [
+        "Daily Trade Count Limit",
+        "Account Equity & API Connection Verification",
+        "Loss Streak Cooldown Protection",
+        "Optimal Session Timing Window Check (IST)"
+      ];
+
+      const baseWeights = {
+        catboost_ai: config.gate_scoring?.weights?.catboost_ai ?? 25,
+        market_regime: config.gate_scoring?.weights?.market_regime ?? 15,
+        trend_alignment: config.gate_scoring?.weights?.trend_alignment ?? 15,
+        relative_volume: config.gate_scoring?.weights?.relative_volume ?? 10,
+        overextension: config.gate_scoring?.weights?.overextension ?? 10,
+        wedge_filter: config.gate_scoring?.weights?.wedge_filter ?? 5,
+        order_flow: config.gate_scoring?.weights?.order_flow ?? 10,
+        squeeze_filter: config.gate_scoring?.weights?.squeeze_filter ?? 5,
+        order_book: config.gate_scoring?.weights?.order_book ?? 5,
+      };
+
+      const modifiers = config.gate_scoring?.adaptive_modifiers ?? {
+        trending: { trend_alignment_weight_boost: 10, catboost_weight_boost: 5 },
+        ranging: { order_flow_weight_boost: 15, trend_alignment_weight_reduction: -10 },
+        high_volatility: { relative_volume_weight_boost: 10, overextension_weight_boost: 10 },
+        low_volatility: { squeeze_filter_weight_boost: 15 },
+      };
+
+      const activeWeights = { ...baseWeights };
+
+      if (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.STRONG_DOWNTREND) {
+        activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + (modifiers.trending?.trend_alignment_weight_boost ?? 10));
+        activeWeights.catboost_ai = Math.max(0, activeWeights.catboost_ai + (modifiers.trending?.catboost_weight_boost ?? 5));
+      } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
+        activeWeights.order_flow = Math.max(0, activeWeights.order_flow + (modifiers.ranging?.order_flow_weight_boost ?? 15));
+        activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + (modifiers.ranging?.trend_alignment_weight_reduction ?? -10));
+      } else if (this.currentRegime === MarketRegime.HIGH_VOLATILITY) {
+        activeWeights.relative_volume = Math.max(0, activeWeights.relative_volume + (modifiers.high_volatility?.relative_volume_weight_boost ?? 10));
+        activeWeights.overextension = Math.max(0, activeWeights.overextension + (modifiers.high_volatility?.overextension_weight_boost ?? 10));
+      } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
+        activeWeights.squeeze_filter = Math.max(0, activeWeights.squeeze_filter + (modifiers.low_volatility?.squeeze_filter_weight_boost ?? 15));
+      }
+
+      const tacticalGatesMap = [
+        { condName: "CatBoost AI Prediction", weightKey: "catboost_ai" as const },
+        { condName: "Market Regime Filter", weightKey: "market_regime" as const },
+        { condName: "Trend Alignment & Strength (EMA/ADX)", weightKey: "trend_alignment" as const },
+        { condName: "Relative Volume Confirmation", weightKey: "relative_volume" as const },
+        { condName: "Overextension & Level Anchors (VWAP/EMA)", weightKey: "overextension" as const },
+        { condName: "Wedge Pattern Filter", weightKey: "wedge_filter" as const },
+        { condName: "Binance Order Flow Confirmation", weightKey: "order_flow" as const },
+        { condName: "Volatility Compression (Squeeze) Filter", weightKey: "squeeze_filter" as const },
+        { condName: "Order Book Imbalance & Liquidity Depth Gate", weightKey: "order_book" as const },
+      ];
+
+      let totalTacticalWeight = 0;
+      let earnedTacticalWeight = 0;
+
+      for (const gate of tacticalGatesMap) {
+        const cond = conditions.find(c => c.name === gate.condName);
+        const weight = activeWeights[gate.weightKey];
+        totalTacticalWeight += weight;
+        if (cond?.met) {
+          earnedTacticalWeight += weight;
+        }
+      }
+
+      if (totalTacticalWeight > 0) {
+        confidenceScore = Math.round((earnedTacticalWeight / totalTacticalWeight) * 100);
+      }
+      tacticalConfidenceMet = confidenceScore >= confidenceThreshold;
+
+      entryScore = confidenceScore;
+
+      const allSafetyPassed = conditions
+        .filter((c) => safetyGates.includes(c.name))
+        .every((c) => c.met);
+
+      const marketStructurePassed = conditions.find(c => c.name === "Market Structure Confirmation")?.met ?? false;
+
+      allConditionsMet = allSafetyPassed && marketStructurePassed && tacticalConfidenceMet;
+
+      failedConditions = conditions.filter((c) => {
+        if (safetyGates.includes(c.name) || c.name === "Market Structure Confirmation") {
+          return !c.met;
+        }
+        return false;
+      }).map((c) => c.name);
+
+      if (!tacticalConfidenceMet) {
+        failedConditions.push(`Cumulative Tactical Confidence (${confidenceScore}% < ${confidenceThreshold}%)`);
+      }
+    } else {
+      if (signalDirection !== "NEUTRAL") {
+        if (pLongMet || pShortMet || this.isGateSkipped(config, "CatBoost AI Prediction")) entryScore += 40;
+        if ((regimeValid && regimeAligned) || this.isGateSkipped(config, "Market Regime Filter")) entryScore += 20;
+        if ((trendAligned && adxMet) || this.isGateSkipped(config, "Trend Alignment & Strength (EMA/ADX)")) entryScore += 30;
+        if (relVolume > requiredRelVol || this.isGateSkipped(config, "Relative Volume Confirmation")) entryScore += 10;
+      }
+      allConditionsMet = conditions.every((c) => c.met);
+      failedConditions = conditions.filter((c) => !c.met).map((c) => c.name);
     }
 
     return {
       conditions,
       entry_score: entryScore,
       signal_direction: signalDirection,
-      all_conditions_met: conditions.every((c) => c.met),
-      rejection_reason: conditions.every((c) => c.met) ? null : conditions.filter((c) => !c.met).map((c) => c.name).join(", "),
+      all_conditions_met: allConditionsMet,
+      rejection_reason: allConditionsMet ? null : failedConditions.join(", "),
     };
   }
 
@@ -4280,17 +4381,123 @@ class TradingEngine {
       }
     }
 
-    // Calculate Entry Score
-    let entryScore = 0;
-    if (signalDirection !== "NEUTRAL") {
-      if (pLongMet || pShortMet || this.isGateSkipped(config, "CatBoost AI Prediction")) entryScore += 40;
-      if ((regimeValid && regimeAligned) || this.isGateSkipped(config, "Market Regime Filter")) entryScore += 20;
-      if ((trendAligned && adxMet) || this.isGateSkipped(config, "Trend Alignment & Strength (EMA/ADX)")) entryScore += 30;
-      if (relVolume > requiredRelVol || this.isGateSkipped(config, "Relative Volume Confirmation")) entryScore += 10;
+    // Weighted scoring evaluation
+    let confidenceScore = 0;
+    let confidenceThreshold = 70;
+    let tacticalConfidenceMet = true;
+
+    const safetyGates = [
+      "Daily Trade Count Limit",
+      "Account Equity & API Connection Verification",
+      "Loss Streak Cooldown Protection",
+      "Optimal Session Timing Window Check (IST)"
+    ];
+
+    const isWeightedEnabled = config.gate_scoring?.enabled === true;
+
+    const baseWeights = {
+      catboost_ai: config.gate_scoring?.weights?.catboost_ai ?? 25,
+      market_regime: config.gate_scoring?.weights?.market_regime ?? 15,
+      trend_alignment: config.gate_scoring?.weights?.trend_alignment ?? 15,
+      relative_volume: config.gate_scoring?.weights?.relative_volume ?? 10,
+      overextension: config.gate_scoring?.weights?.overextension ?? 10,
+      wedge_filter: config.gate_scoring?.weights?.wedge_filter ?? 5,
+      order_flow: config.gate_scoring?.weights?.order_flow ?? 10,
+      squeeze_filter: config.gate_scoring?.weights?.squeeze_filter ?? 5,
+      order_book: config.gate_scoring?.weights?.order_book ?? 5,
+    };
+
+    const modifiers = config.gate_scoring?.adaptive_modifiers ?? {
+      trending: { trend_alignment_weight_boost: 10, catboost_weight_boost: 5 },
+      ranging: { order_flow_weight_boost: 15, trend_alignment_weight_reduction: -10 },
+      high_volatility: { relative_volume_weight_boost: 10, overextension_weight_boost: 10 },
+      low_volatility: { squeeze_filter_weight_boost: 15 },
+    };
+
+    const activeWeights = { ...baseWeights };
+
+    if (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.STRONG_DOWNTREND) {
+      activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + (modifiers.trending?.trend_alignment_weight_boost ?? 10));
+      activeWeights.catboost_ai = Math.max(0, activeWeights.catboost_ai + (modifiers.trending?.catboost_weight_boost ?? 5));
+    } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
+      activeWeights.order_flow = Math.max(0, activeWeights.order_flow + (modifiers.ranging?.order_flow_weight_boost ?? 15));
+      activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + (modifiers.ranging?.trend_alignment_weight_reduction ?? -10));
+    } else if (this.currentRegime === MarketRegime.HIGH_VOLATILITY) {
+      activeWeights.relative_volume = Math.max(0, activeWeights.relative_volume + (modifiers.high_volatility?.relative_volume_weight_boost ?? 10));
+      activeWeights.overextension = Math.max(0, activeWeights.overextension + (modifiers.high_volatility?.overextension_weight_boost ?? 10));
+    } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
+      activeWeights.squeeze_filter = Math.max(0, activeWeights.squeeze_filter + (modifiers.low_volatility?.squeeze_filter_weight_boost ?? 15));
     }
 
-    const allConditionsMet = conditions.every((c) => c.met);
-    const failedConditions = conditions.filter((c) => !c.met).map((c) => c.name);
+    const tacticalGatesMap = [
+      { condName: "CatBoost AI Prediction", weightKey: "catboost_ai" as const },
+      { condName: "Market Regime Filter", weightKey: "market_regime" as const },
+      { condName: "Trend Alignment & Strength (EMA/ADX)", weightKey: "trend_alignment" as const },
+      { condName: "Relative Volume Confirmation", weightKey: "relative_volume" as const },
+      { condName: "Overextension & Level Anchors (VWAP/EMA)", weightKey: "overextension" as const },
+      { condName: "Wedge Pattern Filter", weightKey: "wedge_filter" as const },
+      { condName: "Binance Order Flow Confirmation", weightKey: "order_flow" as const },
+      { condName: "Volatility Compression (Squeeze) Filter", weightKey: "squeeze_filter" as const },
+      { condName: "Order Book Imbalance & Liquidity Depth Gate", weightKey: "order_book" as const },
+    ];
+
+    let totalTacticalWeight = 0;
+    let earnedTacticalWeight = 0;
+
+    for (const gate of tacticalGatesMap) {
+      const cond = conditions.find(c => c.name === gate.condName);
+      const weight = activeWeights[gate.weightKey];
+      totalTacticalWeight += weight;
+      if (cond?.met) {
+        earnedTacticalWeight += weight;
+      }
+    }
+
+    if (totalTacticalWeight > 0) {
+      confidenceScore = Math.round((earnedTacticalWeight / totalTacticalWeight) * 100);
+    }
+    confidenceThreshold = config.gate_scoring?.confidence_threshold ?? 70;
+    tacticalConfidenceMet = confidenceScore >= confidenceThreshold;
+
+    // Calculate Entry Score
+    let entryScore = 0;
+    if (isWeightedEnabled) {
+      entryScore = confidenceScore;
+    } else {
+      if (signalDirection !== "NEUTRAL") {
+        if (pLongMet || pShortMet || this.isGateSkipped(config, "CatBoost AI Prediction")) entryScore += 40;
+        if ((regimeValid && regimeAligned) || this.isGateSkipped(config, "Market Regime Filter")) entryScore += 20;
+        if ((trendAligned && adxMet) || this.isGateSkipped(config, "Trend Alignment & Strength (EMA/ADX)")) entryScore += 30;
+        if (relVolume > requiredRelVol || this.isGateSkipped(config, "Relative Volume Confirmation")) entryScore += 10;
+      }
+    }
+
+    const allSafetyPassed = conditions
+      .filter((c) => safetyGates.includes(c.name))
+      .every((c) => c.met);
+
+    const marketStructurePassed = conditions.find(c => c.name === "Market Structure Confirmation")?.met ?? false;
+
+    let allConditionsMet = false;
+    if (isWeightedEnabled) {
+      allConditionsMet = allSafetyPassed && marketStructurePassed && tacticalConfidenceMet;
+    } else {
+      allConditionsMet = conditions.every((c) => c.met);
+    }
+
+    const failedConditions = conditions.filter((c) => {
+      if (isWeightedEnabled) {
+        if (safetyGates.includes(c.name) || c.name === "Market Structure Confirmation") {
+          return !c.met;
+        }
+        return false;
+      }
+      return !c.met;
+    }).map((c) => c.name);
+
+    if (isWeightedEnabled && !tacticalConfidenceMet) {
+      failedConditions.push(`Cumulative Tactical Confidence (${confidenceScore}% < ${confidenceThreshold}%)`);
+    }
 
     // Write to trade_block_log backend file every 1 minute
     if (config.general.enable_block_logging !== false) {
@@ -4309,10 +4516,33 @@ class TradingEngine {
           }
           blockDetails = `  * Neutral Strategy State: ${neutralReason}`;
         } else if (!allConditionsMet) {
-          blockDetails = "  * Disqualified Gates Detail:\n" + conditions
-            .filter((c) => !c.met)
-            .map((c) => `    - [${c.name}]: Current = "${c.current_value}" | Required = "${c.required}"`)
-            .join("\n");
+          if (isWeightedEnabled) {
+            const safetyFailures = conditions.filter(c => safetyGates.includes(c.name) && !c.met);
+            const msFailure = !marketStructurePassed;
+            const detailsList: string[] = [];
+            if (safetyFailures.length > 0) {
+              detailsList.push("    - [Safety Circuit Breakers Failed]: " + safetyFailures.map(c => `${c.name} ("${c.current_value}")`).join(", "));
+            }
+            if (msFailure) {
+              const msCond = conditions.find(c => c.name === "Market Structure Confirmation");
+              detailsList.push(`    - [Market Structure Confirmation Failed (MANDATORY)]: Current = "${msCond?.current_value}" | Required = "${msCond?.required}"`);
+            }
+            if (!tacticalConfidenceMet) {
+              detailsList.push(`    - [Confidence Threshold Failed]: Cumulative Score: ${confidenceScore}% | Required: >= ${confidenceThreshold}%`);
+              detailsList.push("      * Tactical Gates Performance:");
+              for (const gate of tacticalGatesMap) {
+                const cond = conditions.find(c => c.name === gate.condName);
+                const weight = activeWeights[gate.weightKey];
+                detailsList.push(`        - ${gate.condName}: [${cond?.met ? "PASS" : "FAIL"}] (Weight: ${weight}%)`);
+              }
+            }
+            blockDetails = "  * Disqualified Gates Detail:\n" + detailsList.join("\n");
+          } else {
+            blockDetails = "  * Disqualified Gates Detail:\n" + conditions
+              .filter((c) => !c.met)
+              .map((c) => `    - [${c.name}]: Current = "${c.current_value}" | Required = "${c.required}"`)
+              .join("\n");
+          }
         } else {
           blockDetails = "  * Status: All gating conditions passed! Ready for execution / executed.";
         }
@@ -4354,8 +4584,9 @@ class TradingEngine {
       rejection_reason: allConditionsMet ? null : failedConditions.join(", "),
     });
 
-    // 3. Trade Entry Execution: Trigger a trade if all conditions met, entry score >= 80, and no trade active
-    if (allConditionsMet && entryScore >= 80 && !this.activeTrade) {
+    // 3. Trade Entry Execution: Trigger a trade if all conditions met, entry score >= hurdle, and no trade active
+    const entryHurdle = isWeightedEnabled ? confidenceThreshold : 80;
+    if (allConditionsMet && entryScore >= entryHurdle && !this.activeTrade) {
       this.executeTradeEntry(signalDirection as "LONG" | "SHORT", probabilityLong, avgSentiment, entryScore, savedSignal.id);
     }
   }

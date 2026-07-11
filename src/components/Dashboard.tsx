@@ -583,6 +583,16 @@ export default function Dashboard({
               </div>
             </div>
 
+            {status.regime_change_cooldown_remaining_seconds !== undefined && status.regime_change_cooldown_remaining_seconds !== null && (
+              <div>
+                <p className="text-[9px] font-mono text-slate-400 uppercase leading-none">Regime Cooldown</p>
+                <div className="flex items-center gap-1.5 mt-1 leading-none text-amber-600 font-sans font-bold text-xs animate-pulse">
+                  <RotateCw className="w-3 h-3 animate-spin" />
+                  PAUSED ({Math.ceil(status.regime_change_cooldown_remaining_seconds / 60)}m left)
+                </div>
+              </div>
+            )}
+
             <div>
               <p className="text-[9px] font-mono text-slate-400 uppercase leading-none">Economic Protection</p>
               {status.critical_event_active ? (

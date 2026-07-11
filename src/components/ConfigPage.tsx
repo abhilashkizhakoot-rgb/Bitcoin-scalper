@@ -1297,6 +1297,19 @@ export default function ConfigPage({
                 </div>
 
                 <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Regime Transition Cooldown (Minutes)</label>
+                  <input
+                    type="number"
+                    value={generalConfig.regime_change_cooldown_minutes !== undefined ? generalConfig.regime_change_cooldown_minutes : 15}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, regime_change_cooldown_minutes: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Waiting period in minutes enforced immediately after the Regime Filter detects a market regime transition. Pauses new trade entries to prevent entering bad trades during volatile regime shifts.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
                   <label className="text-xs font-mono text-slate-400 uppercase">Max Consecutive Losses</label>
                   <input
                     type="number"

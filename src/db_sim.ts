@@ -115,6 +115,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     enable_orderflow_softening: true,
     order_book_min_depth: 4.0,
     order_book_max_imbalance: 0.35,
+    regime_change_cooldown_minutes: 15,
   },
   ml_settings: {
     entry_threshold_long: 0.80,
@@ -885,6 +886,10 @@ class DatabaseManager {
       }
       if (this.cache.config.general.order_book_max_imbalance === undefined) {
         this.cache.config.general.order_book_max_imbalance = 0.35;
+        changed = true;
+      }
+      if (this.cache.config.general.regime_change_cooldown_minutes === undefined) {
+        this.cache.config.general.regime_change_cooldown_minutes = 15;
         changed = true;
       }
     }

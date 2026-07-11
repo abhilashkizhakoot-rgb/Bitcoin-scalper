@@ -35,6 +35,8 @@ class TradingEngine {
   private protectionRemainingSeconds: number | null = null;
   private currentRegime: MarketRegime = MarketRegime.RANGE_BOUND;
   private regimeConfidence: number = 0.5;
+  private lastRegimeChangeTimestamp: number | null = null;
+  private hasInitializedRegime: boolean = false;
   private tickCount: number = 0;
   private orderFlowStats = {
     takerBuyVolume: 0,
@@ -569,10 +571,35 @@ class TradingEngine {
     }
   }
 
+  public getRegimeChangeCooldownStatus() {
+    const config = dbManager.getConfig();
+    const cooldownMins = config.general.regime_change_cooldown_minutes !== undefined
+      ? config.general.regime_change_cooldown_minutes
+      : 15; // Default to 15 mins
+
+    if (this.lastRegimeChangeTimestamp === null) {
+      return { active: false, remainingSeconds: 0 };
+    }
+
+    const elapsedMs = Date.now() - this.lastRegimeChangeTimestamp;
+    const cooldownMs = cooldownMins * 60 * 1000;
+    const remainingMs = cooldownMs - elapsedMs;
+
+    if (remainingMs > 0) {
+      return {
+        active: true,
+        remainingSeconds: Math.ceil(remainingMs / 1000),
+      };
+    }
+
+    return { active: false, remainingSeconds: 0 };
+  }
+
   public getStatus() {
     const creds = dbManager.getCredentials();
     const config = dbManager.getConfig();
     const active = this.activeTrade;
+    const regimeCooldown = this.getRegimeChangeCooldownStatus();
 
     return {
       is_trading_active: config.general.is_trading_active,
@@ -583,6 +610,7 @@ class TradingEngine {
       critical_event_active: this.criticalEventActive,
       critical_event_keyword: this.criticalEventKeyword,
       protection_remaining_seconds: this.protectionRemainingSeconds,
+      regime_change_cooldown_remaining_seconds: regimeCooldown.active ? regimeCooldown.remainingSeconds : null,
       active_trade: active,
       account_balance_usdt: creds.account_balance_usdt,
       checkpoints: this.getCurrentCheckpoints(),
@@ -3580,6 +3608,17 @@ class TradingEngine {
     confidence = Math.min(confidence, 0.99);
 
     if (this.currentRegime !== regime) {
+      if (this.hasInitializedRegime) {
+        this.lastRegimeChangeTimestamp = Date.now();
+        const config = dbManager.getConfig();
+        const cooldownMins = config.general.regime_change_cooldown_minutes !== undefined
+          ? config.general.regime_change_cooldown_minutes
+          : 15;
+        this.log(
+          `⏳ Regime Change Cooldown Activated: Pausing new trade entries for ${cooldownMins} minutes due to regime shift [${this.currentRegime}] → [${regime}].`
+        );
+      }
+
       this.log(
         `Market Regime Shift detected: [${this.currentRegime}] → [${regime}] (using ${intervalMinutes}m aggregated candles) with confidence ${(
           confidence * 100
@@ -3612,6 +3651,7 @@ class TradingEngine {
 
     this.currentRegime = regime;
     this.regimeConfidence = confidence;
+    this.hasInitializedRegime = true;
   }
 
   // Layer 2: Sentiment analysis on news titles using FinBERT and Cross-Source Aggregation
@@ -4392,6 +4432,18 @@ class TradingEngine {
       required: obReq,
     });
 
+    // C20: Regime Transition Cooldown
+    const regimeCooldown = this.getRegimeChangeCooldownStatus();
+    const regimeCooldownMins = config.general.regime_change_cooldown_minutes !== undefined ? config.general.regime_change_cooldown_minutes : 15;
+    conditions.push({
+      name: "Regime Transition Cooldown",
+      met: !regimeCooldown.active,
+      current_value: regimeCooldown.active
+        ? `BLOCKED (Cooldown active: ${Math.ceil(regimeCooldown.remainingSeconds / 60)}m left)`
+        : "PASSING (No recent regime shift)",
+      required: `No regime transitions within the last ${regimeCooldownMins} minutes`,
+    });
+
     // Apply bypassed/skipped gates
     for (const c of conditions) {
       if (this.isGateSkipped(config, c.name)) {
@@ -4409,7 +4461,8 @@ class TradingEngine {
       "Daily Trade Count Limit",
       "Account Equity & API Connection Verification",
       "Loss Streak Cooldown Protection",
-      "Optimal Session Timing Window Check (IST)"
+      "Optimal Session Timing Window Check (IST)",
+      "Regime Transition Cooldown"
     ];
 
     const isWeightedEnabled = config.gate_scoring?.enabled === true;

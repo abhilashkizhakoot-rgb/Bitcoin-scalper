@@ -179,6 +179,7 @@ export interface StrategyConfig {
     enable_orderflow_softening?: boolean;
     order_book_min_depth?: number;
     order_book_max_imbalance?: number;
+    regime_change_cooldown_minutes?: number;
   };
   ml_settings: {
     entry_threshold_long: number; // e.g. 0.80

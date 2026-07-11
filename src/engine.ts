@@ -2746,6 +2746,25 @@ class TradingEngine {
       invalidationMultiplier = 0.45;   // Max breathing room for high-volatility trend extension
     }
 
+    const closes = this.candles1m.map(c => c.close);
+    const ema200 = this.calculateEMA(closes, Math.min(closes.length, 200));
+    const ema200Val = ema200[lastIdx] || currentPrice;
+
+    // Dynamic selection of the active EMA zones based on ADX (Normal Trend [20-30]: 100/200 EMA; Strong Trend [30-40]: 20/50 EMA)
+    let firstEmaVal = ema20Val;
+    let secondEmaVal = ema50Val;
+    let emaZoneLabel = "20/50 EMA";
+
+    if (adxValue < 30) {
+      firstEmaVal = ema100Val;
+      secondEmaVal = ema200Val;
+      emaZoneLabel = "100/200 EMA";
+    } else {
+      firstEmaVal = ema20Val;
+      secondEmaVal = ema50Val;
+      emaZoneLabel = "20/50 EMA";
+    }
+
     // --- FEATURE 3: Multi-Timeframe (5m) Trend Structure Alignment ---
     const candles5m = this.aggregateCandles(this.candles1m, 5);
     const closes5m = candles5m.map(c => c.close);
@@ -2902,18 +2921,18 @@ class TradingEngine {
         }
       }
 
-      // Setup 2: 20/50 EMA Pushback
-      const emaRetraceThreshold20 = ema20Val + effectiveEmaMult * currentAtr;
-      const emaRetraceThreshold50 = ema50Val + effectiveEmaMult * currentAtr;
-      const hasRetracedToEMA = postBreakoutCandles.some(c => c.low <= emaRetraceThreshold20 || c.low <= emaRetraceThreshold50);
+      // Setup 2: Adaptive EMA Pushback Zone (based on ADX)
+      const emaRetraceThresholdFirst = firstEmaVal + effectiveEmaMult * currentAtr;
+      const emaRetraceThresholdSecond = secondEmaVal + effectiveEmaMult * currentAtr;
+      const hasRetracedToEMA = postBreakoutCandles.some(c => c.low <= emaRetraceThresholdFirst || c.low <= emaRetraceThresholdSecond);
       
-      const currentRejectsEma20 = currentCandle.low <= ema20Val + 0.2 * currentAtr && currentPrice >= (ema20Val - 0.15 * currentAtr) && currentCandle.close > currentCandle.open;
-      const currentRejectsEma50 = currentCandle.low <= ema50Val + 0.2 * currentAtr && currentPrice >= (ema50Val - 0.15 * currentAtr) && currentCandle.close > currentCandle.open;
-      const isEmaPushbackValid = (currentRejectsEma20 || currentRejectsEma50) && hasRetracedToEMA;
+      const currentRejectsFirst = currentCandle.low <= firstEmaVal + 0.2 * currentAtr && currentPrice >= (firstEmaVal - 0.15 * currentAtr) && currentCandle.close > currentCandle.open;
+      const currentRejectsSecond = currentCandle.low <= secondEmaVal + 0.2 * currentAtr && currentPrice >= (secondEmaVal - 0.15 * currentAtr) && currentCandle.close > currentCandle.open;
+      const isEmaPushbackValid = (currentRejectsFirst || currentRejectsSecond) && hasRetracedToEMA;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
-          emaPushbackMessage = `20/50 EMA Pushback confirmed${mtfMessage}: Price rejected dynamic EMA support at $${(currentRejectsEma20 ? ema20Val : ema50Val).toFixed(2)} with bullish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
+          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed${mtfMessage}: Price rejected dynamic EMA support at $${(currentRejectsFirst ? firstEmaVal : secondEmaVal).toFixed(2)} with bullish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
         } else {
           emaPushbackMessage = "Blocked EMA Pushback: Abnormally high volume pullback during EMA retracement suggests a trend failure.";
         }
@@ -2926,7 +2945,7 @@ class TradingEngine {
       } else {
         const failureReason = !isVolumeHealthyForPullback
           ? "Pullback volume is abnormally high (distribution risk); waiting for volume to dry up before confirming a safe entry."
-          : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to 20/50 EMA pushback setup (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
+          : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to ${emaZoneLabel} pushback setup (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
         return {
           confirmed: false,
           message: failureReason
@@ -3061,18 +3080,18 @@ class TradingEngine {
         }
       }
 
-      // Setup 2: 20/50 EMA Pushback
-      const emaRetraceThreshold20 = ema20Val - effectiveEmaMult * currentAtr;
-      const emaRetraceThreshold50 = ema50Val - effectiveEmaMult * currentAtr;
-      const hasRetracedToEMA = postBreakoutCandles.some(c => c.high >= emaRetraceThreshold20 || c.high >= emaRetraceThreshold50);
+      // Setup 2: Adaptive EMA Pushback Zone (based on ADX)
+      const emaRetraceThresholdFirst = firstEmaVal - effectiveEmaMult * currentAtr;
+      const emaRetraceThresholdSecond = secondEmaVal - effectiveEmaMult * currentAtr;
+      const hasRetracedToEMA = postBreakoutCandles.some(c => c.high >= emaRetraceThresholdFirst || c.high >= emaRetraceThresholdSecond);
       
-      const currentRejectsEma20 = currentCandle.high >= ema20Val - 0.2 * currentAtr && currentPrice <= (ema20Val + 0.15 * currentAtr) && currentCandle.close < currentCandle.open;
-      const currentRejectsEma50 = currentCandle.high >= ema50Val - 0.2 * currentAtr && currentPrice <= (ema50Val + 0.15 * currentAtr) && currentCandle.close < currentCandle.open;
-      const isEmaPushbackValid = (currentRejectsEma20 || currentRejectsEma50) && hasRetracedToEMA;
+      const currentRejectsFirst = currentCandle.high >= firstEmaVal - 0.2 * currentAtr && currentPrice <= (firstEmaVal + 0.15 * currentAtr) && currentCandle.close < currentCandle.open;
+      const currentRejectsSecond = currentCandle.high >= secondEmaVal - 0.2 * currentAtr && currentPrice <= (secondEmaVal + 0.15 * currentAtr) && currentCandle.close < currentCandle.open;
+      const isEmaPushbackValid = (currentRejectsFirst || currentRejectsSecond) && hasRetracedToEMA;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
-          emaPushbackMessage = `20/50 EMA Pushback confirmed${mtfMessage}: Price rejected dynamic EMA resistance at $${(currentRejectsEma20 ? ema20Val : ema50Val).toFixed(2)} with bearish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
+          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed${mtfMessage}: Price rejected dynamic EMA resistance at $${(currentRejectsFirst ? firstEmaVal : secondEmaVal).toFixed(2)} with bearish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
         } else {
           emaPushbackMessage = "Blocked EMA Pushback: Abnormally high volume pullback during EMA retracement suggests a trend failure.";
         }
@@ -3085,7 +3104,7 @@ class TradingEngine {
       } else {
         const failureReason = !isVolumeHealthyForPullback
           ? "Pullback volume is abnormally high (accumulation risk); waiting for volume to dry up before confirming a safe entry."
-          : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to 20/50 EMA pushback setup (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
+          : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to ${emaZoneLabel} pushback setup (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
         return {
           confirmed: false,
           message: failureReason

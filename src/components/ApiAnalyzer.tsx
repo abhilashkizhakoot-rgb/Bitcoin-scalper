@@ -39,7 +39,7 @@ export default function ApiAnalyzer({ isPaperMode = true }: ApiAnalyzerProps) {
         setLogs(data);
       }
     } catch (e) {
-      console.error("Failed to fetch API logs:", e);
+      console.warn("Failed to fetch API logs:", e);
     } finally {
       setLoading(false);
     }

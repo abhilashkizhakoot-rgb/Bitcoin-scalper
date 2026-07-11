@@ -256,7 +256,7 @@ export default function Dashboard({
 
         setChartData(finalPoints.slice(-30));
       } catch (err) {
-        console.error("Failed to fetch market candles", err);
+        console.warn("Failed to fetch market candles", err);
       }
     };
 

@@ -180,6 +180,14 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
       description: "Verifies near-book liquidity depth (minimum 10.0 BTC cumulative top-10 levels) and ensures top-10 level bid/ask order book imbalance aligns with the entry direction to avoid buying directly into massive ask walls or selling into heavy bid walls.",
       priority: "HIGH",
     },
+    {
+      name: "Multi-Timeframe Volume Profiling (Horizontal Liquidity)",
+      met: true,
+      current_value: "ST_POC: $101,200 | MT_POC: $101,500 | HT_POC: $101,100 | PASSED (Bouncing off heavy Horizontal Floor support)",
+      required: "Price must not enter trades directly into heavy POC/HVN boundaries without high breakout volume (Rel Volume >= 1.4)",
+      description: "Applies institutional-grade Multi-Timeframe Volume Profiling. Identifies Horizontal Liquidity Pools (POC, VAH, VAL, and High/Low Volume Nodes). Confirms entries bouncing off historical horizontal support/resistance floors and prevents trading into heavy overhead/underhead order walls.",
+      priority: "HIGH",
+    },
   ];
 
   const conditions = checkpointsData?.conditions || fallbackConditions;
@@ -199,6 +207,7 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
     order_flow: config?.gate_scoring?.weights?.order_flow ?? 10,
     squeeze_filter: config?.gate_scoring?.weights?.squeeze_filter ?? 5,
     order_book: config?.gate_scoring?.weights?.order_book ?? 5,
+    volume_profile: (config?.gate_scoring?.weights as any)?.volume_profile ?? 10,
   };
 
   const modifiers = config?.gate_scoring?.adaptive_modifiers ?? {
@@ -248,6 +257,7 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
     { condName: "Binance Order Flow Confirmation", weightKey: "order_flow", label: "Binance Order Flow Score" },
     { condName: "Volatility Compression (Squeeze) Filter", weightKey: "squeeze_filter", label: "Bollinger Squeeze Filter" },
     { condName: "Order Book Imbalance & Liquidity Depth Gate", weightKey: "order_book", label: "Near-Book Imbalance Gate" },
+    { condName: "Multi-Timeframe Volume Profiling (Horizontal Liquidity)", weightKey: "volume_profile", label: "Volume Profile & Horiz. Liquidity" },
   ];
 
   let totalTacticalWeight = 0;

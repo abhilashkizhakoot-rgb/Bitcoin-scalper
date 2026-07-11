@@ -25,6 +25,15 @@ import { placeDeltaMarketOrder, getDeltaWalletBalance } from "./delta_client.js"
 class TradingEngine {
   private candles1m: Candlestick[] = [];
   private currentPrice: number = 101500;
+  private indicatorCache = {
+    ema: new Map<string, number[]>(),
+    rsi: new Map<string, number[]>(),
+    atr: new Map<string, number[]>(),
+    adx: new Map<string, number[]>(),
+    aggCandles: new Map<string, Candlestick[]>(),
+    marketStructure: new Map<string, any>(),
+    volumeProfile: new Map<string, any>(),
+  };
   private currentVolume24h: number = 125400;
   private logs: string[] = [];
   private liveActiveTrade: Trade | null = null;
@@ -1467,6 +1476,31 @@ class TradingEngine {
       priority: "HIGH",
     });
 
+    // C21: Multi-Timeframe Volume Profiling (Horizontal Liquidity)
+    const vpResult = this.evaluateMultiTimeframeVolumeProfile(signalDirection, currentPrice, currentAtr_cp, relVolume);
+    conditions.push({
+      name: "Multi-Timeframe Volume Profiling (Horizontal Liquidity)",
+      met: vpResult.met,
+      current_value: vpResult.val,
+      required: vpResult.req,
+      description: vpResult.description,
+      priority: "HIGH",
+    });
+
+    // C20: Regime Transition Cooldown
+    const regimeCooldown = this.getRegimeChangeCooldownStatus();
+    const regimeCooldownMins = config.general.regime_change_cooldown_minutes !== undefined ? config.general.regime_change_cooldown_minutes : 15;
+    conditions.push({
+      name: "Regime Transition Cooldown",
+      met: !regimeCooldown.active,
+      current_value: regimeCooldown.active
+        ? `BLOCKED (Cooldown active: ${Math.ceil(regimeCooldown.remainingSeconds / 60)}m left)`
+        : "PASSING (No recent regime shift)",
+      required: `No regime transitions within the last ${regimeCooldownMins} minutes`,
+      description: "Applies a transition lock to entry signals whenever the dominant market regime shifts (e.g. from Strong Uptrend to Range Bound), protecting against high-frequency slippage and trend-reversal fakeouts during structural transitions.",
+      priority: "CRITICAL",
+    });
+
     // Apply bypassed/skipped gates
     for (const c of conditions) {
       if (this.isGateSkipped(config, c.name)) {
@@ -1492,7 +1526,8 @@ class TradingEngine {
         "Daily Trade Count Limit",
         "Account Equity & API Connection Verification",
         "Loss Streak Cooldown Protection",
-        "Optimal Session Timing Window Check (IST)"
+        "Optimal Session Timing Window Check (IST)",
+        "Regime Transition Cooldown"
       ];
 
       const baseWeights = {
@@ -1505,6 +1540,7 @@ class TradingEngine {
         order_flow: config.gate_scoring?.weights?.order_flow ?? 10,
         squeeze_filter: config.gate_scoring?.weights?.squeeze_filter ?? 5,
         order_book: config.gate_scoring?.weights?.order_book ?? 5,
+        volume_profile: (config.gate_scoring?.weights as any)?.volume_profile ?? 10,
       };
 
       const modifiers = config.gate_scoring?.adaptive_modifiers ?? {
@@ -1539,6 +1575,7 @@ class TradingEngine {
         { condName: "Binance Order Flow Confirmation", weightKey: "order_flow" as const },
         { condName: "Volatility Compression (Squeeze) Filter", weightKey: "squeeze_filter" as const },
         { condName: "Order Book Imbalance & Liquidity Depth Gate", weightKey: "order_book" as const },
+        { condName: "Multi-Timeframe Volume Profiling (Horizontal Liquidity)", weightKey: "volume_profile" as const },
       ];
 
       let totalTacticalWeight = 0;
@@ -2147,8 +2184,16 @@ class TradingEngine {
 
   // Indicators Calculation Helpers
   private calculateEMA(data: number[], period: number): number[] {
+    if (data.length === 0) return [];
+    const key = `${data.length}_${data[data.length - 1]}_${data[0]}_${period}`;
+    if (this.indicatorCache.ema.has(key)) {
+      return this.indicatorCache.ema.get(key)!;
+    }
+    if (this.indicatorCache.ema.size > 200) {
+      this.indicatorCache.ema.clear();
+    }
+
     const ema: number[] = [];
-    if (data.length === 0) return ema;
     const k = 2 / (period + 1);
     let sum = 0;
     for (let i = 0; i < period; i++) {
@@ -2158,10 +2203,20 @@ class TradingEngine {
     for (let i = period; i < data.length; i++) {
       ema[i] = data[i] * k + ema[i - 1] * (1 - k);
     }
+    this.indicatorCache.ema.set(key, ema);
     return ema;
   }
 
   private calculateRSI(data: number[], period = 14): number[] {
+    if (data.length === 0) return [];
+    const key = `${data.length}_${data[data.length - 1]}_${data[0]}_${period}`;
+    if (this.indicatorCache.rsi.has(key)) {
+      return this.indicatorCache.rsi.get(key)!;
+    }
+    if (this.indicatorCache.rsi.size > 200) {
+      this.indicatorCache.rsi.clear();
+    }
+
     const rsi: number[] = [];
     if (data.length <= period) return rsi;
 
@@ -2190,10 +2245,22 @@ class TradingEngine {
       rsi[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
     }
 
+    this.indicatorCache.rsi.set(key, rsi);
     return rsi;
   }
 
   private calculateATR(candles: Candlestick[], period = 14): number[] {
+    if (candles.length === 0) return [];
+    const last = candles[candles.length - 1];
+    const first = candles[0];
+    const key = `${candles.length}_${last.time}_${last.close}_${first.time}_${period}`;
+    if (this.indicatorCache.atr.has(key)) {
+      return this.indicatorCache.atr.get(key)!;
+    }
+    if (this.indicatorCache.atr.size > 200) {
+      this.indicatorCache.atr.clear();
+    }
+
     const atr: number[] = [];
     if (candles.length <= period) return atr;
 
@@ -2215,10 +2282,22 @@ class TradingEngine {
       atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
     }
 
+    this.indicatorCache.atr.set(key, atr);
     return atr;
   }
 
   private calculateADX(candles: Candlestick[], period = 14): number[] {
+    if (candles.length === 0) return [];
+    const last = candles[candles.length - 1];
+    const first = candles[0];
+    const key = `${candles.length}_${last.time}_${last.close}_${first.time}_${period}`;
+    if (this.indicatorCache.adx.has(key)) {
+      return this.indicatorCache.adx.get(key)!;
+    }
+    if (this.indicatorCache.adx.size > 200) {
+      this.indicatorCache.adx.clear();
+    }
+
     const adx: number[] = [];
     if (candles.length <= period * 2) {
       return Array(candles.length).fill(25);
@@ -2300,6 +2379,7 @@ class TradingEngine {
       adx.unshift(25);
     }
 
+    this.indicatorCache.adx.set(key, adx);
     return adx;
   }
 
@@ -2565,19 +2645,39 @@ class TradingEngine {
     swingHigh: number;
     swingLow: number;
   } {
+    if (this.candles1m.length === 0) {
+      return {
+        current_HH: null, prev_HH: null, current_HL: null, prev_HL: null,
+        current_LH: null, prev_LH: null, current_LL: null, prev_LL: null,
+        isLongStructureConfirmed: false, isShortStructureConfirmed: false,
+        pullbackLongMet: false, pullbackShortMet: false,
+        swingHigh: 100000, swingLow: 100000
+      };
+    }
+    const last = this.candles1m[this.candles1m.length - 1];
+    const cacheKey = `${this.candles1m.length}_${last.time}_${last.close}_${this.currentRegime}`;
+    if (this.indicatorCache.marketStructure.has(cacheKey)) {
+      return this.indicatorCache.marketStructure.get(cacheKey)!;
+    }
+    if (this.indicatorCache.marketStructure.size > 200) {
+      this.indicatorCache.marketStructure.clear();
+    }
+
     const closes = this.candles1m.map(c => c.close);
     const highs = this.candles1m.map(c => c.high);
     const lows = this.candles1m.map(c => c.low);
     const lastIdx = closes.length - 1;
 
     if (closes.length < 50) {
-      return {
+      const defaultStruct = {
         current_HH: null, prev_HH: null, current_HL: null, prev_HL: null,
         current_LH: null, prev_LH: null, current_LL: null, prev_LL: null,
         isLongStructureConfirmed: false, isShortStructureConfirmed: false,
         pullbackLongMet: false, pullbackShortMet: false,
         swingHigh: highs[lastIdx] || 100000, swingLow: lows[lastIdx] || 100000
       };
+      this.indicatorCache.marketStructure.set(cacheKey, defaultStruct);
+      return defaultStruct;
     }
 
     // Adaptive Fractal lookback based on current market regime:
@@ -2694,7 +2794,7 @@ class TradingEngine {
     const swingHigh = rawHighs.length > 0 ? rawHighs[rawHighs.length - 1].price : highs[lastIdx];
     const swingLow = rawLows.length > 0 ? rawLows[rawLows.length - 1].price : lows[lastIdx];
 
-    return {
+    const result = {
       current_HH,
       prev_HH,
       current_HL,
@@ -2710,6 +2810,8 @@ class TradingEngine {
       swingHigh,
       swingLow
     };
+    this.indicatorCache.marketStructure.set(cacheKey, result);
+    return result;
   }
 
   private evaluateTrendBreakoutSetup(
@@ -3655,6 +3757,14 @@ class TradingEngine {
     if (intervalMinutes <= 1 || candles1m.length === 0) {
       return candles1m;
     }
+    const last = candles1m[candles1m.length - 1];
+    const key = `${candles1m.length}_${last.time}_${last.close}_${intervalMinutes}`;
+    if (this.indicatorCache.aggCandles.has(key)) {
+      return this.indicatorCache.aggCandles.get(key)!;
+    }
+    if (this.indicatorCache.aggCandles.size > 200) {
+      this.indicatorCache.aggCandles.clear();
+    }
 
     const aggregated: Candlestick[] = [];
     const groups: Record<number, Candlestick[]> = {};
@@ -3690,7 +3800,263 @@ class TradingEngine {
       });
     }
 
+    this.indicatorCache.aggCandles.set(key, aggregated);
     return aggregated;
+  }
+
+  // --- MULTI-TIMEFRAME VOLUME PROFILING & HORIZONTAL LIQUIDITY ---
+  private calculateVolumeProfile(candles: Candlestick[], numBins: number = 24): {
+    poc: number;
+    vah: number;
+    val: number;
+    hvns: number[];
+    lvns: number[];
+    bins: { price: number; volume: number }[];
+  } {
+    if (candles.length === 0) {
+      return { poc: this.currentPrice, vah: this.currentPrice, val: this.currentPrice, hvns: [], lvns: [], bins: [] };
+    }
+
+    const highs = candles.map(c => c.high);
+    const lows = candles.map(c => c.low);
+    const maxPrice = Math.max(...highs);
+    const minPrice = Math.min(...lows);
+    const priceRange = maxPrice - minPrice;
+
+    if (priceRange === 0) {
+      return { poc: minPrice, vah: minPrice, val: minPrice, hvns: [minPrice], lvns: [], bins: [] };
+    }
+
+    const binSize = priceRange / numBins;
+    const bins = Array.from({ length: numBins }, (_, i) => ({
+      price: minPrice + (i + 0.5) * binSize,
+      volume: 0
+    }));
+
+    let totalVolume = 0;
+    for (const c of candles) {
+      const cRange = c.high - c.low;
+      const cVol = c.volume;
+      totalVolume += cVol;
+      if (cRange === 0) {
+        const idx = Math.min(numBins - 1, Math.max(0, Math.floor((c.close - minPrice) / binSize)));
+        bins[idx].volume += cVol;
+      } else {
+        const startIdx = Math.max(0, Math.floor((c.low - minPrice) / binSize));
+        const endIdx = Math.min(numBins - 1, Math.floor((c.high - minPrice) / binSize));
+        if (startIdx === endIdx) {
+          bins[startIdx].volume += cVol;
+        } else {
+          for (let idx = startIdx; idx <= endIdx; idx++) {
+            const binMin = minPrice + idx * binSize;
+            const binMax = binMin + binSize;
+            const overlapMin = Math.max(c.low, binMin);
+            const overlapMax = Math.min(c.high, binMax);
+            const overlap = overlapMax - overlapMin;
+            if (overlap > 0) {
+              bins[idx].volume += cVol * (overlap / cRange);
+            }
+          }
+        }
+      }
+    }
+
+    let maxVol = 0;
+    let pocIdx = 0;
+    for (let idx = 0; idx < numBins; idx++) {
+      if (bins[idx].volume > maxVol) {
+        maxVol = bins[idx].volume;
+        pocIdx = idx;
+      }
+    }
+    const poc = bins[pocIdx].price;
+
+    const valueAreaThreshold = totalVolume * 0.70;
+    let valueAreaVolume = bins[pocIdx].volume;
+    let leftIdx = pocIdx;
+    let rightIdx = pocIdx;
+
+    while (valueAreaVolume < valueAreaThreshold && (leftIdx > 0 || rightIdx < numBins - 1)) {
+      const leftVol = leftIdx > 0 ? bins[leftIdx - 1].volume : -1;
+      const rightVol = rightIdx < numBins - 1 ? bins[rightIdx + 1].volume : -1;
+
+      if (leftVol >= rightVol && leftIdx > 0) {
+        leftIdx--;
+        valueAreaVolume += leftVol;
+      } else if (rightIdx < numBins - 1) {
+        rightIdx++;
+        valueAreaVolume += rightVol;
+      } else if (leftIdx > 0) {
+        leftIdx--;
+        valueAreaVolume += leftVol;
+      } else {
+        break;
+      }
+    }
+
+    const val = bins[leftIdx].price - binSize * 0.5;
+    const vah = bins[rightIdx].price + binSize * 0.5;
+
+    const hvns: number[] = [];
+    const lvns: number[] = [];
+    const windowSize = 2;
+
+    for (let idx = windowSize; idx < numBins - windowSize; idx++) {
+      const currentVol = bins[idx].volume;
+      let isPeak = true;
+      let isTrough = true;
+
+      for (let offset = -windowSize; offset <= windowSize; offset++) {
+        if (offset === 0) continue;
+        const neighborVol = bins[idx + offset].volume;
+        if (neighborVol >= currentVol) isPeak = false;
+        if (neighborVol <= currentVol) isTrough = false;
+      }
+
+      if (isPeak && currentVol > totalVolume * 0.03) {
+        hvns.push(bins[idx].price);
+      }
+      if (isTrough && currentVol < totalVolume * 0.015) {
+        lvns.push(bins[idx].price);
+      }
+    }
+
+    return { poc, vah, val, hvns, lvns, bins };
+  }
+
+  private getVolumeProfileCached(candles: Candlestick[], id: string, numBins: number = 24): {
+    poc: number;
+    vah: number;
+    val: number;
+    hvns: number[];
+    lvns: number[];
+    bins: { price: number; volume: number }[];
+  } {
+    if (candles.length === 0) {
+      return { poc: this.currentPrice, vah: this.currentPrice, val: this.currentPrice, hvns: [], lvns: [], bins: [] };
+    }
+    const last = candles[candles.length - 1];
+    const key = `${id}_${candles.length}_${last.time}_${last.close}_${numBins}`;
+    if (this.indicatorCache.volumeProfile.has(key)) {
+      return this.indicatorCache.volumeProfile.get(key)!;
+    }
+    if (this.indicatorCache.volumeProfile.size > 200) {
+      this.indicatorCache.volumeProfile.clear();
+    }
+    const profile = this.calculateVolumeProfile(candles, numBins);
+    this.indicatorCache.volumeProfile.set(key, profile);
+    return profile;
+  }
+
+  private evaluateMultiTimeframeVolumeProfile(
+    direction: "LONG" | "SHORT" | "NEUTRAL",
+    currentPrice: number,
+    atrVal: number,
+    relVolume: number
+  ): {
+    met: boolean;
+    val: string;
+    req: string;
+    description: string;
+    stProfile: any;
+    mtProfile: any;
+    htProfile: any;
+  } {
+    const stProfile = this.getVolumeProfileCached(this.candles1m.slice(-90), "st_1m");
+    const mtProfile = this.getVolumeProfileCached(this.aggregateCandles(this.candles1m, 5).slice(-120), "mt_5m");
+    const htProfile = this.getVolumeProfileCached(this.aggregateCandles(this.candles1m, 15).slice(-120), "ht_15m");
+
+    if (direction === "NEUTRAL") {
+      return {
+        met: true,
+        val: "NEUTRAL - Profiles computed and tracking",
+        req: "Symmetrical horizontal liquidity tracking",
+        description: "Evaluates support/resistance points of control (POC) and value area boundaries across short, medium, and high timeframes.",
+        stProfile,
+        mtProfile,
+        htProfile
+      };
+    }
+
+    const proximityTolerance = Math.max(currentPrice * 0.003, atrVal * 0.4);
+
+    const allPocs = [stProfile.poc, mtProfile.poc, htProfile.poc];
+    const allHvns = [...stProfile.hvns, ...mtProfile.hvns, ...htProfile.hvns];
+    const allLiquidityNodes = Array.from(new Set([...allPocs, ...allHvns])).sort((a, b) => a - b);
+
+    const supportNodes = allLiquidityNodes.filter(node => node < currentPrice);
+    const resistanceNodes = allLiquidityNodes.filter(node => node > currentPrice);
+
+    const nearSupport = supportNodes.length > 0 ? supportNodes[supportNodes.length - 1] : null;
+    const nearResistance = resistanceNodes.length > 0 ? resistanceNodes[0] : null;
+
+    let hasSupportFloor = false;
+    let hasOverheadBlocker = false;
+    let detailMsg = "";
+    let isMet = true;
+
+    if (direction === "LONG") {
+      if (nearSupport && (currentPrice - nearSupport) <= proximityTolerance) {
+        hasSupportFloor = true;
+      }
+
+      if (nearResistance && (nearResistance - currentPrice) <= proximityTolerance) {
+        if (relVolume < 1.4) {
+          hasOverheadBlocker = true;
+        }
+      }
+
+      const stVABreakout = currentPrice > stProfile.vah;
+      const mtVABreakout = currentPrice > mtProfile.vah;
+
+      if (hasOverheadBlocker) {
+        isMet = false;
+        detailMsg = `BLOCKED (Overhead Liquidity Wall detected at $${nearResistance!.toFixed(2)} - requires Rel Vol >= 1.40)`;
+      } else if (hasSupportFloor) {
+        detailMsg = `PASSED (Bouncing off heavy Horizontal Floor support at $${nearSupport!.toFixed(2)})`;
+      } else if (stVABreakout || mtVABreakout) {
+        detailMsg = `PASSED (Explosive Value Area High breakout: stVAH $${stProfile.vah.toFixed(2)}, mtVAH $${mtProfile.vah.toFixed(2)})`;
+      } else {
+        detailMsg = `PASSED (Neutral range spacing; Near Floor: ${nearSupport ? "$" + nearSupport.toFixed(2) : "None"}, Near Wall: ${nearResistance ? "$" + nearResistance.toFixed(2) : "None"})`;
+      }
+    } else {
+      if (nearResistance && (nearResistance - currentPrice) <= proximityTolerance) {
+        hasSupportFloor = true;
+      }
+
+      if (nearSupport && (currentPrice - nearSupport) <= proximityTolerance) {
+        if (relVolume < 1.4) {
+          hasOverheadBlocker = true;
+        }
+      }
+
+      const stVABreakdown = currentPrice < stProfile.val;
+      const mtVABreakdown = currentPrice < mtProfile.val;
+
+      if (hasOverheadBlocker) {
+        isMet = false;
+        detailMsg = `BLOCKED (Underhead Liquidity Support Floor detected at $${nearSupport!.toFixed(2)} - requires Rel Vol >= 1.40)`;
+      } else if (hasSupportFloor) {
+        detailMsg = `PASSED (Retesting heavy dynamic resistance ceiling at $${nearResistance!.toFixed(2)})`;
+      } else if (stVABreakdown || mtVABreakdown) {
+        detailMsg = `PASSED (Explosive Value Area Low breakdown: stVAL $${stProfile.val.toFixed(2)}, mtVAL $${mtProfile.val.toFixed(2)})`;
+      } else {
+        detailMsg = `PASSED (Neutral range spacing; Near Floor: ${nearSupport ? "$" + nearSupport.toFixed(2) : "None"}, Near Wall: ${nearResistance ? "$" + nearResistance.toFixed(2) : "None"})`;
+      }
+    }
+
+    const valueStr = `ST_POC: $${stProfile.poc.toFixed(1)} | MT_POC: $${mtProfile.poc.toFixed(1)} | HT_POC: $${htProfile.poc.toFixed(1)} | ${detailMsg}`;
+    const reqStr = `Price must not enter trades directly into heavy POC/HVN boundaries without high breakout volume (Rel Volume >= 1.4)`;
+
+    return {
+      met: isMet,
+      val: valueStr,
+      req: reqStr,
+      description: "Applies institutional-grade Multi-Timeframe Volume Profiling. Identifies Horizontal Liquidity Pools (POC, VAH, VAL, and High/Low Volume Nodes). Confirms entries bouncing off historical horizontal support/resistance floors and prevents trading into heavy overhead/underhead order walls.",
+      stProfile,
+      mtProfile,
+      htProfile
+    };
   }
 
   // Layer 1: Market Regime Detection
@@ -4613,6 +4979,15 @@ class TradingEngine {
       required: obReq,
     });
 
+    // C21: Multi-Timeframe Volume Profiling (Horizontal Liquidity)
+    const vpResult = this.evaluateMultiTimeframeVolumeProfile(signalDirection, currentClose, currentAtr, relVolume);
+    conditions.push({
+      name: "Multi-Timeframe Volume Profiling (Horizontal Liquidity)",
+      met: vpResult.met,
+      current_value: vpResult.val,
+      required: vpResult.req,
+    });
+
     // C20: Regime Transition Cooldown
     const regimeCooldown = this.getRegimeChangeCooldownStatus();
     const regimeCooldownMins = config.general.regime_change_cooldown_minutes !== undefined ? config.general.regime_change_cooldown_minutes : 15;
@@ -4658,6 +5033,7 @@ class TradingEngine {
       order_flow: config.gate_scoring?.weights?.order_flow ?? 10,
       squeeze_filter: config.gate_scoring?.weights?.squeeze_filter ?? 5,
       order_book: config.gate_scoring?.weights?.order_book ?? 5,
+      volume_profile: (config.gate_scoring?.weights as any)?.volume_profile ?? 10,
     };
 
     const modifiers = config.gate_scoring?.adaptive_modifiers ?? {
@@ -4692,6 +5068,7 @@ class TradingEngine {
       { condName: "Binance Order Flow Confirmation", weightKey: "order_flow" as const },
       { condName: "Volatility Compression (Squeeze) Filter", weightKey: "squeeze_filter" as const },
       { condName: "Order Book Imbalance & Liquidity Depth Gate", weightKey: "order_book" as const },
+      { condName: "Multi-Timeframe Volume Profiling (Horizontal Liquidity)", weightKey: "volume_profile" as const },
     ];
 
     let totalTacticalWeight = 0;

@@ -816,7 +816,8 @@ class TradingEngine {
     const relVolThreshold = config.general.relative_volume_threshold !== undefined ? config.general.relative_volume_threshold : 1.3;
     const adxThreshold = config.general.adx_threshold !== undefined ? config.general.adx_threshold : 22.0;
 
-    const closes = this.candles1m.map((c) => c.close);
+    const closedCandles = this.candles1m.slice(0, -1);
+    const closes = closedCandles.map((c) => c.close);
     
     // Fallback values if closes.length is less than 50
     const hasEnoughData = closes.length >= 50;
@@ -830,10 +831,10 @@ class TradingEngine {
     const isBullAligned = hasEnoughData ? (ema9[lastIdx] > ema21[lastIdx] && ema21[lastIdx] > ema50[lastIdx]) : false;
     const isBearAligned = hasEnoughData ? (ema9[lastIdx] < ema21[lastIdx] && ema21[lastIdx] < ema50[lastIdx]) : false;
 
-    const adx14 = hasEnoughData ? this.calculateADX(this.candles1m, 14) : [25];
+    const adx14 = hasEnoughData ? this.calculateADX(closedCandles, 14) : [25];
     const adxValue = hasEnoughData ? adx14[lastIdx] : 25;
 
-    const volumes = this.candles1m.map((c) => c.volume);
+    const volumes = closedCandles.map((c) => c.volume);
     let relVolume = 1.0;
     if (hasEnoughData && volumes.length >= 20) {
       const currentVolume = volumes[lastIdx];
@@ -851,14 +852,14 @@ class TradingEngine {
     const headlines = dbManager.getHeadlines().slice(0, 15);
     const avgSentiment = this.calculateAverageSentiment(headlines);
 
-    const currentPrice = this.currentPrice;
+    const currentPrice = hasEnoughData ? closes[lastIdx] : this.currentPrice;
 
     // Ensure VWAP is computed
-    this.calculateVWAP(this.candles1m);
-    const lastCandle = hasEnoughData ? this.candles1m[lastIdx] : null;
-    const vwapVal = lastCandle && lastCandle.vwap !== undefined ? lastCandle.vwap : this.currentPrice;
-    const vwapUpperVal = lastCandle && lastCandle.vwap_upper !== undefined ? lastCandle.vwap_upper : this.currentPrice * 1.01;
-    const vwapLowerVal = lastCandle && lastCandle.vwap_lower !== undefined ? lastCandle.vwap_lower : this.currentPrice * 0.99;
+    this.calculateVWAP(closedCandles);
+    const lastCandle = hasEnoughData ? closedCandles[lastIdx] : null;
+    const vwapVal = lastCandle && lastCandle.vwap !== undefined ? lastCandle.vwap : currentPrice;
+    const vwapUpperVal = lastCandle && lastCandle.vwap_upper !== undefined ? lastCandle.vwap_upper : currentPrice * 1.01;
+    const vwapLowerVal = lastCandle && lastCandle.vwap_lower !== undefined ? lastCandle.vwap_lower : currentPrice * 0.99;
 
     const currentRsi = rsi14[lastIdx] !== undefined ? rsi14[lastIdx] : 50;
     const bb = this.calculateBollingerBands(closes, 20, 2);
@@ -890,17 +891,17 @@ class TradingEngine {
     }
 
     let signalDirection: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL";
-    const struct = this.getTrendMarketStructure();
-    const opens = this.candles1m.map((c) => c.open);
+    const struct = this.getTrendMarketStructure(closedCandles);
+    const opens = closedCandles.map((c) => c.open);
     const averageBodySize = hasEnoughData
       ? closes.slice(-20).map((c, idx) => {
           const openVal = opens[closes.length - 20 + idx] !== undefined ? opens[closes.length - 20 + idx] : c;
           return Math.abs(c - openVal);
         }).reduce((a, b) => a + b, 0) / 20
       : 50;
-    const currentCandle = hasEnoughData ? this.candles1m[lastIdx] : { open: currentPrice, close: currentPrice, high: currentPrice, low: currentPrice };
+    const currentCandle = hasEnoughData ? closedCandles[lastIdx] : { open: currentPrice, close: currentPrice, high: currentPrice, low: currentPrice };
     const currentBodySize = Math.abs(currentCandle.close - currentCandle.open);
-    const atr14_cp = hasEnoughData ? this.calculateATR(this.candles1m, 14) : [50];
+    const atr14_cp = hasEnoughData ? this.calculateATR(closedCandles, 14) : [50];
     const currentAtr_cp = atr14_cp[lastIdx] || 50;
 
     const ema20 = hasEnoughData ? this.calculateEMA(closes, ms.fast_ema_period || 20) : [currentPrice];
@@ -933,7 +934,7 @@ class TradingEngine {
     if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       // Mean-Reversion and Breakout rules for RANGE_BOUND
       const rangeLookback = 30;
-      const recentCandlesForRange = this.candles1m.slice(-rangeLookback);
+      const recentCandlesForRange = closedCandles.slice(-rangeLookback);
       const rangeHigh = recentCandlesForRange.length > 0 ? Math.max(...recentCandlesForRange.map(c => c.high)) : struct.swingHigh;
       const rangeLow = recentCandlesForRange.length > 0 ? Math.min(...recentCandlesForRange.map(c => c.low)) : struct.swingLow;
 
@@ -964,7 +965,7 @@ class TradingEngine {
       signalDirection = "NEUTRAL";
     } else {
       // --- TREND-FOLLOWING LOGIC RESTRICTED TO 20/50 EMA PUSHBACKS ---
-      const recentCandles = this.candles1m.slice(-8);
+      const recentCandles = closedCandles.slice(-8);
 
       const recentPullbackToEma20Long = recentCandles.some(c => c.low <= ema20Val * 1.0015 && c.high >= ema20Val * 0.9985);
       const recentPullbackToEma50Long = recentCandles.some(c => c.low <= ema50Val * 1.0015 && c.high >= ema50Val * 0.9985);
@@ -1185,15 +1186,28 @@ class TradingEngine {
       vwapDevMet = true;
     }
 
-    const atr14 = hasEnoughData ? this.calculateATR(this.candles1m, 14) : [50];
+    const atr14 = hasEnoughData ? this.calculateATR(closedCandles, 14) : [50];
     const currentAtr = atr14[lastIdx] || 50;
+
+    // Minimum ATR Volatility Filter safety gate check
+    const minAtrEnabled = config.risk_management.min_atr_for_trade_enabled === true;
+    const minAtrValue = config.risk_management.min_atr_for_trade_value !== undefined ? config.risk_management.min_atr_for_trade_value : 15;
+    const atrMet = !minAtrEnabled || currentAtr >= minAtrValue;
+    conditions.push({
+      name: "Minimum ATR Volatility Filter",
+      met: atrMet,
+      current_value: `ATR = ${currentAtr.toFixed(1)}`,
+      required: minAtrEnabled ? `ATR >= ${minAtrValue}` : "Deactivated",
+      description: "Blocks new trade execution when the Average True Range is below the minimum threshold (preventing chop in ultra-low volatility).",
+      priority: "HIGH",
+    });
 
     // Check for high movement in earlier short period (recent 10 candles)
     const shortLookback = 10;
     let highMovementShort = false;
     let shortMovementVal = 0;
-    if (this.candles1m.length >= shortLookback) {
-      const recentCandles = this.candles1m.slice(-shortLookback);
+    if (closedCandles.length >= shortLookback) {
+      const recentCandles = closedCandles.slice(-shortLookback);
       const recentHighs = recentCandles.map(c => c.high);
       const recentLows = recentCandles.map(c => c.low);
       const maxHigh = Math.max(...recentHighs);
@@ -1251,7 +1265,7 @@ class TradingEngine {
     });
 
     // C15: Market Structure & Entry Confirmation Check (Pullback, Retest, Reversal, High-Vol Confirmation)
-    const structCheck = this.evaluateMarketStructureConfirmation(signalDirection);
+    const structCheck = this.evaluateMarketStructureConfirmation(signalDirection, closedCandles, currentPrice);
     
     // Override market structure confirmation if Special Super Strong Trend Logic is active
     if (isSpecialSuperStrongTrendLogicActive) {
@@ -1527,7 +1541,8 @@ class TradingEngine {
         "Account Equity & API Connection Verification",
         "Loss Streak Cooldown Protection",
         "Optimal Session Timing Window Check (IST)",
-        "Regime Transition Cooldown"
+        "Regime Transition Cooldown",
+        "Minimum ATR Volatility Filter"
       ];
 
       const baseWeights = {
@@ -2629,7 +2644,7 @@ class TradingEngine {
     return defaultResult;
   }
 
-  public getTrendMarketStructure(): {
+  public getTrendMarketStructure(customCandles?: Candlestick[]): {
     current_HH: { price: number; index: number } | null;
     prev_HH: { price: number; index: number } | null;
     current_HL: { price: number; index: number } | null;
@@ -2645,7 +2660,8 @@ class TradingEngine {
     swingHigh: number;
     swingLow: number;
   } {
-    if (this.candles1m.length === 0) {
+    const candles = customCandles || this.candles1m;
+    if (candles.length === 0) {
       return {
         current_HH: null, prev_HH: null, current_HL: null, prev_HL: null,
         current_LH: null, prev_LH: null, current_LL: null, prev_LL: null,
@@ -2654,8 +2670,8 @@ class TradingEngine {
         swingHigh: 100000, swingLow: 100000
       };
     }
-    const last = this.candles1m[this.candles1m.length - 1];
-    const cacheKey = `${this.candles1m.length}_${last.time}_${last.close}_${this.currentRegime}`;
+    const last = candles[candles.length - 1];
+    const cacheKey = `${candles.length}_${last.time}_${last.close}_${this.currentRegime}`;
     if (this.indicatorCache.marketStructure.has(cacheKey)) {
       return this.indicatorCache.marketStructure.get(cacheKey)!;
     }
@@ -2663,9 +2679,9 @@ class TradingEngine {
       this.indicatorCache.marketStructure.clear();
     }
 
-    const closes = this.candles1m.map(c => c.close);
-    const highs = this.candles1m.map(c => c.high);
-    const lows = this.candles1m.map(c => c.low);
+    const closes = candles.map(c => c.close);
+    const highs = candles.map(c => c.high);
+    const lows = candles.map(c => c.low);
     const lastIdx = closes.length - 1;
 
     if (closes.length < 50) {
@@ -2759,7 +2775,7 @@ class TradingEngine {
       const fib38 = current_HH.price - 0.382 * (current_HH.price - current_HL.price);
       
       const startIndex = Math.max(current_HH.index, lastIdx - 12);
-      const candlesAfterHH = this.candles1m.slice(startIndex);
+      const candlesAfterHH = candles.slice(startIndex);
       for (const candle of candlesAfterHH) {
         if (
           candle.low <= ema20Val ||
@@ -2778,7 +2794,7 @@ class TradingEngine {
       const fib38 = current_LL.price + 0.382 * (current_LH.price - current_LL.price);
       
       const startIndex = Math.max(current_LL.index, lastIdx - 12);
-      const candlesAfterLL = this.candles1m.slice(startIndex);
+      const candlesAfterLL = candles.slice(startIndex);
       for (const candle of candlesAfterLL) {
         if (
           candle.high >= ema20Val ||
@@ -2820,7 +2836,8 @@ class TradingEngine {
     ema20Val: number,
     ema50Val: number,
     ema100Val: number,
-    struct: any
+    struct: any,
+    customCandles?: Candlestick[]
   ): { confirmed: boolean; message: string } {
     const config = dbManager.getConfig();
     const ms = config.market_structure || {
@@ -2837,16 +2854,17 @@ class TradingEngine {
       ema200_proximity_divisor: 3.0,
       weak_trend_adx_threshold: 25,
     };
-    const lastIdx = this.candles1m.length - 1;
+    const candles = customCandles || this.candles1m;
+    const lastIdx = candles.length - 1;
     if (lastIdx < 0) {
       return { confirmed: false, message: "No candle data available." };
     }
-    const currentCandle = this.candles1m[lastIdx];
-    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentCandle = candles[lastIdx];
+    const atr14 = this.calculateATR(candles, 14);
     const currentAtr = atr14[lastIdx] || 50;
 
     // --- Dynamic ADX-Adaptive Retracement Zone logic ---
-    const adx14 = this.calculateADX(this.candles1m, 14);
+    const adx14 = this.calculateADX(candles, 14);
     const adxValue = adx14[lastIdx] || 25;
 
     let adxLabel = "Moderate Trend";
@@ -2855,7 +2873,7 @@ class TradingEngine {
     else if (adxValue >= 30 && adxValue < 40) adxLabel = "Strong Trend";
     else adxLabel = "Parabolic Trend";
 
-    const closes = this.candles1m.map(c => c.close);
+    const closes = candles.map(c => c.close);
     const ema20Series = this.calculateEMA(closes, 20);
     const ema50Series = this.calculateEMA(closes, 50);
     const ema100Series = this.calculateEMA(closes, 100);
@@ -2956,7 +2974,7 @@ class TradingEngine {
     const ema200Val = ema200ValComputed;
 
     // --- FEATURE 3: Multi-Timeframe (5m) Trend Structure Alignment ---
-    const candles5m = this.aggregateCandles(this.candles1m, 5);
+    const candles5m = this.aggregateCandles(candles, 5);
     const closes5m = candles5m.map(c => c.close);
     let mtfMessage = "";
     if (closes5m.length >= 10) {
@@ -3004,7 +3022,7 @@ class TradingEngine {
       // Find the candle index where breakout occurred (closing above breakout level)
       let breakoutIdx = -1;
       for (let i = searchStart; i <= lastIdx; i++) {
-        if (this.candles1m[i].close > breakoutLevel) {
+        if (candles[i].close > breakoutLevel) {
           breakoutIdx = i;
           break;
         }
@@ -3018,7 +3036,7 @@ class TradingEngine {
       }
 
       // --- FEATURE 2: Candle Body Close Confirmation for Breakout ---
-      const boCandle = this.candles1m[breakoutIdx];
+      const boCandle = candles[breakoutIdx];
       const boRange = boCandle.high - boCandle.low;
       const boBody = Math.abs(boCandle.close - boCandle.open);
       const boBodyRatio = boRange > 0 ? boBody / boRange : 0;
@@ -3044,7 +3062,7 @@ class TradingEngine {
         }
       }
 
-      const postBreakoutCandles = this.candles1m.slice(breakoutIdx + 1);
+      const postBreakoutCandles = candles.slice(breakoutIdx + 1);
 
       // --- FEATURE 4: Dynamic Invalidation & Stop-Loss Zones ---
       const structuralHL = struct.current_HL ? struct.current_HL.price : 0;
@@ -3073,7 +3091,7 @@ class TradingEngine {
 
       // --- FEATURE 1: Volume-Validated Pullback & Retest ---
       // Dynamically calculate average volume of the last 20 candles to avoid rigid single-candle anomalies
-      const volumes = this.candles1m.map(c => c.volume);
+      const volumes = candles.map(c => c.volume);
       let avgVol20 = 1.0;
       if (volumes.length >= 20) {
         const sumVol20 = volumes.slice(-20).reduce((a, b) => a + b, 0);
@@ -3096,7 +3114,7 @@ class TradingEngine {
       const upperWick = currentCandle.high - Math.max(currentCandle.close, currentCandle.open);
       const lowerWick = Math.min(currentCandle.close, currentCandle.open) - currentCandle.low;
       const isBullish = currentCandle.close > currentCandle.open;
-      const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
+      const prevCandle = lastIdx >= 1 ? candles[lastIdx - 1] : null;
 
       // 1. Classic Pin Bar (Bullish)
       const isPinBar = range > 0 && lowerWick >= 0.5 * range && upperWick <= 0.25 * range;
@@ -3223,7 +3241,7 @@ class TradingEngine {
       // Find the candle index where breakout occurred (closing below breakout level)
       let breakoutIdx = -1;
       for (let i = searchStart; i <= lastIdx; i++) {
-        if (this.candles1m[i].close < breakoutLevel) {
+        if (candles[i].close < breakoutLevel) {
           breakoutIdx = i;
           break;
         }
@@ -3237,7 +3255,7 @@ class TradingEngine {
       }
 
       // --- FEATURE 2: Candle Body Close Confirmation for Breakout ---
-      const boCandle = this.candles1m[breakoutIdx];
+      const boCandle = candles[breakoutIdx];
       const boRange = boCandle.high - boCandle.low;
       const boBody = Math.abs(boCandle.close - boCandle.open);
       const boBodyRatio = boRange > 0 ? boBody / boRange : 0;
@@ -3263,7 +3281,7 @@ class TradingEngine {
         }
       }
 
-      const postBreakoutCandles = this.candles1m.slice(breakoutIdx + 1);
+      const postBreakoutCandles = candles.slice(breakoutIdx + 1);
 
       // --- FEATURE 4: Dynamic Invalidation & Stop-Loss Zones ---
       const structuralLH = struct.current_LH ? struct.current_LH.price : Infinity;
@@ -3292,7 +3310,7 @@ class TradingEngine {
 
       // --- FEATURE 1: Volume-Validated Pullback & Retest ---
       // Dynamically calculate average volume of the last 20 candles to avoid rigid single-candle anomalies
-      const volumes = this.candles1m.map(c => c.volume);
+      const volumes = candles.map(c => c.volume);
       let avgVol20 = 1.0;
       if (volumes.length >= 20) {
         const sumVol20 = volumes.slice(-20).reduce((a, b) => a + b, 0);
@@ -3315,7 +3333,7 @@ class TradingEngine {
       const upperWick = currentCandle.high - Math.max(currentCandle.close, currentCandle.open);
       const lowerWick = Math.min(currentCandle.close, currentCandle.open) - currentCandle.low;
       const isBearish = currentCandle.close < currentCandle.open;
-      const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
+      const prevCandle = lastIdx >= 1 ? candles[lastIdx - 1] : null;
 
       // 1. Classic Pin Bar (Bearish)
       const isPinBar = range > 0 && upperWick >= 0.5 * range && lowerWick <= 0.25 * range;
@@ -3424,28 +3442,176 @@ class TradingEngine {
     }
   }
 
-  private evaluateMarketStructureConfirmation(signalDirection: "LONG" | "SHORT" | "NEUTRAL"): { confirmed: boolean; message: string; swingHigh: number; swingLow: number } {
-    const rawResult = this.evaluateMarketStructureConfirmationRaw(signalDirection);
-    return this.applyEma200ProximityFilter(signalDirection, this.currentPrice, rawResult);
+  private validateCandleConfirmation(
+    direction: "LONG" | "SHORT" | "NEUTRAL",
+    candles: Candlestick[]
+  ): { isValid: boolean; reason: string; type: string } {
+    if (direction === "NEUTRAL") {
+      return { isValid: true, reason: "Neutral signal, no confirmation required", type: "None" };
+    }
+
+    if (candles.length < 2) {
+      return { isValid: false, reason: "Insufficient candle history", type: "None" };
+    }
+
+    const lastIdx = candles.length - 1;
+    const currentCandle = candles[lastIdx];
+    const prevCandle = candles[lastIdx - 1];
+
+    const range = currentCandle.high - currentCandle.low;
+    if (range <= 0) {
+      return { isValid: false, reason: "Zero range candle", type: "None" };
+    }
+
+    const body = Math.abs(currentCandle.close - currentCandle.open);
+    const upperWick = currentCandle.high - Math.max(currentCandle.close, currentCandle.open);
+    const lowerWick = Math.min(currentCandle.close, currentCandle.open) - currentCandle.low;
+    const isBullish = currentCandle.close > currentCandle.open;
+    const isBearish = currentCandle.close < currentCandle.open;
+
+    // Calculate ATR 14
+    const atr14 = this.calculateATR(candles, 14);
+    const currentAtr = atr14[lastIdx] || (0.01 * currentCandle.close); // fallback
+
+    // --- 1. Classic Pin Bar ---
+    let isPinBar = false;
+    if (direction === "LONG") {
+      isPinBar = lowerWick >= 0.5 * range && upperWick <= 0.25 * range;
+    } else {
+      isPinBar = upperWick >= 0.5 * range && lowerWick <= 0.25 * range;
+    }
+
+    // --- 2. Strong Close ---
+    let hasStrongClose = false;
+    if (direction === "LONG") {
+      hasStrongClose = (currentCandle.close - currentCandle.low) / range >= 0.70;
+    } else {
+      hasStrongClose = (currentCandle.high - currentCandle.close) / range >= 0.70;
+    }
+
+    // --- 3. Engulfing Pattern ---
+    let isEngulfing = false;
+    if (direction === "LONG") {
+      isEngulfing = prevCandle &&
+        (prevCandle.close < prevCandle.open) &&
+        isBullish &&
+        (currentCandle.close >= prevCandle.open) &&
+        (currentCandle.open <= prevCandle.close);
+    } else {
+      isEngulfing = prevCandle &&
+        (prevCandle.close > prevCandle.open) &&
+        isBearish &&
+        (currentCandle.close <= prevCandle.open) &&
+        (currentCandle.open >= prevCandle.close);
+    }
+
+    // --- 4. Momentum Candle ---
+    let isMomentumCandle = false;
+    if (direction === "LONG") {
+      isMomentumCandle = isBullish && body >= 0.7 * currentAtr;
+    } else {
+      isMomentumCandle = isBearish && body >= 0.7 * currentAtr;
+    }
+
+    // --- 5. Multi-Candle Wick Rejection ---
+    let hasMultiWickRejection = false;
+    if (direction === "LONG") {
+      hasMultiWickRejection = prevCandle &&
+        (lowerWick >= 0.35 * range) &&
+        ((Math.min(prevCandle.close, prevCandle.open) - prevCandle.low) >= 0.35 * (prevCandle.high - prevCandle.low)) &&
+        Math.abs(currentCandle.low - prevCandle.low) < 0.15 * currentAtr;
+    } else {
+      hasMultiWickRejection = prevCandle &&
+        (upperWick >= 0.35 * range) &&
+        ((prevCandle.high - Math.max(prevCandle.close, prevCandle.open)) >= 0.35 * (prevCandle.high - prevCandle.low)) &&
+        Math.abs(currentCandle.high - prevCandle.high) < 0.15 * currentAtr;
+    }
+
+    // --- 6. Indecision Override ---
+    const isIndecision = (body / range < 0.15) && !isPinBar;
+
+    if (isIndecision) {
+      return {
+        isValid: false,
+        reason: `Blocked: Candle body is too small (${(body/range*100).toFixed(1)}% < 15% of range) without qualifying as a Pin Bar. Classified as Indecision.`,
+        type: "Indecision Override"
+      };
+    }
+
+    if (isPinBar) {
+      return { isValid: true, reason: `Confirmed by Classic Pin Bar`, type: "Classic Pin Bar" };
+    }
+    if (isEngulfing) {
+      return { isValid: true, reason: `Confirmed by Engulfing Pattern`, type: "Engulfing Pattern" };
+    }
+    if (hasMultiWickRejection) {
+      return { isValid: true, reason: `Confirmed by Multi-Candle Wick Rejection`, type: "Multi-Candle Wick Rejection" };
+    }
+    if (isMomentumCandle && hasStrongClose) {
+      return { isValid: true, reason: `Confirmed by Momentum Candle and Strong Close`, type: "Momentum Candle" };
+    }
+    if (hasStrongClose && (direction === "LONG" ? (lowerWick > upperWick || isBullish) : (upperWick > lowerWick || isBearish))) {
+      return { isValid: true, reason: `Confirmed by Strong Close`, type: "Strong Close" };
+    }
+
+    return {
+      isValid: false,
+      reason: `Blocked: Current candle does not meet any of the rigorous geometric confirmations (Pin Bar, Strong Close, Engulfing, Momentum, Multi-Wick Rejection). Range: $${range.toFixed(2)}, Body: $${body.toFixed(2)} (${(body/range*100).toFixed(1)}%), LowerWick: $${lowerWick.toFixed(2)}, UpperWick: $${upperWick.toFixed(2)}, ATR: $${currentAtr.toFixed(2)}.`,
+      type: "No Pattern Matched"
+    };
+  }
+
+  private evaluateMarketStructureConfirmation(
+    signalDirection: "LONG" | "SHORT" | "NEUTRAL",
+    customCandles?: Candlestick[],
+    customPrice?: number
+  ): { confirmed: boolean; message: string; swingHigh: number; swingLow: number } {
+    const rawResult = this.evaluateMarketStructureConfirmationRaw(signalDirection, customCandles, customPrice);
+    const p = customPrice !== undefined ? customPrice : this.currentPrice;
+    const proximityResult = this.applyEma200ProximityFilter(signalDirection, p, rawResult, customCandles);
+
+    if (!proximityResult.confirmed || signalDirection === "NEUTRAL") {
+      return proximityResult;
+    }
+
+    // Rigorous closed candle validation gate
+    const candles = customCandles || this.candles1m;
+    const closedCandles = candles.slice(0, -1);
+    const candleCheck = this.validateCandleConfirmation(signalDirection, closedCandles);
+
+    if (!candleCheck.isValid) {
+      return {
+        ...proximityResult,
+        confirmed: false,
+        message: `${proximityResult.message} | ${candleCheck.reason}`
+      };
+    }
+
+    return {
+      ...proximityResult,
+      message: `${proximityResult.message} | Candle confirmed via [${candleCheck.type}]`
+    };
   }
 
   private applyEma200ProximityFilter(
     direction: "LONG" | "SHORT" | "NEUTRAL",
     currentPrice: number,
-    result: { confirmed: boolean; message: string; swingHigh: number; swingLow: number }
+    result: { confirmed: boolean; message: string; swingHigh: number; swingLow: number },
+    customCandles?: Candlestick[]
   ): { confirmed: boolean; message: string; swingHigh: number; swingLow: number } {
     if (!result.confirmed || direction === "NEUTRAL") {
       return result;
     }
 
-    const closes = this.candles1m.map(c => c.close);
+    const candles = customCandles || this.candles1m;
+    const closes = candles.map(c => c.close);
     if (closes.length === 0) return result;
 
     const ema200 = this.calculateEMA(closes, Math.min(closes.length, 200));
     const lastIdx = closes.length - 1;
     const ema200Val = lastIdx >= 0 && ema200.length > lastIdx ? ema200[lastIdx] : currentPrice;
 
-    const atr14 = this.calculateATR(this.candles1m, 14);
+    const atr14 = this.calculateATR(candles, 14);
     const currentAtr = atr14[lastIdx] || 50;
 
     // --- Dynamic EMA 200 Angle & Slope Filter ---
@@ -3568,12 +3734,17 @@ class TradingEngine {
     return result;
   }
 
-  private evaluateMarketStructureConfirmationRaw(signalDirection: "LONG" | "SHORT" | "NEUTRAL"): { confirmed: boolean; message: string; swingHigh: number; swingLow: number } {
+  private evaluateMarketStructureConfirmationRaw(
+    signalDirection: "LONG" | "SHORT" | "NEUTRAL",
+    customCandles?: Candlestick[],
+    customPrice?: number
+  ): { confirmed: boolean; message: string; swingHigh: number; swingLow: number } {
     const config = dbManager.getConfig();
-    const struct = this.getTrendMarketStructure();
-    const lastIdx = this.candles1m.length - 1;
-    const currentPrice = this.currentPrice;
-    const currentCandle = lastIdx >= 0 ? this.candles1m[lastIdx] : { open: currentPrice, close: currentPrice };
+    const candles = customCandles || this.candles1m;
+    const struct = this.getTrendMarketStructure(candles);
+    const lastIdx = candles.length - 1;
+    const currentPrice = customPrice !== undefined ? customPrice : this.currentPrice;
+    const currentCandle = lastIdx >= 0 ? candles[lastIdx] : { open: currentPrice, close: currentPrice };
 
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
       return {
@@ -3595,7 +3766,7 @@ class TradingEngine {
       }
 
       const rangeLookback = 30;
-      const recentCandlesForRange = this.candles1m.slice(-rangeLookback);
+      const recentCandlesForRange = candles.slice(-rangeLookback);
       const rangeHigh = recentCandlesForRange.length > 0 ? Math.max(...recentCandlesForRange.map(c => c.high)) : struct.swingHigh;
       const rangeLow = recentCandlesForRange.length > 0 ? Math.min(...recentCandlesForRange.map(c => c.low)) : struct.swingLow;
 
@@ -3607,7 +3778,7 @@ class TradingEngine {
       const isRangeShortReversal = (currentPrice >= rangeResistanceThreshold) && (currentCandle.close < currentCandle.open);
 
       // Compute relative volume to check breakout strength
-      const volumes = this.candles1m.map((c) => c.volume);
+      const volumes = candles.map((c) => c.volume);
       let relVolume = 1.0;
       if (volumes.length >= 20) {
         const currentVolume = volumes[lastIdx];
@@ -3680,7 +3851,7 @@ class TradingEngine {
     let confirmed = false;
     let message = "";
 
-    const closes = this.candles1m.map(c => c.close);
+    const closes = candles.map(c => c.close);
     const hasEnoughData = closes.length >= 100;
     const ema20 = hasEnoughData ? this.calculateEMA(closes, 20) : [];
     const ema50 = hasEnoughData ? this.calculateEMA(closes, 50) : [];
@@ -3692,11 +3863,11 @@ class TradingEngine {
     const ema100Val = lastIdxVal >= 0 && ema100.length > lastIdxVal ? ema100[lastIdxVal] : currentPrice;
 
     if (signalDirection === "LONG") {
-      const result = this.evaluateTrendBreakoutSetup("LONG", currentPrice, ema20Val, ema50Val, ema100Val, struct);
+      const result = this.evaluateTrendBreakoutSetup("LONG", currentPrice, ema20Val, ema50Val, ema100Val, struct, candles);
       confirmed = result.confirmed;
       message = result.message;
     } else if (signalDirection === "SHORT") {
-      const result = this.evaluateTrendBreakoutSetup("SHORT", currentPrice, ema20Val, ema50Val, ema100Val, struct);
+      const result = this.evaluateTrendBreakoutSetup("SHORT", currentPrice, ema20Val, ema50Val, ema100Val, struct, candles);
       confirmed = result.confirmed;
       message = result.message;
     }
@@ -4345,11 +4516,12 @@ class TradingEngine {
     this.lastScanningTimestamp = timestamp.slice(0, 16);
 
     // Calculate indicator details
-    const closes = this.candles1m.map((c) => c.close);
+    const closedCandles = this.candles1m.slice(0, -1);
+    const closes = closedCandles.map((c) => c.close);
     if (closes.length < 50) return;
 
     const lastIdx = closes.length - 1;
-    const currentClose = this.currentPrice;
+    const currentClose = closes[lastIdx];
 
     const ema9 = this.calculateEMA(closes, 9);
     const ema21 = this.calculateEMA(closes, 21);
@@ -4359,10 +4531,10 @@ class TradingEngine {
     const isBullAligned = ema9[lastIdx] > ema21[lastIdx] && ema21[lastIdx] > ema50[lastIdx];
     const isBearAligned = ema9[lastIdx] < ema21[lastIdx] && ema21[lastIdx] < ema50[lastIdx];
 
-    const adx14 = this.calculateADX(this.candles1m, 14);
+    const adx14 = this.calculateADX(closedCandles, 14);
     const adxValue = adx14[lastIdx] || 25;
 
-    const volumes = this.candles1m.map((c) => c.volume);
+    const volumes = closedCandles.map((c) => c.volume);
     let relVolume = 1.0;
     if (volumes.length >= 20) {
       const currentVolume = volumes[lastIdx];
@@ -4425,15 +4597,15 @@ class TradingEngine {
     let probabilityShort = Number((1 - probabilityLong).toFixed(4));
 
     // Determine signal direction using HH/HL breakout strategy for trending markets:
-    const struct = this.getTrendMarketStructure();
-    const opens = this.candles1m.map((c) => c.open);
+    const struct = this.getTrendMarketStructure(closedCandles);
+    const opens = closedCandles.map((c) => c.open);
     const averageBodySize = closes.slice(-20).map((c, idx) => {
       const openVal = opens[closes.length - 20 + idx] !== undefined ? opens[closes.length - 20 + idx] : c;
       return Math.abs(c - openVal);
     }).reduce((a, b) => a + b, 0) / 20;
-    const currentCandle = this.candles1m[lastIdx];
+    const currentCandle = closedCandles[lastIdx];
     const currentBodySize = Math.abs(currentCandle.close - currentCandle.open);
-    const atr14 = this.calculateATR(this.candles1m, 14);
+    const atr14 = this.calculateATR(closedCandles, 14);
     const currentAtr = atr14[lastIdx] || 150;
 
     const ema20 = this.calculateEMA(closes, ms.fast_ema_period || 20);
@@ -4466,7 +4638,7 @@ class TradingEngine {
     if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       // Mean-Reversion and Breakout rules for RANGE_BOUND
       const rangeLookback = 30;
-      const recentCandlesForRange = this.candles1m.slice(-rangeLookback);
+      const recentCandlesForRange = closedCandles.slice(-rangeLookback);
       const rangeHigh = recentCandlesForRange.length > 0 ? Math.max(...recentCandlesForRange.map(c => c.high)) : struct.swingHigh;
       const rangeLow = recentCandlesForRange.length > 0 ? Math.min(...recentCandlesForRange.map(c => c.low)) : struct.swingLow;
 
@@ -4497,7 +4669,7 @@ class TradingEngine {
       signalDirection = "NEUTRAL";
     } else {
       // --- TREND-FOLLOWING LOGIC RESTRICTED TO 20/50 EMA PUSHBACKS ---
-      const recentCandles = this.candles1m.slice(-8);
+      const recentCandles = closedCandles.slice(-8);
 
       const recentPullbackToEma20Long = recentCandles.some(c => c.low <= ema20Val * 1.0015 && c.high >= ema20Val * 0.9985);
       const recentPullbackToEma50Long = recentCandles.some(c => c.low <= ema50Val * 1.0015 && c.high >= ema50Val * 0.9985);
@@ -4527,8 +4699,8 @@ class TradingEngine {
     }
 
     // Ensure VWAP is computed
-    this.calculateVWAP(this.candles1m);
-    const lastCandle = this.candles1m[lastIdx];
+    this.calculateVWAP(closedCandles);
+    const lastCandle = closedCandles[lastIdx];
     const vwapVal = lastCandle.vwap !== undefined ? lastCandle.vwap : currentClose;
     const vwapUpperVal = lastCandle.vwap_upper !== undefined ? lastCandle.vwap_upper : currentClose * 1.01;
     const vwapLowerVal = lastCandle.vwap_lower !== undefined ? lastCandle.vwap_lower : currentClose * 0.99;
@@ -4707,8 +4879,8 @@ class TradingEngine {
     const shortLookback = 10;
     let highMovementShort = false;
     let shortMovementVal = 0;
-    if (this.candles1m.length >= shortLookback) {
-      const recentCandles = this.candles1m.slice(-shortLookback);
+    if (closedCandles.length >= shortLookback) {
+      const recentCandles = closedCandles.slice(-shortLookback);
       const recentHighs = recentCandles.map(c => c.high);
       const recentLows = recentCandles.map(c => c.low);
       const maxHigh = Math.max(...recentHighs);
@@ -4764,7 +4936,7 @@ class TradingEngine {
     });
 
     // C15: Market Structure & Entry Confirmation Check (Pullback, Retest, Reversal, High-Vol Confirmation)
-    const structCheck = this.evaluateMarketStructureConfirmation(signalDirection);
+    const structCheck = this.evaluateMarketStructureConfirmation(signalDirection, closedCandles, currentClose);
     
     // Override market structure confirmation if Special Super Strong Trend Logic is active
     if (isSpecialSuperStrongTrendLogicActive) {
@@ -5000,6 +5172,17 @@ class TradingEngine {
       required: `No regime transitions within the last ${regimeCooldownMins} minutes`,
     });
 
+    // C22: Minimum ATR Volatility Filter
+    const minAtrEnabled = config.risk_management.min_atr_for_trade_enabled === true;
+    const minAtrValue = config.risk_management.min_atr_for_trade_value !== undefined ? config.risk_management.min_atr_for_trade_value : 15;
+    const atrMet = !minAtrEnabled || currentAtr >= minAtrValue;
+    conditions.push({
+      name: "Minimum ATR Volatility Filter",
+      met: atrMet,
+      current_value: `ATR = ${currentAtr.toFixed(1)}`,
+      required: minAtrEnabled ? `ATR >= ${minAtrValue}` : "Deactivated",
+    });
+
     // Apply bypassed/skipped gates
     for (const c of conditions) {
       if (this.isGateSkipped(config, c.name)) {
@@ -5018,7 +5201,8 @@ class TradingEngine {
       "Account Equity & API Connection Verification",
       "Loss Streak Cooldown Protection",
       "Optimal Session Timing Window Check (IST)",
-      "Regime Transition Cooldown"
+      "Regime Transition Cooldown",
+      "Minimum ATR Volatility Filter"
     ];
 
     const isWeightedEnabled = config.gate_scoring?.enabled === true;

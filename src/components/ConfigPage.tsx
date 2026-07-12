@@ -1151,6 +1151,44 @@ export default function ConfigPage({
                     </p>
                   </div>
                 )}
+
+                <div className="space-y-2 col-span-1 md:col-span-2 border-t border-slate-100 pt-4 mt-2">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none text-xs font-semibold text-slate-700 uppercase">
+                    <input
+                      type="checkbox"
+                      checked={riskConfig.min_atr_for_trade_enabled === true}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, min_atr_for_trade_enabled: e.target.checked })}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                    />
+                    Enable Minimum ATR Volatility Filter (Do Not Trade Low ATR)
+                  </label>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    When enabled, trade entry is blocked if the 14-period Average True Range (ATR) is below the configured threshold. This prevents trading in ultra-low volatility conditions (e.g. low ATR like 11) where market chop leads to frequent stop-outs before transaction fees can be recovered.
+                  </p>
+                </div>
+
+                {riskConfig.min_atr_for_trade_enabled && (
+                  <div className="space-y-1.5 col-span-1 md:col-span-2">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Minimum ATR Threshold Value</label>
+                    <input
+                      type="number"
+                      step="1"
+                      value={riskConfig.min_atr_for_trade_value}
+                      onChange={(e) => {
+                        const parsed = parseInputNumber(e.target.value, true);
+                        if (typeof parsed === "number") {
+                          setRiskConfig({ ...riskConfig, min_atr_for_trade_value: Math.max(0, parsed) });
+                        } else {
+                          setRiskConfig({ ...riskConfig, min_atr_for_trade_value: parsed });
+                        }
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      The threshold ATR value below which trade entries are blocked (e.g. set to 15 to block trades at 11 or other low ATR values).
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 

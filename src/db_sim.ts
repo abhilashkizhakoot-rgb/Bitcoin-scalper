@@ -183,6 +183,8 @@ const DEFAULT_CONFIG: StrategyConfig = {
     static_stop_loss_value_usd: 150,
     max_atr_for_stop_loss_enabled: false,
     max_atr_for_stop_loss_value: 100,
+    min_atr_for_trade_enabled: false,
+    min_atr_for_trade_value: 15,
   },
   market_structure: {
     min_breakout_body_ratio: 0.22,
@@ -960,6 +962,14 @@ class DatabaseManager {
       }
       if (this.cache.config.risk_management.max_atr_for_stop_loss_value === undefined) {
         this.cache.config.risk_management.max_atr_for_stop_loss_value = 100;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.min_atr_for_trade_enabled === undefined) {
+        this.cache.config.risk_management.min_atr_for_trade_enabled = false;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.min_atr_for_trade_value === undefined) {
+        this.cache.config.risk_management.min_atr_for_trade_value = 15;
         changed = true;
       }
     }

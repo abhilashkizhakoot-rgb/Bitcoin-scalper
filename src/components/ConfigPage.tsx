@@ -2160,23 +2160,59 @@ export default function ConfigPage({
                 </div>
 
                 {gateScoringConfig.enabled && (
-                  <div className="border-t border-slate-200/60 pt-4 space-y-2">
-                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
-                      <span>Cumulative Confidence Entry Threshold</span>
-                      <span className="text-indigo-600 font-semibold">{gateScoringConfig.confidence_threshold}%</span>
-                    </label>
-                    <input
-                      type="range"
-                      min="10"
-                      max="100"
-                      step="5"
-                      value={gateScoringConfig.confidence_threshold}
-                      onChange={(e) => setGateScoringConfig({ ...gateScoringConfig, confidence_threshold: Number(e.target.value) })}
-                      className="w-full accent-indigo-600 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer"
-                    />
-                    <p className="text-[10px] text-slate-400 leading-relaxed">
-                      The minimum overall confidence score (out of 100%) required from passed tactical gates to permit trade initiation. The Market Structure Confirmation remains a mandatory final filter regardless of this threshold.
-                    </p>
+                  <div className="border-t border-slate-200/60 pt-4 space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                        <span>Cumulative Confidence Entry Threshold</span>
+                        <span className="text-indigo-600 font-semibold">{gateScoringConfig.confidence_threshold}%</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="10"
+                        max="100"
+                        step="5"
+                        value={gateScoringConfig.confidence_threshold}
+                        onChange={(e) => setGateScoringConfig({ ...gateScoringConfig, confidence_threshold: Number(e.target.value) })}
+                        className="w-full accent-indigo-600 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                      />
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        The minimum overall confidence score (out of 100%) required from passed tactical gates to permit trade initiation. The Market Structure Confirmation remains a mandatory final filter regardless of this threshold.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-slate-200/60 pt-4">
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-sans font-semibold text-slate-700">Softened Gate Weight Discounting</span>
+                        <p className="text-[10px] text-slate-400">Discount the weight score of tactical gates that pass ONLY via softened thresholds.</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={gateScoringConfig.enable_weight_discounting !== false}
+                        onChange={(e) => setGateScoringConfig({ ...gateScoringConfig, enable_weight_discounting: e.target.checked })}
+                        className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded cursor-pointer"
+                      />
+                    </div>
+
+                    {(gateScoringConfig.enable_weight_discounting !== false) && (
+                      <div className="pt-2 space-y-2 border-t border-slate-200/60">
+                        <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                          <span>Softened Gate Weight Multiplier (Discount)</span>
+                          <span className="text-indigo-600 font-semibold">{Math.round((gateScoringConfig.softened_gate_discount_factor ?? 0.5) * 100)}%</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={gateScoringConfig.softened_gate_discount_factor ?? 0.5}
+                          onChange={(e) => setGateScoringConfig({ ...gateScoringConfig, softened_gate_discount_factor: Number(e.target.value) })}
+                          className="w-full accent-indigo-600 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                        />
+                        <p className="text-[10px] text-slate-400 leading-relaxed">
+                          The percentage of the gate's configured weight that will be earned when it passes under softened thresholds. Example: At 50%, a 10% weight gate will only contribute 5% to the score.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

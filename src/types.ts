@@ -252,6 +252,8 @@ export interface StrategyConfig {
   gate_scoring?: {
     enabled: boolean;
     confidence_threshold: number; // e.g., 70
+    enable_weight_discounting?: boolean; // Enable discounting for softened gates
+    softened_gate_discount_factor?: number; // E.g., 0.5 (meaning 50% of weight is counted)
     weights: {
       catboost_ai: number;
       market_regime: number;

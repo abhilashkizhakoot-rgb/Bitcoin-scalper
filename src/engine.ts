@@ -993,7 +993,7 @@ class TradingEngine {
       }
     }
 
-    const conditions: { name: string; met: boolean; current_value: any; required: string; description: string; priority: "CRITICAL" | "HIGH" | "MEDIUM" }[] = [];
+    const conditions: { name: string; met: boolean; current_value: any; required: string; description: string; priority: "CRITICAL" | "HIGH" | "MEDIUM"; softened?: boolean }[] = [];
 
     // C1: CatBoost AI Prediction (threshold is 0.50 leaning direction in RANGE_BOUND, 0.70 for pullback, 0.75 in trending breakouts)
     const pbTrendStatus = this.detectPullbackTrendlineBreak();
@@ -1039,6 +1039,8 @@ class TradingEngine {
       (!isLowVolatility && hasExtremeRealtimePressure) ||
       (isLowVolatility && hasSoftenRegimePressure);
 
+    const isRegimeSoftened = (isLowVolatility && hasSoftenRegimePressure) || (hasExtremeRealtimePressure && !((signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) || (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) || this.currentRegime === MarketRegime.HIGH_VOLATILITY));
+
     conditions.push({
       name: "Market Regime Filter",
       met: regimeValid && (signalDirection === "NEUTRAL" ? true : regimeAligned),
@@ -1046,6 +1048,7 @@ class TradingEngine {
       required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, or HIGH_VOLATILITY (Softenable under heavy leading order flow & volume confirmation)",
       description: "Restricts execution during low volatility ranging zones to prevent chop losses. Softened under heavy real-time order flow and book imbalance with supporting volume.",
       priority: "CRITICAL",
+      softened: isRegimeSoftened,
     });
 
     // C3 & C8 Combined: Trend Alignment & Strength (EMA/ADX)
@@ -1095,6 +1098,12 @@ class TradingEngine {
     const medEma = ms.medium_ema_period || 50;
     const slowEma = ms.slow_ema_period || 200;
 
+    const isTrendSoftened = (this.currentRegime !== MarketRegime.RANGE_BOUND) && hasExtremeRealtimePressure && (
+      (signalDirection === "LONG" && !isUptrendAligned) ||
+      (signalDirection === "SHORT" && !isDowntrendAligned) ||
+      (adxValue < trendAlignAdx)
+    );
+
     conditions.push({
       name: "Trend Alignment & Strength (EMA/ADX)",
       met: trendAligned && adxMet,
@@ -1102,12 +1111,15 @@ class TradingEngine {
       required: requiredStr,
       description: `Confirms overall strong trend alignment (EMA ${fastEma}/${medEma}/${slowEma}) and high trend strength (ADX >= ${trendAlignAdx}) or checks safety locks during range bound.`,
       priority: "HIGH",
+      softened: isTrendSoftened,
     });
 
     // C5: Relative Volume Confirmation
     const requiredRelVol = hasExtremeRealtimePressure 
       ? Math.min(1.0, Math.max(0.75, relVolThreshold - 0.5)) 
       : relVolThreshold;
+    const isRelVolumeSoftened = hasExtremeRealtimePressure && relVolume > requiredRelVol && relVolume <= relVolThreshold;
+
     conditions.push({
       name: "Relative Volume Confirmation",
       met: relVolume > requiredRelVol,
@@ -1117,6 +1129,7 @@ class TradingEngine {
         ? "Validates supporting transaction volume. (Threshold softened under extreme leading order flow pressure)."
         : "Validates that trade has supporting transaction volume to avoid false breakups.",
       priority: "MEDIUM",
+      softened: isRelVolumeSoftened,
     });
 
     // C7: Daily Circuit Breaker
@@ -1389,6 +1402,8 @@ class TradingEngine {
       }
     }
 
+    const isOrderFlowSoftened = signalDirection !== "NEUTRAL" && flowRes.score < 45 && flowRes.score >= 30;
+
     conditions.push({
       name: "Binance Order Flow Confirmation",
       met: ofMet,
@@ -1396,6 +1411,7 @@ class TradingEngine {
       required: ofReq,
       description: "Applies a continuous fuzzy confluence score blending taker volume buy/sell ratio (70% weight) and order book bid/ask depth imbalance (30% weight) with adaptive soft-gates based on AI prediction confidence.",
       priority: "HIGH",
+      softened: isOrderFlowSoftened,
     });
 
     // C18: Volatility Compression (Squeeze) Filter
@@ -1607,12 +1623,19 @@ class TradingEngine {
       let totalTacticalWeight = 0;
       let earnedTacticalWeight = 0;
 
+      const enableDiscounting = config.gate_scoring?.enable_weight_discounting !== false;
+      const discountFactor = config.gate_scoring?.softened_gate_discount_factor ?? 0.5;
+
       for (const gate of tacticalGatesMap) {
         const cond = conditions.find(c => c.name === gate.condName);
         const weight = activeWeights[gate.weightKey];
         totalTacticalWeight += weight;
         if (cond?.met) {
-          earnedTacticalWeight += weight;
+          if (enableDiscounting && cond.softened === true) {
+            earnedTacticalWeight += weight * discountFactor;
+          } else {
+            earnedTacticalWeight += weight;
+          }
         }
       }
 
@@ -4560,7 +4583,7 @@ class TradingEngine {
     const vwapLowerVal = lastCandle.vwap_lower !== undefined ? lastCandle.vwap_lower : currentClose * 0.99;
 
     // 2. Conditions Check (Strict 10-Conditions Checklist)
-    const conditions: { name: string; met: boolean; current_value: any; required: string }[] = [];
+    const conditions: { name: string; met: boolean; current_value: any; required: string; softened?: boolean }[] = [];
 
     // C1: CatBoost Probability Filter
     const pbTrendStatus = this.detectPullbackTrendlineBreak();
@@ -4604,11 +4627,14 @@ class TradingEngine {
       (!isLowVolatility && hasExtremeRealtimePressure) ||
       (isLowVolatility && hasSoftenRegimePressure);
 
+    const isRegimeSoftened = (isLowVolatility && hasSoftenRegimePressure) || (hasExtremeRealtimePressure && !((signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) || (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) || this.currentRegime === MarketRegime.HIGH_VOLATILITY));
+
     conditions.push({
       name: "Market Regime Filter",
       met: regimeValid && (signalDirection === "NEUTRAL" ? true : regimeAligned),
       current_value: this.currentRegime + (isLowVolatility && hasSoftenRegimePressure ? " (SOFTENED VIA HEAVY LEADING ORDER FLOW)" : (hasExtremeRealtimePressure ? " (BYPASSED VIA LEADING ORDER FLOW)" : "")),
       required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, or HIGH_VOLATILITY (Softenable under heavy leading order flow & volume confirmation)",
+      softened: isRegimeSoftened,
     });
 
     // C3 & C8 Combined: Trend Alignment & Strength (EMA/ADX)
@@ -4654,22 +4680,32 @@ class TradingEngine {
       }
     }
 
+    const isTrendSoftened = (this.currentRegime !== MarketRegime.RANGE_BOUND) && hasExtremeRealtimePressure && (
+      (signalDirection === "LONG" && !isUptrendAligned) ||
+      (signalDirection === "SHORT" && !isDowntrendAligned) ||
+      (adxValue < trendAlignAdx)
+    );
+
     conditions.push({
       name: "Trend Alignment & Strength (EMA/ADX)",
       met: trendAligned && adxMet,
       current_value: `${currentTrendStr} | ADX: ${adxValue.toFixed(1)}`,
       required: requiredStr,
+      softened: isTrendSoftened,
     });
 
     // C5: Relative Volume Confirmation
     const requiredRelVol = hasExtremeRealtimePressure 
       ? Math.min(1.0, Math.max(0.75, relVolThreshold - 0.5)) 
       : relVolThreshold;
+    const isRelVolumeSoftened = hasExtremeRealtimePressure && relVolume > requiredRelVol && relVolume <= relVolThreshold;
+
     conditions.push({
       name: "Relative Volume Confirmation",
       met: relVolume > requiredRelVol,
       current_value: `${relVolume.toFixed(2)}x` + (hasExtremeRealtimePressure ? " (SOFTENED VIA LEADING ORDER FLOW)" : ""),
       required: `> ${requiredRelVol.toFixed(2)}x above 20-period MA`,
+      softened: isRelVolumeSoftened,
     });
 
     // C7: Daily Circuit Breaker
@@ -4924,11 +4960,14 @@ class TradingEngine {
       }
     }
 
+    const isOrderFlowSoftened = signalDirection !== "NEUTRAL" && flowRes.score < 45 && flowRes.score >= 30;
+
     conditions.push({
       name: "Binance Order Flow Confirmation",
       met: ofMet,
       current_value: ofVal,
       required: ofReq,
+      softened: isOrderFlowSoftened,
     });
 
     // C18: Volatility Compression (Squeeze) Filter
@@ -5124,12 +5163,19 @@ class TradingEngine {
     let totalTacticalWeight = 0;
     let earnedTacticalWeight = 0;
 
+    const enableDiscounting = config.gate_scoring?.enable_weight_discounting !== false;
+    const discountFactor = config.gate_scoring?.softened_gate_discount_factor ?? 0.5;
+
     for (const gate of tacticalGatesMap) {
       const cond = conditions.find(c => c.name === gate.condName);
       const weight = activeWeights[gate.weightKey];
       totalTacticalWeight += weight;
       if (cond?.met) {
-        earnedTacticalWeight += weight;
+        if (enableDiscounting && cond.softened === true) {
+          earnedTacticalWeight += weight * discountFactor;
+        } else {
+          earnedTacticalWeight += weight;
+        }
       }
     }
 

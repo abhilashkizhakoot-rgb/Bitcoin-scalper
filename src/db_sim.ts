@@ -208,6 +208,8 @@ const DEFAULT_CONFIG: StrategyConfig = {
   gate_scoring: {
     enabled: true,
     confidence_threshold: 70,
+    enable_weight_discounting: true,
+    softened_gate_discount_factor: 0.5,
     weights: {
       catboost_ai: 25,
       market_regime: 15,
@@ -1007,6 +1009,8 @@ class DatabaseManager {
       const def = DEFAULT_CONFIG.gate_scoring;
       if (gs.enabled === undefined) { gs.enabled = def.enabled; changed = true; }
       if (gs.confidence_threshold === undefined) { gs.confidence_threshold = def.confidence_threshold; changed = true; }
+      if (gs.enable_weight_discounting === undefined) { gs.enable_weight_discounting = def.enable_weight_discounting; changed = true; }
+      if (gs.softened_gate_discount_factor === undefined) { gs.softened_gate_discount_factor = def.softened_gate_discount_factor; changed = true; }
       if (!gs.weights) {
         gs.weights = { ...def.weights };
         changed = true;

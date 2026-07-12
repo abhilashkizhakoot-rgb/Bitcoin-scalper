@@ -32,6 +32,7 @@ interface Checkpoint {
   required: string;
   description: string;
   priority: "CRITICAL" | "HIGH" | "MEDIUM";
+  softened?: boolean;
 }
 
 interface CheckpointsPageProps {
@@ -260,6 +261,9 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
     { condName: "Multi-Timeframe Volume Profiling (Horizontal Liquidity)", weightKey: "volume_profile", label: "Volume Profile & Horiz. Liquidity" },
   ];
 
+  const enableDiscounting = config?.gate_scoring?.enable_weight_discounting !== false;
+  const discountFactor = config?.gate_scoring?.softened_gate_discount_factor ?? 0.5;
+
   let totalTacticalWeight = 0;
   let earnedTacticalWeight = 0;
 
@@ -268,7 +272,11 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
     const weight = activeWeights[gate.weightKey as keyof typeof activeWeights] || 0;
     totalTacticalWeight += weight;
     if (cond?.met) {
-      earnedTacticalWeight += weight;
+      if (enableDiscounting && cond.softened === true) {
+        earnedTacticalWeight += weight * discountFactor;
+      } else {
+        earnedTacticalWeight += weight;
+      }
     }
   }
 
@@ -279,9 +287,18 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
     const baseW = baseWeights[gate.weightKey as keyof typeof baseWeights] || 0;
     const activeW = activeWeights[gate.weightKey as keyof typeof activeWeights] || 0;
     const modifier = appliedModifiers[gate.weightKey];
+    const cond = conditions.find(c => c.name === name);
+    const isSoftened = cond?.softened === true;
+    const isMet = cond?.met === true;
+    const discountApplied = isMet && isSoftened && enableDiscounting;
+    const earnedW = discountApplied ? activeW * discountFactor : (isMet ? activeW : 0);
+
     return {
       base: baseW,
       active: activeW,
+      earned: earnedW,
+      isSoftened,
+      discountApplied,
       modifier: modifier || null,
     };
   };
@@ -599,8 +616,13 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
                             {wInfo.modifier.val > 0 ? `+` : ``}{wInfo.modifier.val} Regime
                           </span>
                         )}
-                        <span className={`font-bold ${cond?.met ? "text-emerald-700 bg-emerald-50/50 px-1.5 py-0.5 rounded-md" : "text-slate-400"}`}>
-                          {cond?.met ? wInfo.active : 0} <span className="text-[10px] text-slate-400 font-normal">/ {wInfo.active}</span>
+                        {wInfo.discountApplied && (
+                          <span className="text-[8.5px] font-mono font-semibold px-1.5 py-0.5 rounded-sm bg-amber-50 text-amber-700 border border-amber-200/50">
+                            {Math.round(discountFactor * 100)}% Softened Discount
+                          </span>
+                        )}
+                        <span className={`font-bold ${cond?.met ? (wInfo.discountApplied ? "text-amber-700 bg-amber-50/50 px-1.5 py-0.5 rounded-md" : "text-emerald-700 bg-emerald-50/50 px-1.5 py-0.5 rounded-md") : "text-slate-400"}`}>
+                          {cond?.met ? wInfo.earned : 0} <span className="text-[10px] text-slate-400 font-normal">/ {wInfo.active}</span>
                         </span>
                       </div>
                     </div>
@@ -963,15 +985,20 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
                   return (
                     <div className="flex items-center gap-1.5 text-[10px] font-mono">
                       <span className="text-slate-400">Weight:</span>
-                      <span className="font-bold text-slate-700 flex items-center gap-1">
-                        {wInfo.active} pts
+                      <span className="font-bold text-slate-700 flex flex-wrap items-center gap-1">
+                        {wInfo.discountApplied ? `${wInfo.earned} pts` : `${wInfo.active} pts`}
                         {wInfo.modifier && (
                           <span className={`text-[8px] font-bold px-1 rounded-sm ${wInfo.modifier.val > 0 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"}`}>
                             {wInfo.modifier.val > 0 ? `+` : ``}{wInfo.modifier.val}
                           </span>
                         )}
-                        <span className={`text-[9px] font-normal ${item.met ? "text-emerald-600" : "text-slate-400"}`}>
-                          ({item.met ? "Contributed" : "Blocked"})
+                        {wInfo.discountApplied && (
+                          <span className="text-[8px] font-bold px-1 rounded-sm bg-amber-50 text-amber-600 border border-amber-100/30">
+                            Softened Discount
+                          </span>
+                        )}
+                        <span className={`text-[9px] font-normal ${item.met ? (wInfo.discountApplied ? "text-amber-600" : "text-emerald-600") : "text-slate-400"}`}>
+                          ({item.met ? (wInfo.discountApplied ? `Contributed (Softened)` : "Contributed") : "Blocked"})
                         </span>
                       </span>
                     </div>

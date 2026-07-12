@@ -227,8 +227,8 @@ export interface StrategyConfig {
     static_stop_loss_value_usd?: number; // Static stop loss distance in USD
     max_atr_for_stop_loss_enabled?: boolean; // Enable/disable maximum ATR cap for stop loss calculation
     max_atr_for_stop_loss_value?: number; // Maximum ATR value to cap at
-    min_atr_enabled?: boolean; // Enable/disable minimum ATR limit filter
-    min_atr_value?: number; // Minimum absolute ATR value required to trade (e.g. 12)
+    min_atr_for_trading_enabled?: boolean; // Enable/disable minimum ATR floor for trading
+    min_atr_for_trading_value?: number; // Minimum ATR value below which trading is blocked
   };
   market_structure: {
     min_breakout_body_ratio: number; // e.g. 0.22 (22% body ratio)

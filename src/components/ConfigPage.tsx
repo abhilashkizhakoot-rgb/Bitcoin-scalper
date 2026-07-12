@@ -1156,36 +1156,36 @@ export default function ConfigPage({
                   <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none text-xs font-semibold text-slate-700 uppercase">
                     <input
                       type="checkbox"
-                      checked={riskConfig.min_atr_enabled === true}
-                      onChange={(e) => setRiskConfig({ ...riskConfig, min_atr_enabled: e.target.checked })}
+                      checked={riskConfig.min_atr_for_trading_enabled !== false}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, min_atr_for_trading_enabled: e.target.checked })}
                       className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
                     />
-                    Enable Minimum ATR Volatility Filter (Chop Avoidance)
+                    Enable Minimum ATR Volatility Floor (Skip Low ATR)
                   </label>
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    When enabled, trade executions are blocked if the absolute 14-period ATR falls below the configured threshold. This prevents trading in extremely flat, low-liquidity conditions where the spread and commissions would eat up any potential profits (e.g., ATR below 11 or 12).
+                    When enabled, the system enforces a strict absolute floor threshold on the 14-period Average True Range (ATR). If the current ATR falls below this value (e.g., during dead-liquidity or ultra-low volume periods), all trade entry signals are hard-blocked to avoid sideways chop losses.
                   </p>
                 </div>
 
-                {riskConfig.min_atr_enabled && (
+                {riskConfig.min_atr_for_trading_enabled !== false && (
                   <div className="space-y-1.5 col-span-1 md:col-span-2">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Minimum ATR Value Threshold</label>
+                    <label className="text-xs font-mono text-slate-400 uppercase">Minimum ATR Threshold Floor</label>
                     <input
                       type="number"
-                      step="0.5"
-                      value={riskConfig.min_atr_value}
+                      step="1"
+                      value={riskConfig.min_atr_for_trading_value !== undefined ? riskConfig.min_atr_for_trading_value : 12}
                       onChange={(e) => {
                         const parsed = parseInputNumber(e.target.value, true);
                         if (typeof parsed === "number") {
-                          setRiskConfig({ ...riskConfig, min_atr_value: Math.max(0.1, parsed) });
+                          setRiskConfig({ ...riskConfig, min_atr_for_trading_value: Math.max(0, parsed) });
                         } else {
-                          setRiskConfig({ ...riskConfig, min_atr_value: parsed });
+                          setRiskConfig({ ...riskConfig, min_atr_for_trading_value: parsed });
                         }
                       }}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                     />
                     <p className="text-[10px] text-slate-400 leading-relaxed">
-                      The absolute minimum ATR required to permit a trade execution. Below this value, the "Minimum ATR Volatility Gate" will block entries.
+                      The absolute minimum 14-period Average True Range value required to authorize trading. Set to 11 or 12 to filter out dead consolidation ranges (Standard: 11 - 15).
                     </p>
                   </div>
                 )}

@@ -183,8 +183,8 @@ const DEFAULT_CONFIG: StrategyConfig = {
     static_stop_loss_value_usd: 150,
     max_atr_for_stop_loss_enabled: false,
     max_atr_for_stop_loss_value: 100,
-    min_atr_enabled: true,
-    min_atr_value: 12,
+    min_atr_for_trading_enabled: true,
+    min_atr_for_trading_value: 12, // Default 12, which is higher than low value 11
   },
   market_structure: {
     min_breakout_body_ratio: 0.22,
@@ -636,6 +636,14 @@ class DatabaseManager {
               this.cache.config.risk_management.take_profit_ratio = 3.5;
               updated = true;
             }
+            if (this.cache.config.risk_management.min_atr_for_trading_enabled === undefined) {
+              this.cache.config.risk_management.min_atr_for_trading_enabled = true;
+              updated = true;
+            }
+            if (this.cache.config.risk_management.min_atr_for_trading_value === undefined) {
+              this.cache.config.risk_management.min_atr_for_trading_value = 12;
+              updated = true;
+            }
           }
           if (this.cache.config.general) {
             if (this.cache.config.general.enable_trade_logging === undefined) {
@@ -962,14 +970,6 @@ class DatabaseManager {
       }
       if (this.cache.config.risk_management.max_atr_for_stop_loss_value === undefined) {
         this.cache.config.risk_management.max_atr_for_stop_loss_value = 100;
-        changed = true;
-      }
-      if (this.cache.config.risk_management.min_atr_enabled === undefined) {
-        this.cache.config.risk_management.min_atr_enabled = true;
-        changed = true;
-      }
-      if (this.cache.config.risk_management.min_atr_value === undefined) {
-        this.cache.config.risk_management.min_atr_value = 12;
         changed = true;
       }
     }

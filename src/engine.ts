@@ -1189,19 +1189,6 @@ class TradingEngine {
     const atr14 = hasEnoughData ? this.calculateATR(closedCandles, 14) : [50];
     const currentAtr = atr14[lastIdx] || 50;
 
-    // Minimum ATR Volatility Filter safety gate check
-    const minAtrEnabled = config.risk_management.min_atr_for_trade_enabled === true;
-    const minAtrValue = config.risk_management.min_atr_for_trade_value !== undefined ? config.risk_management.min_atr_for_trade_value : 15;
-    const atrMet = !minAtrEnabled || currentAtr >= minAtrValue;
-    conditions.push({
-      name: "Minimum ATR Volatility Filter",
-      met: atrMet,
-      current_value: `ATR = ${currentAtr.toFixed(1)}`,
-      required: minAtrEnabled ? `ATR >= ${minAtrValue}` : "Deactivated",
-      description: "Blocks new trade execution when the Average True Range is below the minimum threshold (preventing chop in ultra-low volatility).",
-      priority: "HIGH",
-    });
-
     // Check for high movement in earlier short period (recent 10 candles)
     const shortLookback = 10;
     let highMovementShort = false;
@@ -1515,6 +1502,21 @@ class TradingEngine {
       priority: "CRITICAL",
     });
 
+    // C22: Minimum ATR Volatility Gate
+    const minAtrEnabled = config.risk_management.min_atr_enabled !== false;
+    const minAtrValue = config.risk_management.min_atr_value !== undefined ? config.risk_management.min_atr_value : 12;
+    const minAtrMet = !minAtrEnabled || currentAtr_cp >= minAtrValue;
+    conditions.push({
+      name: "Minimum ATR Volatility Gate",
+      met: minAtrMet,
+      current_value: minAtrEnabled
+        ? `${minAtrMet ? "PASSED" : "BLOCKED"} (Current ATR = $${currentAtr_cp.toFixed(2)})`
+        : "DISABLED",
+      required: `ATR >= $${minAtrValue.toFixed(2)}`,
+      description: "Avoids executing trades during extremely low volatility levels (e.g., ATR below 11 or 12) where price action is flat and cannot sustain moves large enough to cover transaction fees and slippage.",
+      priority: "CRITICAL",
+    });
+
     // Apply bypassed/skipped gates
     for (const c of conditions) {
       if (this.isGateSkipped(config, c.name)) {
@@ -1542,7 +1544,7 @@ class TradingEngine {
         "Loss Streak Cooldown Protection",
         "Optimal Session Timing Window Check (IST)",
         "Regime Transition Cooldown",
-        "Minimum ATR Volatility Filter"
+        "Minimum ATR Volatility Gate"
       ];
 
       const baseWeights = {
@@ -3442,125 +3444,6 @@ class TradingEngine {
     }
   }
 
-  private validateCandleConfirmation(
-    direction: "LONG" | "SHORT" | "NEUTRAL",
-    candles: Candlestick[]
-  ): { isValid: boolean; reason: string; type: string } {
-    if (direction === "NEUTRAL") {
-      return { isValid: true, reason: "Neutral signal, no confirmation required", type: "None" };
-    }
-
-    if (candles.length < 2) {
-      return { isValid: false, reason: "Insufficient candle history", type: "None" };
-    }
-
-    const lastIdx = candles.length - 1;
-    const currentCandle = candles[lastIdx];
-    const prevCandle = candles[lastIdx - 1];
-
-    const range = currentCandle.high - currentCandle.low;
-    if (range <= 0) {
-      return { isValid: false, reason: "Zero range candle", type: "None" };
-    }
-
-    const body = Math.abs(currentCandle.close - currentCandle.open);
-    const upperWick = currentCandle.high - Math.max(currentCandle.close, currentCandle.open);
-    const lowerWick = Math.min(currentCandle.close, currentCandle.open) - currentCandle.low;
-    const isBullish = currentCandle.close > currentCandle.open;
-    const isBearish = currentCandle.close < currentCandle.open;
-
-    // Calculate ATR 14
-    const atr14 = this.calculateATR(candles, 14);
-    const currentAtr = atr14[lastIdx] || (0.01 * currentCandle.close); // fallback
-
-    // --- 1. Classic Pin Bar ---
-    let isPinBar = false;
-    if (direction === "LONG") {
-      isPinBar = lowerWick >= 0.5 * range && upperWick <= 0.25 * range;
-    } else {
-      isPinBar = upperWick >= 0.5 * range && lowerWick <= 0.25 * range;
-    }
-
-    // --- 2. Strong Close ---
-    let hasStrongClose = false;
-    if (direction === "LONG") {
-      hasStrongClose = (currentCandle.close - currentCandle.low) / range >= 0.70;
-    } else {
-      hasStrongClose = (currentCandle.high - currentCandle.close) / range >= 0.70;
-    }
-
-    // --- 3. Engulfing Pattern ---
-    let isEngulfing = false;
-    if (direction === "LONG") {
-      isEngulfing = prevCandle &&
-        (prevCandle.close < prevCandle.open) &&
-        isBullish &&
-        (currentCandle.close >= prevCandle.open) &&
-        (currentCandle.open <= prevCandle.close);
-    } else {
-      isEngulfing = prevCandle &&
-        (prevCandle.close > prevCandle.open) &&
-        isBearish &&
-        (currentCandle.close <= prevCandle.open) &&
-        (currentCandle.open >= prevCandle.close);
-    }
-
-    // --- 4. Momentum Candle ---
-    let isMomentumCandle = false;
-    if (direction === "LONG") {
-      isMomentumCandle = isBullish && body >= 0.7 * currentAtr;
-    } else {
-      isMomentumCandle = isBearish && body >= 0.7 * currentAtr;
-    }
-
-    // --- 5. Multi-Candle Wick Rejection ---
-    let hasMultiWickRejection = false;
-    if (direction === "LONG") {
-      hasMultiWickRejection = prevCandle &&
-        (lowerWick >= 0.35 * range) &&
-        ((Math.min(prevCandle.close, prevCandle.open) - prevCandle.low) >= 0.35 * (prevCandle.high - prevCandle.low)) &&
-        Math.abs(currentCandle.low - prevCandle.low) < 0.15 * currentAtr;
-    } else {
-      hasMultiWickRejection = prevCandle &&
-        (upperWick >= 0.35 * range) &&
-        ((prevCandle.high - Math.max(prevCandle.close, prevCandle.open)) >= 0.35 * (prevCandle.high - prevCandle.low)) &&
-        Math.abs(currentCandle.high - prevCandle.high) < 0.15 * currentAtr;
-    }
-
-    // --- 6. Indecision Override ---
-    const isIndecision = (body / range < 0.15) && !isPinBar;
-
-    if (isIndecision) {
-      return {
-        isValid: false,
-        reason: `Blocked: Candle body is too small (${(body/range*100).toFixed(1)}% < 15% of range) without qualifying as a Pin Bar. Classified as Indecision.`,
-        type: "Indecision Override"
-      };
-    }
-
-    if (isPinBar) {
-      return { isValid: true, reason: `Confirmed by Classic Pin Bar`, type: "Classic Pin Bar" };
-    }
-    if (isEngulfing) {
-      return { isValid: true, reason: `Confirmed by Engulfing Pattern`, type: "Engulfing Pattern" };
-    }
-    if (hasMultiWickRejection) {
-      return { isValid: true, reason: `Confirmed by Multi-Candle Wick Rejection`, type: "Multi-Candle Wick Rejection" };
-    }
-    if (isMomentumCandle && hasStrongClose) {
-      return { isValid: true, reason: `Confirmed by Momentum Candle and Strong Close`, type: "Momentum Candle" };
-    }
-    if (hasStrongClose && (direction === "LONG" ? (lowerWick > upperWick || isBullish) : (upperWick > lowerWick || isBearish))) {
-      return { isValid: true, reason: `Confirmed by Strong Close`, type: "Strong Close" };
-    }
-
-    return {
-      isValid: false,
-      reason: `Blocked: Current candle does not meet any of the rigorous geometric confirmations (Pin Bar, Strong Close, Engulfing, Momentum, Multi-Wick Rejection). Range: $${range.toFixed(2)}, Body: $${body.toFixed(2)} (${(body/range*100).toFixed(1)}%), LowerWick: $${lowerWick.toFixed(2)}, UpperWick: $${upperWick.toFixed(2)}, ATR: $${currentAtr.toFixed(2)}.`,
-      type: "No Pattern Matched"
-    };
-  }
-
   private evaluateMarketStructureConfirmation(
     signalDirection: "LONG" | "SHORT" | "NEUTRAL",
     customCandles?: Candlestick[],
@@ -3568,29 +3451,7 @@ class TradingEngine {
   ): { confirmed: boolean; message: string; swingHigh: number; swingLow: number } {
     const rawResult = this.evaluateMarketStructureConfirmationRaw(signalDirection, customCandles, customPrice);
     const p = customPrice !== undefined ? customPrice : this.currentPrice;
-    const proximityResult = this.applyEma200ProximityFilter(signalDirection, p, rawResult, customCandles);
-
-    if (!proximityResult.confirmed || signalDirection === "NEUTRAL") {
-      return proximityResult;
-    }
-
-    // Rigorous closed candle validation gate
-    const candles = customCandles || this.candles1m;
-    const closedCandles = candles.slice(0, -1);
-    const candleCheck = this.validateCandleConfirmation(signalDirection, closedCandles);
-
-    if (!candleCheck.isValid) {
-      return {
-        ...proximityResult,
-        confirmed: false,
-        message: `${proximityResult.message} | ${candleCheck.reason}`
-      };
-    }
-
-    return {
-      ...proximityResult,
-      message: `${proximityResult.message} | Candle confirmed via [${candleCheck.type}]`
-    };
+    return this.applyEma200ProximityFilter(signalDirection, p, rawResult, customCandles);
   }
 
   private applyEma200ProximityFilter(
@@ -5172,15 +5033,17 @@ class TradingEngine {
       required: `No regime transitions within the last ${regimeCooldownMins} minutes`,
     });
 
-    // C22: Minimum ATR Volatility Filter
-    const minAtrEnabled = config.risk_management.min_atr_for_trade_enabled === true;
-    const minAtrValue = config.risk_management.min_atr_for_trade_value !== undefined ? config.risk_management.min_atr_for_trade_value : 15;
-    const atrMet = !minAtrEnabled || currentAtr >= minAtrValue;
+    // C22: Minimum ATR Volatility Gate
+    const minAtrEnabled = config.risk_management.min_atr_enabled !== false;
+    const minAtrValue = config.risk_management.min_atr_value !== undefined ? config.risk_management.min_atr_value : 12;
+    const minAtrMet = !minAtrEnabled || currentAtr >= minAtrValue;
     conditions.push({
-      name: "Minimum ATR Volatility Filter",
-      met: atrMet,
-      current_value: `ATR = ${currentAtr.toFixed(1)}`,
-      required: minAtrEnabled ? `ATR >= ${minAtrValue}` : "Deactivated",
+      name: "Minimum ATR Volatility Gate",
+      met: minAtrMet,
+      current_value: minAtrEnabled
+        ? `${minAtrMet ? "PASSED" : "BLOCKED"} (Current ATR = $${currentAtr.toFixed(2)})`
+        : "DISABLED",
+      required: `ATR >= $${minAtrValue.toFixed(2)}`,
     });
 
     // Apply bypassed/skipped gates
@@ -5202,7 +5065,7 @@ class TradingEngine {
       "Loss Streak Cooldown Protection",
       "Optimal Session Timing Window Check (IST)",
       "Regime Transition Cooldown",
-      "Minimum ATR Volatility Filter"
+      "Minimum ATR Volatility Gate"
     ];
 
     const isWeightedEnabled = config.gate_scoring?.enabled === true;

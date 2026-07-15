@@ -5400,7 +5400,7 @@ class TradingEngine {
 
     // 3. Trade Entry Execution: Trigger a trade if all conditions met, entry score >= hurdle, and no trade active
     const entryHurdle = isWeightedEnabled ? confidenceThreshold : 80;
-    if (allConditionsMet && entryScore >= entryHurdle && !this.activeTrade) {
+    if (allConditionsMet && entryScore >= entryHurdle && !this.activeTrade && signalDirection !== "NEUTRAL") {
       this.executeTradeEntry(signalDirection as "LONG" | "SHORT", probabilityLong, avgSentiment, entryScore, savedSignal.id);
     }
   }
@@ -5413,6 +5413,11 @@ class TradingEngine {
     score: number,
     signalId: string
   ) {
+    if ((direction as string) === "NEUTRAL") {
+      this.log(`⚠️ BLOCKED: Attempted to execute trade entry with NEUTRAL direction.`);
+      return;
+    }
+
     const config = dbManager.getConfig();
     const creds = dbManager.getCredentials();
 

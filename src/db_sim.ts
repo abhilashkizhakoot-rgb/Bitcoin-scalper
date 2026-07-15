@@ -185,6 +185,10 @@ const DEFAULT_CONFIG: StrategyConfig = {
     max_atr_for_stop_loss_value: 100,
     min_atr_for_trading_enabled: true,
     min_atr_for_trading_value: 12, // Default 12, which is higher than low value 11
+    overextension_ema_trending_threshold: 2.2,
+    overextension_ema_ranging_threshold: 1.2,
+    overextension_vwap_trending_multiplier: 1.5,
+    overextension_vwap_ranging_multiplier: 1.0,
   },
   market_structure: {
     min_breakout_body_ratio: 0.22,
@@ -975,6 +979,22 @@ class DatabaseManager {
       }
       if (this.cache.config.risk_management.max_atr_for_stop_loss_value === undefined) {
         this.cache.config.risk_management.max_atr_for_stop_loss_value = 100;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.overextension_ema_trending_threshold === undefined) {
+        this.cache.config.risk_management.overextension_ema_trending_threshold = 2.2;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.overextension_ema_ranging_threshold === undefined) {
+        this.cache.config.risk_management.overextension_ema_ranging_threshold = 1.2;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.overextension_vwap_trending_multiplier === undefined) {
+        this.cache.config.risk_management.overextension_vwap_trending_multiplier = 1.5;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.overextension_vwap_ranging_multiplier === undefined) {
+        this.cache.config.risk_management.overextension_vwap_ranging_multiplier = 1.0;
         changed = true;
       }
     }

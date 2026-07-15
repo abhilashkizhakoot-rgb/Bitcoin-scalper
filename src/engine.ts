@@ -853,8 +853,19 @@ class TradingEngine {
 
     const currentPrice = this.currentPrice;
 
-    // Ensure VWAP is computed
-    this.calculateVWAP(this.candles1m);
+    const rm = config.risk_management;
+    const isTrending = this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.STRONG_DOWNTREND;
+
+    const emaThreshold = isTrending
+      ? (rm.overextension_ema_trending_threshold ?? 2.2)
+      : (rm.overextension_ema_ranging_threshold ?? 1.2);
+
+    const vwapMultiplier = isTrending
+      ? (rm.overextension_vwap_trending_multiplier ?? 1.5)
+      : (rm.overextension_vwap_ranging_multiplier ?? 1.0);
+
+    // Ensure VWAP is computed with the regime-specific multiplier
+    this.calculateVWAP(this.candles1m, vwapMultiplier);
     const lastCandle = hasEnoughData ? this.candles1m[lastIdx] : null;
     const vwapVal = lastCandle && lastCandle.vwap !== undefined ? lastCandle.vwap : this.currentPrice;
     const vwapUpperVal = lastCandle && lastCandle.vwap_upper !== undefined ? lastCandle.vwap_upper : this.currentPrice * 1.01;
@@ -1216,7 +1227,7 @@ class TradingEngine {
     }
 
     const ema100Distance = currentPrice - ema100Val;
-    const maxAllowedDeviation = 2.2 * currentAtr;
+    const maxAllowedDeviation = emaThreshold * currentAtr;
     const isEma100OverextendedLong = currentPrice > ema100Val + maxAllowedDeviation;
     const isEma100OverextendedShort = currentPrice < ema100Val - maxAllowedDeviation;
 
@@ -1228,8 +1239,8 @@ class TradingEngine {
       ema100ValStr = signalDirection === "LONG"
         ? `PASSING (Extreme Leading Pressure Confirmed: Distance +$${ema100Distance.toFixed(2)})`
         : `PASSING (Extreme Leading Pressure Confirmed: Distance -$${Math.abs(ema100Distance).toFixed(2)})`;
-    } else if (!highMovementShort) {
-      ema100ValStr = `PASSING (No high momentum pulse in last 10 candles)`;
+    } else if (isTrending && !highMovementShort) {
+      ema100ValStr = `PASSING (No high momentum pulse in last 10 candles in Trending Regime)`;
     } else {
       if (signalDirection === "LONG") {
         if (isSpecialSuperStrongTrendLogicActive) {
@@ -4641,8 +4652,19 @@ class TradingEngine {
       }
     }
 
-    // Ensure VWAP is computed
-    this.calculateVWAP(this.candles1m);
+    const rm = config.risk_management;
+    const isTrending = this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.STRONG_DOWNTREND;
+
+    const emaThreshold = isTrending
+      ? (rm.overextension_ema_trending_threshold ?? 2.2)
+      : (rm.overextension_ema_ranging_threshold ?? 1.2);
+
+    const vwapMultiplier = isTrending
+      ? (rm.overextension_vwap_trending_multiplier ?? 1.5)
+      : (rm.overextension_vwap_ranging_multiplier ?? 1.0);
+
+    // Ensure VWAP is computed with the regime-specific multiplier
+    this.calculateVWAP(this.candles1m, vwapMultiplier);
     const lastCandle = this.candles1m[lastIdx];
     const vwapVal = lastCandle.vwap !== undefined ? lastCandle.vwap : currentClose;
     const vwapUpperVal = lastCandle.vwap_upper !== undefined ? lastCandle.vwap_upper : currentClose * 1.01;
@@ -4846,7 +4868,7 @@ class TradingEngine {
     }
 
     const ema100Distance = currentClose - ema100Val;
-    const maxAllowedDeviation = 2.2 * currentAtr;
+    const maxAllowedDeviation = emaThreshold * currentAtr;
     const isEma100OverextendedLong = currentClose > ema100Val + maxAllowedDeviation;
     const isEma100OverextendedShort = currentClose < ema100Val - maxAllowedDeviation;
 
@@ -4858,8 +4880,8 @@ class TradingEngine {
       ema100ValStr = signalDirection === "LONG"
         ? `PASSING (Extreme Leading Pressure Confirmed: Distance +$${ema100Distance.toFixed(2)})`
         : `PASSING (Extreme Leading Pressure Confirmed: Distance -$${Math.abs(ema100Distance).toFixed(2)})`;
-    } else if (!highMovementShort) {
-      ema100ValStr = `PASSING (No high momentum pulse in last 10 candles)`;
+    } else if (isTrending && !highMovementShort) {
+      ema100ValStr = `PASSING (No high momentum pulse in last 10 candles in Trending Regime)`;
     } else {
       if (signalDirection === "LONG") {
         if (isSpecialSuperStrongTrendLogicActive) {

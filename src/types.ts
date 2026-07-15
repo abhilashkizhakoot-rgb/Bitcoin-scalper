@@ -229,6 +229,10 @@ export interface StrategyConfig {
     max_atr_for_stop_loss_value?: number; // Maximum ATR value to cap at
     min_atr_for_trading_enabled?: boolean; // Enable/disable minimum ATR floor for trading
     min_atr_for_trading_value?: number; // Minimum ATR value below which trading is blocked
+    overextension_ema_trending_threshold?: number; // EMA overextension threshold in trending markets (default: 2.2)
+    overextension_ema_ranging_threshold?: number; // EMA overextension threshold in ranging/other markets (default: 1.2)
+    overextension_vwap_trending_multiplier?: number; // VWAP band multiplier in trending markets (default: 1.5)
+    overextension_vwap_ranging_multiplier?: number; // VWAP band multiplier in ranging/other markets (default: 1.0)
   };
   market_structure: {
     min_breakout_body_ratio: number; // e.g. 0.22 (22% body ratio)

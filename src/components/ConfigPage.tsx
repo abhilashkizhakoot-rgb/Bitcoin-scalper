@@ -1253,7 +1253,74 @@ export default function ConfigPage({
               </div>
             </div>
 
-            {/* Section 4: Delta Fees & Indian GST */}
+            {/* Section 4: Overextension & Level Anchors Filters (VWAP/EMA) */}
+            <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm">
+              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans border-b border-slate-100 pb-2">
+                Regime-Aware Overextension & Level Anchors (VWAP/EMA)
+              </h4>
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                Prevents buying the exact top or shorting the exact bottom by dynamically setting overextension thresholds. In <strong>trending markets</strong>, thresholds are widened to capture major breakouts. In <strong>ranging/mean-reverting markets</strong>, thresholds are tightened to filter out fake breakdowns at range support/resistance.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-slate-600 pt-1">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">EMA Overextension (Trending Regime)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={riskConfig.overextension_ema_trending_threshold !== undefined ? riskConfig.overextension_ema_trending_threshold : 2.2}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, overextension_ema_trending_threshold: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Maximum allowed ATR deviation from the 100 EMA in trending regimes before being flagged as overextended (Default: 2.2).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">EMA Overextension (Ranging Regime)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={riskConfig.overextension_ema_ranging_threshold !== undefined ? riskConfig.overextension_ema_ranging_threshold : 1.2}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, overextension_ema_ranging_threshold: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Maximum allowed ATR deviation from the 100 EMA in range-bound/low-volatility regimes (Default: 1.2 - stricter to block bad trades at range boundaries).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">VWAP Band Multiplier (Trending Regime)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={riskConfig.overextension_vwap_trending_multiplier !== undefined ? riskConfig.overextension_vwap_trending_multiplier : 1.5}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, overextension_vwap_trending_multiplier: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Multiplier for VWAP standard deviation standard bands in strong trends (Default: 1.5).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">VWAP Band Multiplier (Ranging Regime)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={riskConfig.overextension_vwap_ranging_multiplier !== undefined ? riskConfig.overextension_vwap_ranging_multiplier : 1.0}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, overextension_vwap_ranging_multiplier: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Multiplier for VWAP standard deviation bands in range-bound environments. Set to 1.0 to block trades near outer range boundaries (Default: 1.0).
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 5: Delta Fees & Indian GST */}
             <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm">
               <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans border-b border-slate-100 pb-2">
                 Delta Exchange India Fee Settings

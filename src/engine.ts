@@ -1035,29 +1035,23 @@ class TradingEngine {
                                        (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.32 || this.orderBookStats.imbalanceRatio <= -0.45)));
 
     const isLowVolatility = this.currentRegime === MarketRegime.LOW_VOLATILITY;
-    const hasSoftenRegimePressure = (config.general.enable_orderflow_softening !== false) &&
-                                    ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.60 || this.orderBookStats.imbalanceRatio >= 0.35)) ||
-                                    (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.40 || this.orderBookStats.imbalanceRatio <= -0.35))) &&
-                                    (relVolume > 1.1);
 
     // C2: Market Regime lock
-    // Blocked all entries during LOW_VOLATILITY unless softened via heavy order flow pressure and volume.
-    const regimeValid = !isLowVolatility || hasSoftenRegimePressure;
+    // Blocked all entries during LOW_VOLATILITY.
+    const regimeValid = !isLowVolatility;
     const regimeAligned =
       (signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
       (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
-      this.currentRegime === MarketRegime.HIGH_VOLATILITY ||
-      (!isLowVolatility && hasExtremeRealtimePressure) ||
-      (isLowVolatility && hasSoftenRegimePressure);
+      this.currentRegime === MarketRegime.HIGH_VOLATILITY;
 
-    const isRegimeSoftened = (isLowVolatility && hasSoftenRegimePressure) || (hasExtremeRealtimePressure && !((signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) || (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) || this.currentRegime === MarketRegime.HIGH_VOLATILITY));
+    const isRegimeSoftened = false;
 
     conditions.push({
       name: "Market Regime Filter",
       met: regimeValid && (signalDirection === "NEUTRAL" ? true : regimeAligned),
-      current_value: this.currentRegime + (isLowVolatility && hasSoftenRegimePressure ? " (SOFTENED VIA HEAVY LEADING ORDER FLOW)" : (hasExtremeRealtimePressure ? " (BYPASSED VIA LEADING ORDER FLOW)" : "")),
-      required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, or HIGH_VOLATILITY (Softenable under heavy leading order flow & volume confirmation)",
-      description: "Restricts execution during low volatility ranging zones to prevent chop losses. Softened under heavy real-time order flow and book imbalance with supporting volume.",
+      current_value: this.currentRegime,
+      required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, or HIGH_VOLATILITY",
+      description: "Restricts execution during low volatility ranging zones to prevent chop losses.",
       priority: "CRITICAL",
       softened: isRegimeSoftened,
     });
@@ -1067,6 +1061,10 @@ class TradingEngine {
     let adxMet = true;
     let currentTrendStr = "";
     let requiredStr = "";
+
+    const softeningPercent = config.general.orderflow_softening_percent !== undefined ? config.general.orderflow_softening_percent : 10;
+    const standardAdxThreshold = trendAlignAdx;
+    const softenedAdxThreshold = standardAdxThreshold * (1 - softeningPercent / 100);
 
     if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       if (signalDirection === "LONG") {
@@ -1088,9 +1086,9 @@ class TradingEngine {
         trendAligned = signalDirection === "NEUTRAL" ? true : (
           signalDirection === "LONG" ? (ema20Val > ema50Val) : (ema20Val < ema50Val)
         );
-        adxMet = adxValue >= 20;
-        currentTrendStr = `EMA Structure: FAST_ALIGNED (Extreme Real-time Flow Pressure) | ADX: ${adxValue.toFixed(1)} (Threshold softened to >= 20)`;
-        requiredStr = `LONG: Fast EMA${fastEma} > EMA${medEma} & ADX >= 20 (Softened via Order Flow), SHORT: Fast EMA${fastEma} < EMA${medEma} & ADX >= 20`;
+        adxMet = adxValue >= softenedAdxThreshold;
+        currentTrendStr = `EMA Structure: FAST_ALIGNED (Extreme Real-time Flow Pressure) | ADX: ${adxValue.toFixed(1)} (Threshold softened to >= ${softenedAdxThreshold.toFixed(1)})`;
+        requiredStr = `LONG: Fast EMA${fastEma} > EMA${medEma} & ADX >= ${softenedAdxThreshold.toFixed(1)} (Softened via Order Flow), SHORT: Fast EMA${fastEma} < EMA${medEma} & ADX >= ${softenedAdxThreshold.toFixed(1)}`;
       } else {
         const fastEma = ms.fast_ema_period || 20;
         const medEma = ms.medium_ema_period || 50;
@@ -1099,9 +1097,9 @@ class TradingEngine {
           (signalDirection === "LONG" && isUptrendAligned) ||
           (signalDirection === "SHORT" && isDowntrendAligned)
         );
-        adxMet = adxValue >= trendAlignAdx;
+        adxMet = adxValue >= standardAdxThreshold;
         currentTrendStr = `EMA Structure: ${isUptrendAligned ? "BULLISH_TREND" : isDowntrendAligned ? "BEARISH_TREND" : "MIXED/FLAT"}`;
-        requiredStr = `LONG: EMA${fastEma} > EMA${medEma} > EMA${slowEma} & ADX >= ${trendAlignAdx} & STRONG_UPTREND, SHORT: EMA${fastEma} < EMA${medEma} < EMA${slowEma} & ADX >= ${trendAlignAdx} & STRONG_DOWNTREND`;
+        requiredStr = `LONG: EMA${fastEma} > EMA${medEma} > EMA${slowEma} & ADX >= ${standardAdxThreshold} & STRONG_UPTREND, SHORT: EMA${fastEma} < EMA${medEma} < EMA${slowEma} & ADX >= ${standardAdxThreshold} & STRONG_DOWNTREND`;
       }
     }
 
@@ -1112,7 +1110,7 @@ class TradingEngine {
     const isTrendSoftened = (this.currentRegime !== MarketRegime.RANGE_BOUND) && hasExtremeRealtimePressure && (
       (signalDirection === "LONG" && !isUptrendAligned) ||
       (signalDirection === "SHORT" && !isDowntrendAligned) ||
-      (adxValue < trendAlignAdx)
+      (adxValue < standardAdxThreshold)
     );
 
     conditions.push({
@@ -1126,14 +1124,16 @@ class TradingEngine {
     });
 
     // C5: Relative Volume Confirmation
+    const standardRelVolThreshold = relVolThreshold;
+    const softenedRelVolThreshold = standardRelVolThreshold * (1 - softeningPercent / 100);
     const requiredRelVol = hasExtremeRealtimePressure 
-      ? Math.min(1.0, Math.max(0.75, relVolThreshold - 0.5)) 
-      : relVolThreshold;
-    const isRelVolumeSoftened = hasExtremeRealtimePressure && relVolume > requiredRelVol && relVolume <= relVolThreshold;
+      ? softenedRelVolThreshold 
+      : standardRelVolThreshold;
+    const isRelVolumeSoftened = hasExtremeRealtimePressure && relVolume >= softenedRelVolThreshold && relVolume < standardRelVolThreshold;
 
     conditions.push({
       name: "Relative Volume Confirmation",
-      met: relVolume > requiredRelVol,
+      met: relVolume >= requiredRelVol,
       current_value: `${relVolume.toFixed(2)}x` + (hasExtremeRealtimePressure ? " (SOFTENED VIA LEADING ORDER FLOW)" : ""),
       required: `> ${requiredRelVol.toFixed(2)}x above 20-period MA`,
       description: hasExtremeRealtimePressure
@@ -4700,28 +4700,22 @@ class TradingEngine {
                                        (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.32 || this.orderBookStats.imbalanceRatio <= -0.45)));
 
     const isLowVolatility = this.currentRegime === MarketRegime.LOW_VOLATILITY;
-    const hasSoftenRegimePressure = (config.general.enable_orderflow_softening !== false) &&
-                                    ((signalDirection === "LONG" && (this.orderFlowStats.takerBuyRatio >= 0.60 || this.orderBookStats.imbalanceRatio >= 0.35)) ||
-                                    (signalDirection === "SHORT" && (this.orderFlowStats.takerBuyRatio <= 0.40 || this.orderBookStats.imbalanceRatio <= -0.35))) &&
-                                    (relVolume > 1.1);
 
     // C2: Market Regime lock
-    // Blocked all entries during LOW_VOLATILITY unless softened via heavy order flow pressure and volume.
-    const regimeValid = !isLowVolatility || hasSoftenRegimePressure;
+    // Blocked all entries during LOW_VOLATILITY.
+    const regimeValid = !isLowVolatility;
     const regimeAligned =
       (signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
       (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
-      this.currentRegime === MarketRegime.HIGH_VOLATILITY ||
-      (!isLowVolatility && hasExtremeRealtimePressure) ||
-      (isLowVolatility && hasSoftenRegimePressure);
+      this.currentRegime === MarketRegime.HIGH_VOLATILITY;
 
-    const isRegimeSoftened = (isLowVolatility && hasSoftenRegimePressure) || (hasExtremeRealtimePressure && !((signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) || (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) || this.currentRegime === MarketRegime.HIGH_VOLATILITY));
+    const isRegimeSoftened = false;
 
     conditions.push({
       name: "Market Regime Filter",
       met: regimeValid && (signalDirection === "NEUTRAL" ? true : regimeAligned),
-      current_value: this.currentRegime + (isLowVolatility && hasSoftenRegimePressure ? " (SOFTENED VIA HEAVY LEADING ORDER FLOW)" : (hasExtremeRealtimePressure ? " (BYPASSED VIA LEADING ORDER FLOW)" : "")),
-      required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, or HIGH_VOLATILITY (Softenable under heavy leading order flow & volume confirmation)",
+      current_value: this.currentRegime,
+      required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, or HIGH_VOLATILITY",
       softened: isRegimeSoftened,
     });
 
@@ -4730,6 +4724,10 @@ class TradingEngine {
     let adxMet = true;
     let currentTrendStr = "";
     let requiredStr = "";
+
+    const softeningPercent = config.general.orderflow_softening_percent !== undefined ? config.general.orderflow_softening_percent : 10;
+    const standardAdxThreshold = trendAlignAdx;
+    const softenedAdxThreshold = standardAdxThreshold * (1 - softeningPercent / 100);
 
     if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       if (signalDirection === "LONG") {
@@ -4751,9 +4749,9 @@ class TradingEngine {
         trendAligned = signalDirection === "NEUTRAL" ? true : (
           signalDirection === "LONG" ? (ema20Val > ema50Val) : (ema20Val < ema50Val)
         );
-        adxMet = adxValue >= 20;
-        currentTrendStr = `EMA Structure: FAST_ALIGNED (Extreme Real-time Flow Pressure) | ADX: ${adxValue.toFixed(1)} (Threshold softened to >= 20)`;
-        requiredStr = `LONG: Fast EMA${fastEma} > EMA${medEma} & ADX >= 20 (Softened via Order Flow), SHORT: Fast EMA${fastEma} < EMA${medEma} & ADX >= 20`;
+        adxMet = adxValue >= softenedAdxThreshold;
+        currentTrendStr = `EMA Structure: FAST_ALIGNED (Extreme Real-time Flow Pressure) | ADX: ${adxValue.toFixed(1)} (Threshold softened to >= ${softenedAdxThreshold.toFixed(1)})`;
+        requiredStr = `LONG: Fast EMA${fastEma} > EMA${medEma} & ADX >= ${softenedAdxThreshold.toFixed(1)} (Softened via Order Flow), SHORT: Fast EMA${fastEma} < EMA${medEma} & ADX >= ${softenedAdxThreshold.toFixed(1)}`;
       } else {
         const fastEma = ms.fast_ema_period || 20;
         const medEma = ms.medium_ema_period || 50;
@@ -4762,16 +4760,16 @@ class TradingEngine {
           (signalDirection === "LONG" && isUptrendAligned) ||
           (signalDirection === "SHORT" && isDowntrendAligned)
         );
-        adxMet = adxValue >= trendAlignAdx;
+        adxMet = adxValue >= standardAdxThreshold;
         currentTrendStr = `EMA Structure: ${isUptrendAligned ? "BULLISH_TREND" : isDowntrendAligned ? "BEARISH_TREND" : "MIXED/FLAT"}`;
-        requiredStr = `LONG: EMA${fastEma} > EMA${medEma} > EMA${slowEma} & ADX >= ${trendAlignAdx} & STRONG_UPTREND, SHORT: EMA${fastEma} < EMA${medEma} < EMA${slowEma} & ADX >= ${trendAlignAdx} & STRONG_DOWNTREND`;
+        requiredStr = `LONG: EMA${fastEma} > EMA${medEma} > EMA${slowEma} & ADX >= ${standardAdxThreshold} & STRONG_UPTREND, SHORT: EMA${fastEma} < EMA${medEma} < EMA${slowEma} & ADX >= ${standardAdxThreshold} & STRONG_DOWNTREND`;
       }
     }
 
     const isTrendSoftened = (this.currentRegime !== MarketRegime.RANGE_BOUND) && hasExtremeRealtimePressure && (
       (signalDirection === "LONG" && !isUptrendAligned) ||
       (signalDirection === "SHORT" && !isDowntrendAligned) ||
-      (adxValue < trendAlignAdx)
+      (adxValue < standardAdxThreshold)
     );
 
     conditions.push({
@@ -4783,14 +4781,16 @@ class TradingEngine {
     });
 
     // C5: Relative Volume Confirmation
+    const standardRelVolThreshold = relVolThreshold;
+    const softenedRelVolThreshold = standardRelVolThreshold * (1 - softeningPercent / 100);
     const requiredRelVol = hasExtremeRealtimePressure 
-      ? Math.min(1.0, Math.max(0.75, relVolThreshold - 0.5)) 
-      : relVolThreshold;
-    const isRelVolumeSoftened = hasExtremeRealtimePressure && relVolume > requiredRelVol && relVolume <= relVolThreshold;
+      ? softenedRelVolThreshold 
+      : standardRelVolThreshold;
+    const isRelVolumeSoftened = hasExtremeRealtimePressure && relVolume >= softenedRelVolThreshold && relVolume < standardRelVolThreshold;
 
     conditions.push({
       name: "Relative Volume Confirmation",
-      met: relVolume > requiredRelVol,
+      met: relVolume >= requiredRelVol,
       current_value: `${relVolume.toFixed(2)}x` + (hasExtremeRealtimePressure ? " (SOFTENED VIA LEADING ORDER FLOW)" : ""),
       required: `> ${requiredRelVol.toFixed(2)}x above 20-period MA`,
       softened: isRelVolumeSoftened,

@@ -177,6 +177,7 @@ export interface StrategyConfig {
     enable_block_logging?: boolean;
     enable_trade_logging?: boolean;
     enable_orderflow_softening?: boolean;
+    orderflow_softening_percent?: number;
     order_book_min_depth?: number;
     order_book_max_imbalance?: number;
     regime_change_cooldown_minutes?: number;

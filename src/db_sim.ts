@@ -113,6 +113,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     enable_block_logging: true,
     enable_trade_logging: true,
     enable_orderflow_softening: true,
+    orderflow_softening_percent: 10,
     order_book_min_depth: 4.0,
     order_book_max_imbalance: 0.35,
     regime_change_cooldown_minutes: 15,
@@ -897,6 +898,10 @@ class DatabaseManager {
       }
       if (this.cache.config.general.enable_orderflow_softening === undefined) {
         this.cache.config.general.enable_orderflow_softening = true;
+        changed = true;
+      }
+      if (this.cache.config.general.orderflow_softening_percent === undefined) {
+        this.cache.config.general.orderflow_softening_percent = 10;
         changed = true;
       }
       if (this.cache.config.general.order_book_min_depth === undefined) {

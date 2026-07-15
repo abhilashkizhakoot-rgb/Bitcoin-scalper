@@ -742,6 +742,24 @@ export default function ConfigPage({
                   </p>
                 </div>
 
+                {generalConfig.enable_orderflow_softening !== false && (
+                  <div className="space-y-1.5 pl-6.5">
+                    <label className="block text-xs font-semibold text-slate-700">Order Flow Softening Percentage (%)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={generalConfig.orderflow_softening_percent !== undefined ? generalConfig.orderflow_softening_percent : 10}
+                      onChange={(e) => setGeneralConfig({ ...generalConfig, orderflow_softening_percent: parseInputNumber(e.target.value) })}
+                      className="w-full text-xs rounded border border-slate-300 px-3 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white"
+                    />
+                    <p className="text-[9px] text-slate-400">
+                      Reduces Trend ADX and Relative Volume requirements by this percentage when localized order flow pressure triggers. E.g., at 10%, Volume threshold of 1.3 reduces to 1.17, ADX threshold of 22.0 reduces to 19.8.
+                    </p>
+                  </div>
+                )}
+
                 <div className="space-y-2 flex flex-col justify-end pb-1">
                   <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
                     <input

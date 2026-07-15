@@ -248,6 +248,9 @@ export interface StrategyConfig {
     fast_ema_period?: number; // Fast EMA period (default: 20)
     medium_ema_period?: number; // Medium EMA period (default: 50)
     slow_ema_period?: number; // Slow EMA period (default: 200)
+    micro_trend_alignment_enabled?: boolean; // Enable Micro-Trend Alignment Filter (default: true)
+    micro_trend_fast_period?: number; // Fast period for micro-trend tracking (default: 5)
+    micro_trend_slow_period?: number; // Slow period for micro-trend tracking (default: 15)
   };
   gate_scoring?: {
     enabled: boolean;

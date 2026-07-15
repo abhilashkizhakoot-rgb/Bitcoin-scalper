@@ -162,6 +162,9 @@ export default function ConfigPage({
     fast_ema_period: 20,
     medium_ema_period: 50,
     slow_ema_period: 200,
+    micro_trend_alignment_enabled: true,
+    micro_trend_fast_period: 5,
+    micro_trend_slow_period: 15,
   });
 
   useEffect(() => {
@@ -253,6 +256,9 @@ export default function ConfigPage({
         fast_ema_period: 20,
         medium_ema_period: 50,
         slow_ema_period: 200,
+        micro_trend_alignment_enabled: true,
+        micro_trend_fast_period: 5,
+        micro_trend_slow_period: 15,
       }
     };
 
@@ -2115,6 +2121,66 @@ export default function ConfigPage({
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Slow-moving exponential moving average period representing long-term trend direction and baseline support/resistance (Standard: 200).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5 md:col-span-2 border-t border-slate-100 pt-4">
+                  <h4 className="text-xs font-sans font-semibold text-slate-700 uppercase tracking-wider mb-1">Solution A: Micro-Trend Alignment Filters</h4>
+                </div>
+
+                <div className="space-y-1.5 flex items-center justify-between md:col-span-2 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-700">Enable Micro-Trend Alignment Filter</span>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      Filters counter-trend range reversals & breakouts. Ensures short-term 1m momentum aligns with entry direction before launching trade.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, micro_trend_alignment_enabled: !msConfig.micro_trend_alignment_enabled })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.micro_trend_alignment_enabled ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.micro_trend_alignment_enabled ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Micro-Trend Fast EMA</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="2"
+                    max="50"
+                    disabled={!msConfig.micro_trend_alignment_enabled}
+                    value={msConfig.micro_trend_fast_period || ""}
+                    onChange={(e) => setMsConfig({ ...msConfig, micro_trend_fast_period: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Fast EMA period for tracking immediate micro-trend direction changes (Standard: 5).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Micro-Trend Slow EMA</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="5"
+                    max="100"
+                    disabled={!msConfig.micro_trend_alignment_enabled}
+                    value={msConfig.micro_trend_slow_period || ""}
+                    onChange={(e) => setMsConfig({ ...msConfig, micro_trend_slow_period: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Slow EMA period for dynamic micro-trend baseline reference (Standard: 15).
                   </p>
                 </div>
               </div>

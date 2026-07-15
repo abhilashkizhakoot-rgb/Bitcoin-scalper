@@ -3643,6 +3643,12 @@ class TradingEngine {
         };
       }
 
+      const ms = config.market_structure || {
+        micro_trend_alignment_enabled: true,
+        micro_trend_fast_period: 5,
+        micro_trend_slow_period: 15,
+      };
+
       const rangeLookback = 30;
       const recentCandlesForRange = this.candles1m.slice(-rangeLookback);
       const rangeHigh = recentCandlesForRange.length > 0 ? Math.max(...recentCandlesForRange.map(c => c.high)) : struct.swingHigh;
@@ -3668,18 +3674,62 @@ class TradingEngine {
       const isRangeLongBreakout = (currentPrice > rangeHigh) && (relVolume > 1.2);
       const isRangeShortBreakdown = (currentPrice < rangeLow) && (relVolume > 1.2);
 
+      // Calculate Micro-Trend alignment using fast/slow EMAs on 1m chart
+      const closes = this.candles1m.map((c) => c.close);
+      const hasEnoughCandles = closes.length >= Math.max(ms.micro_trend_slow_period || 15, 15);
+      let microTrendAligned = true;
+      let microTrendDetails = "";
+
+      if (ms.micro_trend_alignment_enabled !== false && hasEnoughCandles) {
+        const microFastPeriod = ms.micro_trend_fast_period || 5;
+        const microSlowPeriod = ms.micro_trend_slow_period || 15;
+        const emaFastList = this.calculateEMA(closes, microFastPeriod);
+        const emaSlowList = this.calculateEMA(closes, microSlowPeriod);
+        const emaFastVal = emaFastList[lastIdx] !== undefined ? emaFastList[lastIdx] : currentPrice;
+        const emaSlowVal = emaSlowList[lastIdx] !== undefined ? emaSlowList[lastIdx] : currentPrice;
+
+        const isMicroTrendBullish = emaFastVal > emaSlowVal;
+        const isMicroTrendBearish = emaFastVal < emaSlowVal;
+
+        if (signalDirection === "LONG") {
+          // LONG reversal/breakout requires bullish micro-trend or price crossing above slower EMA to confirm shift
+          microTrendAligned = isMicroTrendBullish || (currentPrice >= emaSlowVal);
+          microTrendDetails = `(Micro-Trend [EMA ${microFastPeriod}/${microSlowPeriod}]: Fast $${emaFastVal.toFixed(2)} vs Slow $${emaSlowVal.toFixed(2)} - ${isMicroTrendBullish ? "BULLISH" : "BEARISH"}${microTrendAligned ? " [ALIGNED]" : " [BLOCKED]"})`;
+        } else if (signalDirection === "SHORT") {
+          // SHORT reversal/breakdown requires bearish micro-trend or price crossing below slower EMA to confirm shift
+          microTrendAligned = isMicroTrendBearish || (currentPrice <= emaSlowVal);
+          microTrendDetails = `(Micro-Trend [EMA ${microFastPeriod}/${microSlowPeriod}]: Fast $${emaFastVal.toFixed(2)} vs Slow $${emaSlowVal.toFixed(2)} - ${isMicroTrendBearish ? "BEARISH" : "BULLISH"}${microTrendAligned ? " [ALIGNED]" : " [BLOCKED]"})`;
+        }
+      }
+
       if (signalDirection === "LONG") {
         if (isRangeLongReversal) {
+          if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
+            return {
+              confirmed: false,
+              message: `Range LONG Reversal Blocked: Micro-Trend is strongly bearish and does not support entry. ${microTrendDetails}`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           return {
             confirmed: true,
-            message: `Ranging Bullish Reversal Confirmed. Price ($${currentPrice.toFixed(2)}) is bouncing off major range support ($${rangeLow.toFixed(2)}).`,
+            message: `Ranging Bullish Reversal Confirmed. Price ($${currentPrice.toFixed(2)}) is bouncing off major range support ($${rangeLow.toFixed(2)}). ${microTrendDetails}`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
         } else if (isRangeLongBreakout) {
+          if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
+            return {
+              confirmed: false,
+              message: `Range LONG Breakout Blocked: Micro-Trend is strongly bearish and does not support entry. ${microTrendDetails}`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           return {
             confirmed: true,
-            message: `Ranging Bullish Breakout Confirmed. Price ($${currentPrice.toFixed(2)}) broke above major range resistance ($${rangeHigh.toFixed(2)}) on high relative volume (${relVolume.toFixed(2)}x).`,
+            message: `Ranging Bullish Breakout Confirmed. Price ($${currentPrice.toFixed(2)}) broke above major range resistance ($${rangeHigh.toFixed(2)}) on high relative volume (${relVolume.toFixed(2)}x). ${microTrendDetails}`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -3693,16 +3743,32 @@ class TradingEngine {
         }
       } else if (signalDirection === "SHORT") {
         if (isRangeShortReversal) {
+          if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
+            return {
+              confirmed: false,
+              message: `Range SHORT Reversal Blocked: Micro-Trend is strongly bullish and does not support entry. ${microTrendDetails}`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           return {
             confirmed: true,
-            message: `Ranging Bearish Reversal Confirmed. Price ($${currentPrice.toFixed(2)}) is rejecting major range resistance ($${rangeHigh.toFixed(2)}).`,
+            message: `Ranging Bearish Reversal Confirmed. Price ($${currentPrice.toFixed(2)}) is rejecting major range resistance ($${rangeHigh.toFixed(2)}). ${microTrendDetails}`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
         } else if (isRangeShortBreakdown) {
+          if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
+            return {
+              confirmed: false,
+              message: `Range SHORT Breakdown Blocked: Micro-Trend is strongly bullish and does not support entry. ${microTrendDetails}`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           return {
             confirmed: true,
-            message: `Ranging Bearish Breakdown Confirmed. Price ($${currentPrice.toFixed(2)}) broke below major range support ($${rangeLow.toFixed(2)}) on high relative volume (${relVolume.toFixed(2)}x).`,
+            message: `Ranging Bearish Breakdown Confirmed. Price ($${currentPrice.toFixed(2)}) broke below major range support ($${rangeLow.toFixed(2)}) on high relative volume (${relVolume.toFixed(2)}x). ${microTrendDetails}`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };

@@ -256,6 +256,7 @@ export interface StrategyConfig {
     micro_trend_alignment_enabled?: boolean; // Enable Micro-Trend Alignment Filter (default: true)
     micro_trend_fast_period?: number; // Fast period for micro-trend tracking (default: 5)
     micro_trend_slow_period?: number; // Slow period for micro-trend tracking (default: 15)
+    timeframe_minutes?: number; // Market Structure Timeframe in minutes (default: 5)
   };
   gate_scoring?: {
     enabled: boolean;

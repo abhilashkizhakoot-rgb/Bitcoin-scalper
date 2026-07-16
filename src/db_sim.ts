@@ -212,6 +212,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     micro_trend_alignment_enabled: true,
     micro_trend_fast_period: 5,
     micro_trend_slow_period: 15,
+    timeframe_minutes: 5,
   },
   gate_scoring: {
     enabled: true,
@@ -1030,6 +1031,7 @@ class DatabaseManager {
       if (ms.micro_trend_alignment_enabled === undefined) { ms.micro_trend_alignment_enabled = def.micro_trend_alignment_enabled !== false; changed = true; }
       if (ms.micro_trend_fast_period === undefined) { ms.micro_trend_fast_period = def.micro_trend_fast_period || 5; changed = true; }
       if (ms.micro_trend_slow_period === undefined) { ms.micro_trend_slow_period = def.micro_trend_slow_period || 15; changed = true; }
+      if (ms.timeframe_minutes === undefined) { ms.timeframe_minutes = def.timeframe_minutes || 5; changed = true; }
     }
 
     if (!this.cache?.config?.gate_scoring) {

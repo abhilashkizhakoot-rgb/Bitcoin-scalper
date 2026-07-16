@@ -165,6 +165,7 @@ export default function ConfigPage({
     micro_trend_alignment_enabled: true,
     micro_trend_fast_period: 5,
     micro_trend_slow_period: 15,
+    timeframe_minutes: 5,
   });
 
   useEffect(() => {
@@ -259,6 +260,7 @@ export default function ConfigPage({
         micro_trend_alignment_enabled: true,
         micro_trend_fast_period: 5,
         micro_trend_slow_period: 15,
+        timeframe_minutes: 5,
       }
     };
 
@@ -2209,6 +2211,22 @@ export default function ConfigPage({
                   </p>
                 </div>
 
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Market Structure Timeframe (Min)</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    max="60"
+                    value={msConfig.timeframe_minutes !== undefined ? msConfig.timeframe_minutes : 5}
+                    onChange={(e) => setMsConfig({ ...msConfig, timeframe_minutes: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    The candle interval (in minutes) used to construct and analyze structural swing levels (HH/HL/LH/LL). Higher values (e.g. 5m) filter out 1m noise and align with larger charts.
+                  </p>
+                </div>
+
                 <div className="space-y-1.5 md:col-span-2 border-t border-slate-100 pt-4">
                   <h4 className="text-xs font-sans font-semibold text-slate-700 uppercase tracking-wider mb-1">Solution A: Micro-Trend Alignment Filters</h4>
                 </div>
@@ -2330,40 +2348,6 @@ export default function ConfigPage({
                         The minimum overall confidence score (out of 100%) required from passed tactical gates to permit trade initiation. The Market Structure Confirmation remains a mandatory final filter regardless of this threshold.
                       </p>
                     </div>
-
-                    <div className="flex items-center justify-between border-t border-slate-200/60 pt-4">
-                      <div className="space-y-0.5">
-                        <span className="text-xs font-sans font-semibold text-slate-700">Softened Gate Weight Discounting</span>
-                        <p className="text-[10px] text-slate-400">Discount the weight score of tactical gates that pass ONLY via softened thresholds.</p>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={gateScoringConfig.enable_weight_discounting !== false}
-                        onChange={(e) => setGateScoringConfig({ ...gateScoringConfig, enable_weight_discounting: e.target.checked })}
-                        className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded cursor-pointer"
-                      />
-                    </div>
-
-                    {(gateScoringConfig.enable_weight_discounting !== false) && (
-                      <div className="pt-2 space-y-2 border-t border-slate-200/60">
-                        <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
-                          <span>Softened Gate Weight Multiplier (Discount)</span>
-                          <span className="text-indigo-600 font-semibold">{Math.round((gateScoringConfig.softened_gate_discount_factor ?? 0.5) * 100)}%</span>
-                        </label>
-                        <input
-                          type="range"
-                          min="0"
-                          max="1"
-                          step="0.05"
-                          value={gateScoringConfig.softened_gate_discount_factor ?? 0.5}
-                          onChange={(e) => setGateScoringConfig({ ...gateScoringConfig, softened_gate_discount_factor: Number(e.target.value) })}
-                          className="w-full accent-indigo-600 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer"
-                        />
-                        <p className="text-[10px] text-slate-400 leading-relaxed">
-                          The percentage of the gate's configured weight that will be earned when it passes under softened thresholds. Example: At 50%, a 10% weight gate will only contribute 5% to the score.
-                        </p>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>

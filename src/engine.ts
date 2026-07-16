@@ -520,6 +520,58 @@ class TradingEngine {
         checkpointStr = "No checkpoints evaluated or available.\n";
       }
 
+      // Compute and snapshot maximum features for offline/ML optimization
+      const takerBuyVol = this.orderFlowStats.takerBuyVolume;
+      const takerSellVol = this.orderFlowStats.takerSellVolume;
+      const takerBuyPct = (this.orderFlowStats.takerBuyRatio * 100).toFixed(2);
+      const netCVDVal = this.orderFlowStats.netCVD;
+
+      const bidDepth = this.orderBookStats.bidDepthBTC;
+      const askDepth = this.orderBookStats.askDepthBTC;
+      const totalDepth = bidDepth + askDepth;
+      const rawImbalance = (this.orderBookStats.imbalanceRatio * 100).toFixed(2);
+      const stability = this.getOrderBookStability(trade.direction);
+      const adjImbalance = (stability.adjustedImbalance * 100).toFixed(2);
+      const stabilityIdx = stability.stabilityIndex;
+      const spoofRsk = stability.spoofRisk;
+
+      const closes = this.candles1m.map((c) => c.close);
+      const volumes = this.candles1m.map((c) => c.volume);
+      const hasEnough = closes.length >= 50;
+      const currentPrice = this.currentPrice;
+
+      const rsi14 = hasEnough ? this.calculateRSI(closes, 14) : [50];
+      const currentRsi = rsi14[closes.length - 1] !== undefined ? rsi14[closes.length - 1] : 50;
+
+      const adx14 = hasEnough ? this.calculateADX(this.candles1m, 14) : [25];
+      const currentAdx = adx14[closes.length - 1] !== undefined ? adx14[closes.length - 1] : 25;
+
+      const ema9 = hasEnough ? this.calculateEMA(closes, 9) : [currentPrice];
+      const ema21 = hasEnough ? this.calculateEMA(closes, 21) : [currentPrice];
+      const ema50 = hasEnough ? this.calculateEMA(closes, 50) : [currentPrice];
+      const ema100 = hasEnough ? this.calculateEMA(closes, 100) : [currentPrice];
+      const ema200 = hasEnough ? this.calculateEMA(closes, 200) : [currentPrice];
+
+      const ema9Val = ema9[closes.length - 1] || currentPrice;
+      const ema21Val = ema21[closes.length - 1] || currentPrice;
+      const ema50Val = ema50[closes.length - 1] || currentPrice;
+      const ema100Val = ema100[closes.length - 1] || currentPrice;
+      const ema200Val = ema200[closes.length - 1] || currentPrice;
+
+      const bb = this.calculateBollingerBands(closes, 20, 2);
+      const struct = this.getTrendMarketStructure();
+
+      let relVolume = 1.0;
+      if (hasEnough && volumes.length >= 20) {
+        const lastIdx = closes.length - 1;
+        const currentVolume = volumes[lastIdx];
+        const sumPrevVolumes = volumes.slice(lastIdx - 20, lastIdx).reduce((a, b) => a + b, 0);
+        const avgPrevVolume = sumPrevVolumes / 20;
+        relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
+      } else if (hasEnough) {
+        relVolume = 1.35;
+      }
+
       const logEntry =
         `[TRADE ENTRY] ${timestamp}\n` +
         `Trade ID         : ${trade.id}\n` +
@@ -535,6 +587,38 @@ class TradingEngine {
         `Take Profit Price: $${trade.feature_snapshot?.take_profit_price || "—"}\n` +
         `ATR (14)         : $${trade.feature_snapshot?.atr_14 || "—"}\n` +
         `Fees Paid        : $${trade.fees_paid_usdt} USDT\n` +
+        `\n` +
+        `DETAILED MARKET STATE SNAPSHOT FOR OFFLINE OPTIMIZATION:\n` +
+        `  1. MARKET REGIME & SENTIMENT:\n` +
+        `    - Dominant Market Regime: ${this.currentRegime}\n` +
+        `    - Regime Classification Confidence: ${(this.regimeConfidence * 100).toFixed(1)}%\n` +
+        `  2. ORDER FLOW & CVD METRICS (BINANCE 1-MIN COALITION):\n` +
+        `    - Taker Buy Volume      : ${takerBuyVol.toFixed(4)} BTC\n` +
+        `    - Taker Sell Volume     : ${takerSellVol.toFixed(4)} BTC\n` +
+        `    - Taker Buy Percentage  : ${takerBuyPct}%\n` +
+        `    - Cumulative Volume Delta (CVD): ${netCVDVal.toFixed(4)} BTC\n` +
+        `  3. ORDER BOOK LIQUIDITY DEPTH (DELTA TOP-10 WALLS):\n` +
+        `    - Bid Depth (BTC)       : ${bidDepth.toFixed(3)} BTC\n` +
+        `    - Ask Depth (BTC)       : ${askDepth.toFixed(3)} BTC\n` +
+        `    - Total Depth Sum       : ${totalDepth.toFixed(3)} BTC\n` +
+        `    - Raw Imbalance Ratio   : ${rawImbalance}%\n` +
+        `    - Volume-Mismatch Filtered (Adjusted) Imbalance: ${adjImbalance}%\n` +
+        `    - Wall Stability Index : ${stabilityIdx}%\n` +
+        `    - Spoofing Risk Prob    : ${spoofRsk}%\n` +
+        `  4. TECHNICAL INDICATORS SNAPSHOT:\n` +
+        `    - RSI (14-period)       : ${currentRsi.toFixed(2)}\n` +
+        `    - ADX (14-period)       : ${currentAdx.toFixed(2)}\n` +
+        `    - Relative Volume (20)  : ${relVolume.toFixed(2)}x\n` +
+        `    - Bollinger Bands Upper : $${bb.upper.toFixed(2)} (Dev position: ${((currentPrice - bb.lower) / (bb.upper - bb.lower || 1)).toFixed(4)})\n` +
+        `    - Bollinger Bands Middle: $${bb.middle.toFixed(2)}\n` +
+        `    - Bollinger Bands Lower : $${bb.lower.toFixed(2)}\n` +
+        `    - Moving Averages (9): $${ema9Val.toFixed(2)} | (21): $${ema21Val.toFixed(2)} | (50): $${ema50Val.toFixed(2)} | (100): $${ema100Val.toFixed(2)} | (200): $${ema200Val.toFixed(2)}\n` +
+        `    - EMA 21-50 Spread %    : ${(((ema21Val - ema50Val) / ema50Val) * 100).toFixed(4)}%\n` +
+        `  5. MARKET STRUCTURE ANCHORS:\n` +
+        `    - HH (Higher High)      : ${struct.current_HH ? `$${struct.current_HH.price.toFixed(2)} (Index: ${struct.current_HH.index})` : "None"}\n` +
+        `    - LL (Lower Low)        : ${struct.current_LL ? `$${struct.current_LL.price.toFixed(2)} (Index: ${struct.current_LL.index})` : "None"}\n` +
+        `    - LH (Lower High)       : ${struct.current_LH ? `$${struct.current_LH.price.toFixed(2)}` : "None"}\n` +
+        `    - HL (Higher Low)       : ${struct.current_HL ? `$${struct.current_HL.price.toFixed(2)}` : "None"}\n` +
         `\n` +
         checkpointStr +
         separator;
@@ -559,6 +643,12 @@ class TradingEngine {
       const timestamp = new Date().toISOString();
       const separator = "=".repeat(80) + "\n";
 
+      // Calculate exit metrics
+      const closes = this.candles1m.map((c) => c.close);
+      const hasEnough = closes.length >= 50;
+      const rsi14 = hasEnough ? this.calculateRSI(closes, 14) : [50];
+      const currentRsi = rsi14[closes.length - 1] !== undefined ? rsi14[closes.length - 1] : 50;
+
       const logEntry =
         `[TRADE EXIT] ${timestamp}\n` +
         `Trade ID         : ${trade.id}\n` +
@@ -571,6 +661,15 @@ class TradingEngine {
         `Is Win           : ${trade.is_win ? "YES ✅" : "NO ❌"}\n` +
         `Fees Paid (Total): $${trade.fees_paid_usdt} USDT\n` +
         `Net P&L (USDT)   : $${(trade.pnl_usdt || 0).toFixed(2)} USDT (${(trade.pnl_pct || 0).toFixed(2)}%)\n` +
+        `\n` +
+        `DETAILED EXIT STATE SNAPSHOT FOR OFFLINE OPTIMIZATION:\n` +
+        `  - Exit Market Regime : ${this.currentRegime}\n` +
+        `  - Exit RSI (14-period): ${currentRsi.toFixed(2)}\n` +
+        `  - Max Favorable Excursion (MFE): ${(trade.max_favorable_excursion * 100).toFixed(4)}%\n` +
+        `  - Max Adverse Excursion (MAE) : ${(trade.max_adverse_excursion * 100).toFixed(4)}%\n` +
+        `  - Final Position QuantityBTC : ${trade.quantity_btc} BTC\n` +
+        `  - Final PNL % (including leverage): ${(trade.pnl_pct || 0).toFixed(4)}%\n` +
+        `  - Entry Feature Snapshot Dump: ${JSON.stringify(trade.feature_snapshot || {})}\n` +
         separator;
 
       fs.appendFileSync(logFilePath, logEntry, "utf-8");
@@ -2714,8 +2813,28 @@ class TradingEngine {
         swingHigh: 100000, swingLow: 100000
       };
     }
+
+    const config = dbManager.getConfig();
+    const ms = config.market_structure || {
+      fast_ema_period: 20,
+      medium_ema_period: 50,
+      slow_ema_period: 200,
+      trend_alignment_adx_threshold: 30,
+      super_trend_adx_threshold: 35,
+      timeframe_minutes: 5,
+    };
+    const timeframeMinutes = ms.timeframe_minutes !== undefined ? ms.timeframe_minutes : 5;
+
+    let candles = this.aggregateCandles(this.candles1m, timeframeMinutes);
+    if (candles.length < 35 && timeframeMinutes > 1) {
+      candles = this.aggregateCandles(this.candles1m, 3);
+      if (candles.length < 35) {
+        candles = this.candles1m;
+      }
+    }
+
     const last = this.candles1m[this.candles1m.length - 1];
-    const cacheKey = `${this.candles1m.length}_${last.time}_${last.close}_${this.currentRegime}`;
+    const cacheKey = `${this.candles1m.length}_${last.time}_${last.close}_${this.currentRegime}_${timeframeMinutes}`;
     if (this.indicatorCache.marketStructure.has(cacheKey)) {
       return this.indicatorCache.marketStructure.get(cacheKey)!;
     }
@@ -2723,12 +2842,12 @@ class TradingEngine {
       this.indicatorCache.marketStructure.clear();
     }
 
-    const closes = this.candles1m.map(c => c.close);
-    const highs = this.candles1m.map(c => c.high);
-    const lows = this.candles1m.map(c => c.low);
+    const closes = candles.map(c => c.close);
+    const highs = candles.map(c => c.high);
+    const lows = candles.map(c => c.low);
     const lastIdx = closes.length - 1;
 
-    if (closes.length < 50) {
+    if (closes.length < 30) {
       const defaultStruct = {
         current_HH: null, prev_HH: null, current_HL: null, prev_HL: null,
         current_LH: null, prev_LH: null, current_LL: null, prev_LL: null,
@@ -2751,8 +2870,8 @@ class TradingEngine {
     }
     const halfWindow = Math.floor(windowSize / 2);
 
-    const rawHighs: { index: number; price: number }[] = [];
-    const rawLows: { index: number; price: number }[] = [];
+    const rawHighs: { index: number; price: number; time: number }[] = [];
+    const rawLows: { index: number; price: number; time: number }[] = [];
 
     for (let i = halfWindow; i <= lastIdx - halfWindow; i++) {
       let isSwingHigh = true;
@@ -2767,10 +2886,10 @@ class TradingEngine {
       }
 
       if (isSwingHigh) {
-        rawHighs.push({ index: i, price: highs[i] });
+        rawHighs.push({ index: i, price: highs[i], time: candles[i].time });
       }
       if (isSwingLow) {
-        rawLows.push({ index: i, price: lows[i] });
+        rawLows.push({ index: i, price: lows[i], time: candles[i].time });
       }
     }
 
@@ -2819,7 +2938,7 @@ class TradingEngine {
       const fib38 = current_HH.price - 0.382 * (current_HH.price - current_HL.price);
       
       const startIndex = Math.max(current_HH.index, lastIdx - 12);
-      const candlesAfterHH = this.candles1m.slice(startIndex);
+      const candlesAfterHH = candles.slice(startIndex);
       for (const candle of candlesAfterHH) {
         if (
           candle.low <= ema20Val ||
@@ -2838,7 +2957,7 @@ class TradingEngine {
       const fib38 = current_LL.price + 0.382 * (current_LH.price - current_LL.price);
       
       const startIndex = Math.max(current_LL.index, lastIdx - 12);
-      const candlesAfterLL = this.candles1m.slice(startIndex);
+      const candlesAfterLL = candles.slice(startIndex);
       for (const candle of candlesAfterLL) {
         if (
           candle.high >= ema20Val ||
@@ -3059,12 +3178,12 @@ class TradingEngine {
 
       // Symmetrically, the broken level is the previous Higher High (prev_HH) in a confirmed uptrend
       const breakoutLevel = struct.prev_HH ? struct.prev_HH.price : (struct.current_HH ? struct.current_HH.price : struct.swingHigh);
-      const searchStart = struct.prev_HH ? struct.prev_HH.index : 0;
+      const searchStartTimestamp = struct.prev_HH ? struct.prev_HH.time : 0;
 
       // Find the candle index where breakout occurred (closing above breakout level)
       let breakoutIdx = -1;
-      for (let i = searchStart; i <= lastIdx; i++) {
-        if (this.candles1m[i].close > breakoutLevel) {
+      for (let i = 0; i <= lastIdx; i++) {
+        if (this.candles1m[i].time >= searchStartTimestamp && this.candles1m[i].close > breakoutLevel) {
           breakoutIdx = i;
           break;
         }
@@ -3278,12 +3397,12 @@ class TradingEngine {
 
       // The broken level is the previous Lower Low (prev_LL) in a confirmed downtrend
       const breakoutLevel = struct.prev_LL ? struct.prev_LL.price : (struct.current_LL ? struct.current_LL.price : struct.swingLow);
-      const searchStart = struct.prev_LL ? struct.prev_LL.index : 0;
+      const searchStartTimestamp = struct.prev_LL ? struct.prev_LL.time : 0;
 
       // Find the candle index where breakout occurred (closing below breakout level)
       let breakoutIdx = -1;
-      for (let i = searchStart; i <= lastIdx; i++) {
-        if (this.candles1m[i].close < breakoutLevel) {
+      for (let i = 0; i <= lastIdx; i++) {
+        if (this.candles1m[i].time >= searchStartTimestamp && this.candles1m[i].close < breakoutLevel) {
           breakoutIdx = i;
           break;
         }

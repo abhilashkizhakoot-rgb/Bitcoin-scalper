@@ -157,6 +157,17 @@ class TradingEngine {
     const longTermAtr = sumAtrLong / lookback;
     const atrExpansionRatio = currentAtr / (longTermAtr || 1);
 
+    // Retrieve live high-frequency order book and order flow stats
+    const takerBuyRatio = this.orderFlowStats ? this.orderFlowStats.takerBuyRatio : 0.5;
+    const obImbalance = this.orderBookStats ? this.orderBookStats.imbalanceRatio : 0.0;
+
+    // Retrieve news sentiment catalysts
+    const headlines = dbManager.getHeadlines().slice(0, 15);
+    const avgSentiment = this.calculateAverageSentiment(headlines);
+
+    // Retrieve active market structure confirmation
+    const struct = this.getTrendMarketStructure();
+
     if (isTrendRegime) {
       activeModel = "Trend-Following CatBoost Model";
       
@@ -164,7 +175,7 @@ class TradingEngine {
       const trendBias = isBullTrend1m ? 0.40 : -0.40;
       const adxTrendFactor = trendBias * adxScale;
 
-      // Feature 2: Momentum.
+      // Feature 2: Momentum (RSI).
       let momentumFactor = rsiFactor;
       if (isBullTrend1m && rsiFactor < 0) {
         momentumFactor *= 0.5; // Dampen negative RSI in an uptrend (buying dips)
@@ -175,23 +186,52 @@ class TradingEngine {
       // Feature 3: Volume confirmation of breakout
       const volConfirmation = isBullTrend1m ? (volScale - 1.0) * 0.15 : (1.0 - volScale) * 0.15;
 
-      // Feature 4: ATR Volatility Expansion Breakout (Replacing Sentiment)
+      // Feature 4: ATR Volatility Expansion Breakout
       // Confirms breakout energy in the direction of the trend
       const atrBreakoutFactor = (isBullTrend1m ? 1 : -1) * Math.max(0, atrExpansionRatio - 0.8) * 0.25;
 
-      // Combine factors with optimized CatBoost tree-weight mappings (sentiment replaced by emaSpreadFactor + atrBreakoutFactor)
-      score = adxTrendFactor + (momentumFactor * 0.35) + volConfirmation + emaSpreadFactor + atrBreakoutFactor;
+      // --- HIGH-DIMENSIONAL FEATURES FOR CATBOOST ---
+      
+      // Feature 5: Real-time Order Flow Taker Buy Ratio (ranges from -0.75 to +0.75)
+      const orderFlowFactor = (takerBuyRatio - 0.5) * 1.5;
+
+      // Feature 6: Real-time Order Book Imbalance Ratio (ranges from -0.6 to +0.6)
+      const orderBookFactor = obImbalance * 0.6;
+
+      // Feature 7: Real-time News Sentiment (ranges from -0.5 to +0.5)
+      const sentimentFactor = avgSentiment * 0.5;
+
+      // Feature 8: Real-time Market Structure Alignment
+      let marketStructureFactor = 0.0;
+      if (struct.isLongStructureConfirmed) {
+        marketStructureFactor = 0.40;
+      } else if (struct.isShortStructureConfirmed) {
+        marketStructureFactor = -0.40;
+      }
+
+      // Combine factors with optimized CatBoost tree-weight mappings
+      score = (
+        adxTrendFactor + 
+        (momentumFactor * 0.35) + 
+        volConfirmation + 
+        emaSpreadFactor + 
+        atrBreakoutFactor +
+        (orderFlowFactor * 0.50) +       // Real-time order flow pressure weight
+        (orderBookFactor * 0.35) +       // Real-time order book imbalance weight
+        (sentimentFactor * 0.30) +       // News sentiment weight
+        (marketStructureFactor * 0.45)   // Multi-timeframe structure alignment weight
+      );
 
       // Extra optimization adjustments for extreme regimes
       if (regime === MarketRegime.HIGH_VOLATILITY) {
         // High Volatility mode requires higher momentum sensitivity
-        score *= 1.25; 
+        score *= 1.30; 
       } else if (regime === MarketRegime.STRONG_UPTREND) {
         // Upward structural bias
-        score += 0.08;
+        score += 0.10;
       } else if (regime === MarketRegime.STRONG_DOWNTREND) {
         // Downward structural bias
-        score -= 0.08;
+        score -= 0.10;
       }
 
       // Pass through sigmoid function to yield accurate probability
@@ -236,7 +276,44 @@ class TradingEngine {
       // (as EMA 9 deviates from EMA 21, mean-reverting pull back to middle increases)
       const emaOverstretchFactor = -emaSpreadFactor * 0.5;
 
-      // Feature 6: ATR Volatility Contraction / Breakout Protection Scale
+      // --- NEW HIGH-DIMENSIONAL REAL-TIME VARIABLES FOR MEAN-REVERSION ---
+
+      // Feature 6: Order Flow Exhaustion/Absorption Alignment (ranges from -0.4 to +0.4)
+      // Positive when order flow supports the direction of mean-reversion
+      let ofReversionFactor = 0.0;
+      if (bbFactor > 0 && takerBuyRatio > 0.52) {
+        // Near support (bbFactor > 0), buying absorption/volume helps trigger the bounce
+        ofReversionFactor = (takerBuyRatio - 0.5) * 0.8;
+      } else if (bbFactor < 0 && takerBuyRatio < 0.48) {
+        // Near resistance (bbFactor < 0), selling absorption helps trigger the drop
+        ofReversionFactor = (takerBuyRatio - 0.5) * 0.8; // negative factor, aligns with negative bbFactor
+      }
+
+      // Feature 7: Order Book Bid/Ask Imbalance (ranges from -0.25 to +0.25)
+      // High bids at support or high asks at resistance boosts the reversal probability
+      let obReversionFactor = 0.0;
+      if (bbFactor > 0 && obImbalance > 0.05) {
+        obReversionFactor = obImbalance * 0.25;
+      } else if (bbFactor < 0 && obImbalance < -0.05) {
+        obReversionFactor = obImbalance * 0.25; // negative factor, aligns with negative bbFactor
+      }
+
+      // Feature 8: Market Structure Breakout Avoidance Block
+      // In range bound mode, if an actual market structure breakout is already confirmed, we scale down counter-trend probability aggressively to avoid fighting a new trend
+      let rangeBreakoutDampener = 1.0;
+      if (bbFactor > 0 && struct.isShortStructureConfirmed) {
+        // Confirmed bearish breakout while we want to buy support -> reduce confidence
+        rangeBreakoutDampener = 0.45;
+      } else if (bbFactor < 0 && struct.isLongStructureConfirmed) {
+        // Confirmed bullish breakout while we want to short resistance -> reduce confidence
+        rangeBreakoutDampener = 0.45;
+      }
+
+      // Feature 9: News Sentiment Catalyst Influence (ranges from -0.15 to +0.15)
+      // Positive news sentiment tilts range play upwards, negative sentiment tilts it downwards
+      const sentimentImpact = avgSentiment * 0.15;
+
+      // Feature 10: ATR Volatility Contraction / Breakout Protection Scale
       // In a mean-reverting environment, we scale down probability aggressively if volatility is expanding (breakout risk)
       let reversionConfidenceScale = 1.0;
       if (atrExpansionRatio > 1.25) {
@@ -258,8 +335,11 @@ class TradingEngine {
         rsiExhaustionAccent +
         volumeExhaustionFactor +
         vwapDeviationFactor +
-        emaOverstretchFactor
-      ) * reversionConfidenceScale;
+        emaOverstretchFactor +
+        ofReversionFactor +               // supportive absorption orderflow
+        obReversionFactor +               // orderbook book wall pressure
+        sentimentImpact                   // sentiment catalyst tilt
+      ) * reversionConfidenceScale * rangeBreakoutDampener;
 
       if (regime === MarketRegime.LOW_VOLATILITY) {
         // Sideways low volatility dampens any strong probability towards 0.5 (noise reduction)

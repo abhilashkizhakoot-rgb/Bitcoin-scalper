@@ -33,6 +33,13 @@ interface Checkpoint {
   description: string;
   priority: "CRITICAL" | "HIGH" | "MEDIUM";
   softened?: boolean;
+  ema_check_active?: boolean;
+  ema_pair_evaluated?: string;
+  sub_conditions?: {
+    name: string;
+    status: "PASS" | "FAIL" | "SKIP";
+    reason: string;
+  }[];
 }
 
 interface CheckpointsPageProps {
@@ -672,6 +679,91 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
               })}
             </div>
           </div>
+
+          {/* Market Structure Gating Detailed Radar */}
+          {(() => {
+            const msCond = conditions.find(c => c.name === "Market Structure Confirmation");
+            if (!msCond) return null;
+
+            return (
+              <div className="bg-white border border-slate-200/85 rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse" />
+                    <h3 className="font-sans font-bold text-xs text-slate-700 uppercase tracking-wider font-mono">
+                      Market Structure Gating Detailed Radar
+                    </h3>
+                  </div>
+                  {msCond.ema_pair_evaluated && (
+                    <span className="text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-150 px-2 py-0.5 rounded-md">
+                      EMA Evaluation Pair: {msCond.ema_pair_evaluated}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-3 flex flex-col justify-between">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase leading-none block mb-1">EMA Retracement Scanning</span>
+                    <div className="flex items-center gap-1.5 mt-1.5">
+                      <span className={`w-2 h-2 rounded-full ${msCond.ema_check_active ? "bg-emerald-500" : "bg-slate-300"}`} />
+                      <span className="text-xs font-sans font-bold text-slate-700">
+                        {msCond.ema_check_active ? "Active & Scanning" : "Inactive / Bypassed"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-3 flex flex-col justify-between">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase leading-none block mb-1">Target Retrace Level</span>
+                    <p className="text-xs font-sans font-bold text-slate-700 truncate mt-1">
+                      {msCond.ema_pair_evaluated ? `Dynamic ${msCond.ema_pair_evaluated} Band` : "N/A (Breakout Setup Active)"}
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-3 flex flex-col justify-between">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase leading-none block mb-1">Gate Status</span>
+                    <div className="mt-1">
+                      <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded-md ${msCond.met ? "text-emerald-700 bg-emerald-50 border border-emerald-100" : "text-rose-700 bg-rose-50 border border-rose-100"}`}>
+                        {msCond.met ? "GATE CONFIRMED" : "GATE LOCK / SCANNING"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sub-Conditions Timeline */}
+                {msCond.sub_conditions && msCond.sub_conditions.length > 0 ? (
+                  <div className="space-y-2 pt-1">
+                    <h4 className="text-[10px] font-sans font-bold text-slate-500 uppercase tracking-wider font-mono">
+                      Sub-Condition Evaluation Logs (Real-Time)
+                    </h4>
+                    <div className="border border-slate-100 rounded-xl divide-y divide-slate-100 overflow-hidden bg-slate-50/20">
+                      {msCond.sub_conditions.map((sub, sIdx) => {
+                        const statusColors = {
+                          PASS: "bg-emerald-50/80 text-emerald-700 border-emerald-100/50",
+                          FAIL: "bg-rose-50/80 text-rose-700 border-rose-100/50",
+                          SKIP: "bg-slate-100/85 text-slate-500 border-slate-200"
+                        };
+                        return (
+                          <div key={sIdx} className="p-3 flex flex-col sm:flex-row sm:items-start gap-2 justify-between">
+                            <div className="space-y-1">
+                              <span className="text-xs font-sans font-bold text-slate-700 block">{sub.name}</span>
+                              <p className="text-[11px] text-slate-500 leading-normal font-sans">{sub.reason}</p>
+                            </div>
+                            <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-md border text-center shrink-0 self-start sm:self-center ${statusColors[sub.status] || "bg-slate-100"}`}>
+                              {sub.status}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 border border-dashed border-slate-200 rounded-xl bg-slate-50/40 text-center text-[11px] text-slate-500">
+                    Awaiting active trend signal scanning to populate real-time sub-condition parameters.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 

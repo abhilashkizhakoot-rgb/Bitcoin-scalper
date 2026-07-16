@@ -343,3 +343,9 @@ export interface ApiCallLog {
   latency_ms: number;
 }
 
+export interface MarketStructureSubCondition {
+  name: string;
+  status: "PASS" | "FAIL" | "SKIP";
+  reason: string;
+}
+

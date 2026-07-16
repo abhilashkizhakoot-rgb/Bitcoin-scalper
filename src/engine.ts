@@ -22,6 +22,30 @@ import { CrossSourceSentimentAggregator } from "./sentimentEngine.js";
 import { fetchLiveRSSHeadlines } from "./rss.js";
 import { placeDeltaMarketOrder, getDeltaWalletBalance } from "./delta_client.js";
 
+export interface MarketStructureSubCondition {
+  name: string;
+  status: "PASS" | "FAIL" | "SKIP";
+  reason: string;
+}
+
+export interface MarketStructureConfirmationResult {
+  confirmed: boolean;
+  message: string;
+  swingHigh: number;
+  swingLow: number;
+  ema_check_active?: boolean;
+  ema_pair_evaluated?: string;
+  sub_conditions?: MarketStructureSubCondition[];
+}
+
+export interface TrendBreakoutSetupResult {
+  confirmed: boolean;
+  message: string;
+  ema_check_active?: boolean;
+  ema_pair_evaluated?: string;
+  sub_conditions?: MarketStructureSubCondition[];
+}
+
 class TradingEngine {
   private candles1m: Candlestick[] = [];
   private currentPrice: number = 101500;
@@ -1103,7 +1127,18 @@ class TradingEngine {
       }
     }
 
-    const conditions: { name: string; met: boolean; current_value: any; required: string; description: string; priority: "CRITICAL" | "HIGH" | "MEDIUM"; softened?: boolean }[] = [];
+    const conditions: {
+      name: string;
+      met: boolean;
+      current_value: any;
+      required: string;
+      description: string;
+      priority: "CRITICAL" | "HIGH" | "MEDIUM";
+      softened?: boolean;
+      ema_check_active?: boolean;
+      ema_pair_evaluated?: string;
+      sub_conditions?: MarketStructureSubCondition[];
+    }[] = [];
 
     // C1: CatBoost AI Prediction (threshold is 0.50 leaning direction in RANGE_BOUND, 0.70 for pullback, 0.75 in trending breakouts)
     const pbTrendStatus = this.detectPullbackTrendlineBreak();
@@ -1426,6 +1461,9 @@ class TradingEngine {
       required: "Pullback HL (LONG) / LH (SHORT), Breakout Retest, or Range Reversal based on Regime",
       description: "Applies regime-specific market structure entry gates: Trending pulls, Range reversals, High-Vol confirmation, or Low-Vol avoidance.",
       priority: "CRITICAL",
+      ema_check_active: structCheck.ema_check_active,
+      ema_pair_evaluated: structCheck.ema_pair_evaluated,
+      sub_conditions: structCheck.sub_conditions,
     });
 
     // C16: Wedge Pattern Filter (Avoid entry during rising/falling wedges unless confirmed breakout)
@@ -3000,7 +3038,7 @@ class TradingEngine {
     ema50Val: number,
     ema100Val: number,
     struct: any
-  ): { confirmed: boolean; message: string } {
+  ): TrendBreakoutSetupResult {
     const config = dbManager.getConfig();
     const ms = config.market_structure || {
       min_breakout_body_ratio: 0.22,
@@ -3134,6 +3172,45 @@ class TradingEngine {
 
     const ema200Val = ema200ValComputed;
 
+    const condDict: Record<string, { status: "PASS" | "FAIL" | "SKIP"; reason: string }> = {
+      "Multi-Timeframe Trend Alignment": { status: "SKIP", reason: "Not evaluated." },
+      "EMA Structure Alignment": { status: "SKIP", reason: "Not evaluated." },
+      "Breakout Level Confirmation": { status: "SKIP", reason: "Not evaluated." },
+      "Breakout Candle Body Ratio": { status: "SKIP", reason: "Not evaluated." },
+      "Immediate Breakout Entry Allowance": { status: "SKIP", reason: "Not evaluated." },
+      "Dynamic Invalidation Floor/Ceiling": { status: "SKIP", reason: "Not evaluated." },
+      "Chasing Lookback limit": { status: "SKIP", reason: "Not evaluated." },
+      "Volume-Validated Pullback": { status: "SKIP", reason: "Not evaluated." },
+      "Pullback & Retest Setup (Setup 1)": { status: "SKIP", reason: "Not evaluated." },
+      "EMA Retracement / Pushback Setup (Setup 2)": { status: "SKIP", reason: "Not evaluated." },
+    };
+
+    const getReturnObj = (confirmed: boolean, message: string) => {
+      const sub_conditions = Object.entries(condDict).map(([name, val]) => ({
+        name,
+        status: val.status,
+        reason: val.reason,
+      }));
+
+      this.log(`[Checkpoint Radar Debug - Market Confirmation]`);
+      this.log(`  Direction: ${direction} | Regime: ${this.currentRegime} | ADX: ${adxValue.toFixed(1)} (${adxLabel})`);
+      this.log(`  Evaluating Retracement on EMA Pair: ${emaZoneLabel} (Pullback Depth Class: ${classifiedDepth}, Points: ${depthPoints})`);
+      this.log(`  Conditions Evaluation:`);
+      for (const cond of sub_conditions) {
+        const icon = cond.status === "PASS" ? "✅" : cond.status === "FAIL" ? "❌" : "➖";
+        this.log(`    ${icon} ${cond.name}: [${cond.status}] - ${cond.reason}`);
+      }
+      this.log(`  Final Market Structure Gate Confirmation Result: ${confirmed ? "PASSED" : "BLOCKED"} (${message})`);
+
+      return {
+        confirmed,
+        message,
+        ema_check_active: true,
+        ema_pair_evaluated: emaZoneLabel,
+        sub_conditions,
+      };
+    };
+
     // --- FEATURE 3: Multi-Timeframe (5m) Trend Structure Alignment ---
     const candles5m = this.aggregateCandles(this.candles1m, 5);
     const closes5m = candles5m.map(c => c.close);
@@ -3148,19 +3225,31 @@ class TradingEngine {
         const isMtfLong = ema5_5m_val > ema15_5m_val;
         const hasHighHFPressure = adxValue >= (ms.hf_momentum_adx_threshold + 2) || (direction === "LONG" ? (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long) : (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short));
         if (direction === "LONG" && !isMtfLong && !hasHighHFPressure) {
-          return {
-            confirmed: false,
-            message: `Conflicting Trend: Multi-timeframe (5m) trend is bearish (5m EMA 5: $${ema5_5m_val.toFixed(2)} <= EMA 15: $${ema15_5m_val.toFixed(2)}). LONG entry blocked.`
-          };
+          const mtfMsg = `Conflicting Trend: Multi-timeframe (5m) trend is bearish (5m EMA 5: $${ema5_5m_val.toFixed(2)} <= EMA 15: $${ema15_5m_val.toFixed(2)}).`;
+          condDict["Multi-Timeframe Trend Alignment"] = { status: "FAIL", reason: mtfMsg };
+          return getReturnObj(
+            false,
+            `${mtfMsg} LONG entry blocked.`
+          );
         }
         if (direction === "SHORT" && isMtfLong && !hasHighHFPressure) {
-          return {
-            confirmed: false,
-            message: `Conflicting Trend: Multi-timeframe (5m) trend is bullish (5m EMA 5: $${ema5_5m_val.toFixed(2)} >= EMA 15: $${ema15_5m_val.toFixed(2)}). SHORT entry blocked.`
-          };
+          const mtfMsg = `Conflicting Trend: Multi-timeframe (5m) trend is bullish (5m EMA 5: $${ema5_5m_val.toFixed(2)} >= EMA 15: $${ema15_5m_val.toFixed(2)}).`;
+          condDict["Multi-Timeframe Trend Alignment"] = { status: "FAIL", reason: mtfMsg };
+          return getReturnObj(
+            false,
+            `${mtfMsg} SHORT entry blocked.`
+          );
         }
         mtfMessage = hasHighHFPressure ? " | MTF Bypassed (High HF Pressure)" : " | MTF Aligned (5m EMA5 > EMA15)";
+        condDict["Multi-Timeframe Trend Alignment"] = {
+          status: "PASS",
+          reason: hasHighHFPressure ? "Bypassed due to high HF pressure" : `5m EMA5 ($${ema5_5m_val.toFixed(2)}) ${isMtfLong ? ">" : "<"} EMA15 ($${ema15_5m_val.toFixed(2)})`
+        };
+      } else {
+        condDict["Multi-Timeframe Trend Alignment"] = { status: "SKIP", reason: "Incomplete 5m EMA calculation indicators." };
       }
+    } else {
+      condDict["Multi-Timeframe Trend Alignment"] = { status: "SKIP", reason: "Not enough 5m candles available (< 10)." };
     }
 
     if (direction === "LONG") {
@@ -3168,13 +3257,16 @@ class TradingEngine {
         ? (ema20Val > ema50Val)
         : (ema20Val > ema50Val && currentPrice > ema100Val);
       if (!isEmaAlignedLong) {
-        return {
-          confirmed: false,
-          message: adxValue >= ms.weak_trend_adx_threshold
-            ? `Blocked: Fast Bullish EMA structure not aligned (Requires EMA 20 > EMA 50, ADX is strong: ${adxValue.toFixed(1)}).`
-            : `Blocked: Full Bullish EMA structure not aligned (Requires EMA 20 > EMA 50 & Price > EMA 100 on moderate ADX: ${adxValue.toFixed(1)}).`
-        };
+        const alignMsg = adxValue >= ms.weak_trend_adx_threshold
+          ? `Blocked: Fast Bullish EMA structure not aligned (Requires EMA 20 > EMA 50, ADX is strong: ${adxValue.toFixed(1)}).`
+          : `Blocked: Full Bullish EMA structure not aligned (Requires EMA 20 > EMA 50 & Price > EMA 100 on moderate ADX: ${adxValue.toFixed(1)}).`;
+        condDict["EMA Structure Alignment"] = { status: "FAIL", reason: alignMsg };
+        return getReturnObj(false, alignMsg);
       }
+      condDict["EMA Structure Alignment"] = {
+        status: "PASS",
+        reason: adxValue >= ms.weak_trend_adx_threshold ? "EMA 20 > EMA 50 aligned" : "EMA 20 > EMA 50 & Price > EMA 100 aligned"
+      };
 
       // Symmetrically, the broken level is the previous Higher High (prev_HH) in a confirmed uptrend
       const breakoutLevel = struct.prev_HH ? struct.prev_HH.price : (struct.current_HH ? struct.current_HH.price : struct.swingHigh);
@@ -3190,11 +3282,11 @@ class TradingEngine {
       }
 
       if (breakoutIdx === -1) {
-        return {
-          confirmed: false,
-          message: `Waiting for a confirmed Higher High breakout of $${breakoutLevel.toFixed(2)} to initiate the pullback/retest or EMA pushback setup sequence.`
-        };
+        const breakoutMsg = `Waiting for a confirmed Higher High breakout of $${breakoutLevel.toFixed(2)} to initiate the pullback/retest or EMA pushback setup sequence.`;
+        condDict["Breakout Level Confirmation"] = { status: "FAIL", reason: `No HH breakout closed above $${breakoutLevel.toFixed(2)}.` };
+        return getReturnObj(false, breakoutMsg);
       }
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Breakout of $${breakoutLevel.toFixed(2)} confirmed at candle index ${breakoutIdx}.` };
 
       // --- FEATURE 2: Candle Body Close Confirmation for Breakout ---
       const boCandle = this.candles1m[breakoutIdx];
@@ -3202,26 +3294,29 @@ class TradingEngine {
       const boBody = Math.abs(boCandle.close - boCandle.open);
       const boBodyRatio = boRange > 0 ? boBody / boRange : 0;
       if (boBodyRatio < ms.min_breakout_body_ratio) {
-        return {
-          confirmed: false,
-          message: `Blocked: Weak breakout candle body at $${breakoutLevel.toFixed(2)} (Body is only ${(boBodyRatio * 100).toFixed(0)}% of total range). Likely false breakout/wick sweep.`
-        };
+        const bodyMsg = `Blocked: Weak breakout candle body at $${breakoutLevel.toFixed(2)} (Body is only ${(boBodyRatio * 100).toFixed(0)}% of total range). Likely false breakout/wick sweep.`;
+        condDict["Breakout Candle Body Ratio"] = { status: "FAIL", reason: `Body ratio ${(boBodyRatio * 100).toFixed(0)}% < ${(ms.min_breakout_body_ratio * 100).toFixed(0)}%` };
+        return getReturnObj(false, bodyMsg);
       }
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: `Body ratio ${(boBodyRatio * 100).toFixed(0)}% >= ${(ms.min_breakout_body_ratio * 100).toFixed(0)}%` };
 
       if (breakoutIdx === lastIdx) {
         const hasHighHFPressure = ms.allow_immediate_breakout && (adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long));
         if (hasHighHFPressure) {
-          return {
-            confirmed: true,
-            message: `[HF Scalp Boost] Immediate Breakout Entry Confirmed! Price ($${currentPrice.toFixed(2)}) broke out above $${breakoutLevel.toFixed(2)} under high frequency momentum (ADX: ${adxValue.toFixed(1)}) and order flow pressure.`
-          };
+          condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Immediate breakout entry allowed under high-frequency pressure." };
+          return getReturnObj(
+            true,
+            `[HF Scalp Boost] Immediate Breakout Entry Confirmed! Price ($${currentPrice.toFixed(2)}) broke out above $${breakoutLevel.toFixed(2)} under high frequency momentum (ADX: ${adxValue.toFixed(1)}) and order flow pressure.`
+          );
         } else {
-          return {
-            confirmed: false,
-            message: `Blocked: Immediate LONG entry on the Higher High breakout candle ($${breakoutLevel.toFixed(2)}) is forbidden. Waiting for pullback/retest or EMA pushback.`
-          };
+          condDict["Immediate Breakout Entry Allowance"] = { status: "FAIL", reason: "Immediate entry forbidden on breakout candle." };
+          return getReturnObj(
+            false,
+            `Blocked: Immediate LONG entry on the Higher High breakout candle ($${breakoutLevel.toFixed(2)}) is forbidden. Waiting for pullback/retest or EMA pushback.`
+          );
         }
       }
+      condDict["Immediate Breakout Entry Allowance"] = { status: "SKIP", reason: "Evaluated pullback (not currently on breakout candle)." };
 
       const postBreakoutCandles = this.candles1m.slice(breakoutIdx + 1);
 
@@ -3230,11 +3325,11 @@ class TradingEngine {
       const reclaimThreshold = Math.max(breakoutLevel - invalidationMultiplier * currentAtr, structuralHL - 0.1 * currentAtr);
       const hasReclaimed = postBreakoutCandles.some(c => c.close < reclaimThreshold);
       if (hasReclaimed || currentPrice < reclaimThreshold) {
-        return {
-          confirmed: false,
-          message: `Blocked: Higher High breakout setup was invalidated because price strongly reclaimed/broke below the structural/reclaim floor level of $${reclaimThreshold.toFixed(2)} (Breakout Level: $${breakoutLevel.toFixed(2)}).`
-        };
+        const reclaimMsg = `Blocked: Higher High breakout setup was invalidated because price strongly reclaimed/broke below the structural/reclaim floor level of $${reclaimThreshold.toFixed(2)} (Breakout Level: $${breakoutLevel.toFixed(2)}).`;
+        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "FAIL", reason: `Price broken below reclaim level $${reclaimThreshold.toFixed(2)}` };
+        return getReturnObj(false, reclaimMsg);
       }
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `Price stayed above reclaim level $${reclaimThreshold.toFixed(2)}` };
 
       // Chasing check: too many candles elapsed without entry (adaptive lookback based on trend strength)
       let maxPostBreakoutCandles = 30;
@@ -3244,14 +3339,13 @@ class TradingEngine {
         maxPostBreakoutCandles = 45;
       }
       if (postBreakoutCandles.length > maxPostBreakoutCandles) {
-        return {
-          confirmed: false,
-          message: `Blocked: Chasing price after an extended upward move (more than ${maxPostBreakoutCandles} candles since HH breakout, ADX: ${adxValue.toFixed(1)} [${adxLabel}]) is forbidden.`
-        };
+        const chasingMsg = `Blocked: Chasing price after an extended upward move (more than ${maxPostBreakoutCandles} candles since HH breakout, ADX: ${adxValue.toFixed(1)} [${adxLabel}]) is forbidden.`;
+        condDict["Chasing Lookback limit"] = { status: "FAIL", reason: `Elapsed ${postBreakoutCandles.length} candles exceeds limit ${maxPostBreakoutCandles}` };
+        return getReturnObj(false, chasingMsg);
       }
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: `Elapsed ${postBreakoutCandles.length} candles <= limit ${maxPostBreakoutCandles}` };
 
       // --- FEATURE 1: Volume-Validated Pullback & Retest ---
-      // Dynamically calculate average volume of the last 20 candles to avoid rigid single-candle anomalies
       const volumes = this.candles1m.map(c => c.volume);
       let avgVol20 = 1.0;
       if (volumes.length >= 20) {
@@ -3262,11 +3356,16 @@ class TradingEngine {
       let isVolumeHealthyForPullback = true;
       if (postBreakoutCandles.length > 0) {
         const avgPullbackVol = postBreakoutCandles.reduce((sum, c) => sum + c.volume, 0) / postBreakoutCandles.length;
-        // Allow higher volume on pullback when breakout volume itself is highly compressed/low
         const volumeThreshold = Math.max(boCandle.volume * 1.8, avgVol20 * 2.2);
         if (avgPullbackVol > volumeThreshold) {
           isVolumeHealthyForPullback = false;
         }
+      }
+
+      if (!isVolumeHealthyForPullback) {
+        condDict["Volume-Validated Pullback"] = { status: "FAIL", reason: "Pullback volume exceeds healthy distribution thresholds." };
+      } else {
+        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Pullback volume is within safe thresholds." };
       }
 
       // Objective Candle Rejection Evaluation for LONG (Support)
@@ -3342,10 +3441,16 @@ class TradingEngine {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
             pullbackRetestMessage = `Pullback & Retest setup confirmed via [${longRejectionType}]${mtfMessage}: Price pulled back to broken HH level ($${breakoutLevel.toFixed(2)}) on declining volume and rejected it as support with bullish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], Retrace limit: +${effectivePullbackMult.toFixed(1)} * ATR).`;
+            condDict["Pullback & Retest Setup (Setup 1)"] = { status: "PASS", reason: pullbackRetestMessage };
           } else {
             pullbackRetestMessage = "Blocked Retest: Pullback volume is abnormally high, indicating excessive distribution/selling pressure.";
+            condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: pullbackRetestMessage };
           }
+        } else {
+          condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: `Waiting for bullish confirmation candle pattern at broken HH support level $${breakoutLevel.toFixed(2)}.` };
         }
+      } else {
+        condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: `Skipped: Price has not yet pulled back to retest HH level of $${pullbackLimit.toFixed(2)}.` };
       }
 
       // Setup 2: Adaptive EMA Pushback Zone
@@ -3363,23 +3468,29 @@ class TradingEngine {
         if (isVolumeHealthyForPullback) {
           const matchedEmaVal = touchesFirstEma ? firstEmaVal : secondEmaVal;
           emaPushbackMessage = `${emaZoneLabel} Pushback confirmed via [${longRejectionType}]${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected dynamic EMA support at $${matchedEmaVal.toFixed(2)} with bullish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "PASS", reason: emaPushbackMessage };
         } else {
           emaPushbackMessage = "Blocked EMA Pushback: Abnormally high volume pullback during EMA retracement suggests a trend failure.";
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: emaPushbackMessage };
+        }
+      } else {
+        if (hasRetracedToEMA) {
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle.` };
+        } else {
+          const thresholdVal = Math.max(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: `Skipped: Price has not yet retraced into dynamic EMA threshold level of $${thresholdVal.toFixed(2)}.` };
         }
       }
 
       if (isPullbackRetestValid && !pullbackRetestMessage.startsWith("Blocked")) {
-        return { confirmed: true, message: pullbackRetestMessage };
+        return getReturnObj(true, pullbackRetestMessage);
       } else if (isEmaPushbackValid && !emaPushbackMessage.startsWith("Blocked")) {
-        return { confirmed: true, message: emaPushbackMessage };
+        return getReturnObj(true, emaPushbackMessage);
       } else {
         const failureReason = !isVolumeHealthyForPullback
           ? "Pullback volume is abnormally high (distribution risk); waiting for volume to dry up before confirming a safe entry."
           : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to ${emaZoneLabel} pushback setup (Adaptive Expected Depth: ${classifiedDepth}, ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
-        return {
-          confirmed: false,
-          message: failureReason
-        };
+        return getReturnObj(false, failureReason);
       }
     } else {
       // SHORT
@@ -3387,13 +3498,16 @@ class TradingEngine {
         ? (ema20Val < ema50Val)
         : (ema20Val < ema50Val && currentPrice < ema100Val);
       if (!isEmaAlignedShort) {
-        return {
-          confirmed: false,
-          message: adxValue >= ms.weak_trend_adx_threshold
-            ? `Blocked: Fast Bearish EMA structure not aligned (Requires EMA 20 < EMA 50, ADX is strong: ${adxValue.toFixed(1)}).`
-            : `Blocked: Full Bearish EMA structure not aligned (Requires EMA 20 < EMA 50 & Price < EMA 100 on moderate ADX: ${adxValue.toFixed(1)}).`
-        };
+        const alignMsg = adxValue >= ms.weak_trend_adx_threshold
+          ? `Blocked: Fast Bearish EMA structure not aligned (Requires EMA 20 < EMA 50, ADX is strong: ${adxValue.toFixed(1)}).`
+          : `Blocked: Full Bearish EMA structure not aligned (Requires EMA 20 < EMA 50 & Price < EMA 100 on moderate ADX: ${adxValue.toFixed(1)}).`;
+        condDict["EMA Structure Alignment"] = { status: "FAIL", reason: alignMsg };
+        return getReturnObj(false, alignMsg);
       }
+      condDict["EMA Structure Alignment"] = {
+        status: "PASS",
+        reason: adxValue >= ms.weak_trend_adx_threshold ? "EMA 20 < EMA 50 aligned" : "EMA 20 < EMA 50 & Price < EMA 100 aligned"
+      };
 
       // The broken level is the previous Lower Low (prev_LL) in a confirmed downtrend
       const breakoutLevel = struct.prev_LL ? struct.prev_LL.price : (struct.current_LL ? struct.current_LL.price : struct.swingLow);
@@ -3409,11 +3523,11 @@ class TradingEngine {
       }
 
       if (breakoutIdx === -1) {
-        return {
-          confirmed: false,
-          message: `Waiting for a confirmed Lower Low breakout of $${breakoutLevel.toFixed(2)} to initiate the pullback/retest or EMA pushback setup sequence.`
-        };
+        const breakoutMsg = `Waiting for a confirmed Lower Low breakout of $${breakoutLevel.toFixed(2)} to initiate the pullback/retest or EMA pushback setup sequence.`;
+        condDict["Breakout Level Confirmation"] = { status: "FAIL", reason: `No LL breakout closed below $${breakoutLevel.toFixed(2)}.` };
+        return getReturnObj(false, breakoutMsg);
       }
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Breakout of $${breakoutLevel.toFixed(2)} confirmed at candle index ${breakoutIdx}.` };
 
       // --- FEATURE 2: Candle Body Close Confirmation for Breakout ---
       const boCandle = this.candles1m[breakoutIdx];
@@ -3421,26 +3535,29 @@ class TradingEngine {
       const boBody = Math.abs(boCandle.close - boCandle.open);
       const boBodyRatio = boRange > 0 ? boBody / boRange : 0;
       if (boBodyRatio < ms.min_breakout_body_ratio) {
-        return {
-          confirmed: false,
-          message: `Blocked: Weak breakout candle body at $${breakoutLevel.toFixed(2)} (Body is only ${(boBodyRatio * 100).toFixed(0)}% of total range). Likely false breakout/wick sweep.`
-        };
+        const bodyMsg = `Blocked: Weak breakout candle body at $${breakoutLevel.toFixed(2)} (Body is only ${(boBodyRatio * 100).toFixed(0)}% of total range). Likely false breakout/wick sweep.`;
+        condDict["Breakout Candle Body Ratio"] = { status: "FAIL", reason: `Body ratio ${(boBodyRatio * 100).toFixed(0)}% < ${(ms.min_breakout_body_ratio * 100).toFixed(0)}%` };
+        return getReturnObj(false, bodyMsg);
       }
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: `Body ratio ${(boBodyRatio * 100).toFixed(0)}% >= ${(ms.min_breakout_body_ratio * 100).toFixed(0)}%` };
 
       if (breakoutIdx === lastIdx) {
         const hasHighHFPressure = ms.allow_immediate_breakout && (adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short));
         if (hasHighHFPressure) {
-          return {
-            confirmed: true,
-            message: `[HF Scalp Boost] Immediate Breakdown Entry Confirmed! Price ($${currentPrice.toFixed(2)}) broke down below $${breakoutLevel.toFixed(2)} under high frequency momentum (ADX: ${adxValue.toFixed(1)}) and order flow pressure.`
-          };
+          condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Immediate breakout entry allowed under high-frequency pressure." };
+          return getReturnObj(
+            true,
+            `[HF Scalp Boost] Immediate Breakdown Entry Confirmed! Price ($${currentPrice.toFixed(2)}) broke down below $${breakoutLevel.toFixed(2)} under high frequency momentum (ADX: ${adxValue.toFixed(1)}) and order flow pressure.`
+          );
         } else {
-          return {
-            confirmed: false,
-            message: `Blocked: Immediate SHORT entry on the Lower Low breakout candle ($${breakoutLevel.toFixed(2)}) is forbidden. Waiting for pullback/retest or EMA pushback.`
-          };
+          condDict["Immediate Breakout Entry Allowance"] = { status: "FAIL", reason: "Immediate entry forbidden on breakout candle." };
+          return getReturnObj(
+            false,
+            `Blocked: Immediate SHORT entry on the Lower Low breakout candle ($${breakoutLevel.toFixed(2)}) is forbidden. Waiting for pullback/retest or EMA pushback.`
+          );
         }
       }
+      condDict["Immediate Breakout Entry Allowance"] = { status: "SKIP", reason: "Evaluated pullback (not currently on breakout candle)." };
 
       const postBreakoutCandles = this.candles1m.slice(breakoutIdx + 1);
 
@@ -3449,11 +3566,11 @@ class TradingEngine {
       const reclaimThreshold = Math.min(breakoutLevel + invalidationMultiplier * currentAtr, structuralLH + 0.1 * currentAtr);
       const hasReclaimed = postBreakoutCandles.some(c => c.close > reclaimThreshold);
       if (hasReclaimed || currentPrice > reclaimThreshold) {
-        return {
-          confirmed: false,
-          message: `Blocked: Lower Low breakout setup was invalidated because price strongly reclaimed/broke above the structural/reclaim floor level of $${reclaimThreshold.toFixed(2)} (Breakout Level: $${breakoutLevel.toFixed(2)}).`
-        };
+        const reclaimMsg = `Blocked: Lower Low breakout setup was invalidated because price strongly reclaimed/broke above the structural/reclaim floor level of $${reclaimThreshold.toFixed(2)} (Breakout Level: $${breakoutLevel.toFixed(2)}).`;
+        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "FAIL", reason: `Price broken above reclaim level $${reclaimThreshold.toFixed(2)}` };
+        return getReturnObj(false, reclaimMsg);
       }
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `Price stayed below reclaim level $${reclaimThreshold.toFixed(2)}` };
 
       // Chasing check: too many candles elapsed without entry (adaptive lookback based on trend strength)
       let maxPostBreakoutCandles = 30;
@@ -3463,14 +3580,13 @@ class TradingEngine {
         maxPostBreakoutCandles = 45;
       }
       if (postBreakoutCandles.length > maxPostBreakoutCandles) {
-        return {
-          confirmed: false,
-          message: `Blocked: Chasing price after an extended downward move (more than ${maxPostBreakoutCandles} candles since LL breakout, ADX: ${adxValue.toFixed(1)} [${adxLabel}]) is forbidden.`
-        };
+        const chasingMsg = `Blocked: Chasing price after an extended downward move (more than ${maxPostBreakoutCandles} candles since LL breakout, ADX: ${adxValue.toFixed(1)} [${adxLabel}]) is forbidden.`;
+        condDict["Chasing Lookback limit"] = { status: "FAIL", reason: `Elapsed ${postBreakoutCandles.length} candles exceeds limit ${maxPostBreakoutCandles}` };
+        return getReturnObj(false, chasingMsg);
       }
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: `Elapsed ${postBreakoutCandles.length} candles <= limit ${maxPostBreakoutCandles}` };
 
       // --- FEATURE 1: Volume-Validated Pullback & Retest ---
-      // Dynamically calculate average volume of the last 20 candles to avoid rigid single-candle anomalies
       const volumes = this.candles1m.map(c => c.volume);
       let avgVol20 = 1.0;
       if (volumes.length >= 20) {
@@ -3481,11 +3597,16 @@ class TradingEngine {
       let isVolumeHealthyForPullback = true;
       if (postBreakoutCandles.length > 0) {
         const avgPullbackVol = postBreakoutCandles.reduce((sum, c) => sum + c.volume, 0) / postBreakoutCandles.length;
-        // Allow higher volume on pullback when breakout volume itself is highly compressed/low
         const volumeThreshold = Math.max(boCandle.volume * 1.8, avgVol20 * 2.2);
         if (avgPullbackVol > volumeThreshold) {
           isVolumeHealthyForPullback = false;
         }
+      }
+
+      if (!isVolumeHealthyForPullback) {
+        condDict["Volume-Validated Pullback"] = { status: "FAIL", reason: "Pullback volume exceeds healthy distribution thresholds." };
+      } else {
+        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Pullback volume is within safe thresholds." };
       }
 
       // Objective Candle Rejection Evaluation for SHORT (Resistance)
@@ -3561,10 +3682,16 @@ class TradingEngine {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
             pullbackRetestMessage = `Pullback & Retest setup confirmed via [${shortRejectionType}]${mtfMessage}: Price pulled back to broken LL level ($${breakoutLevel.toFixed(2)}) on declining volume and rejected it as resistance with bearish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], Retrace limit: -${effectivePullbackMult.toFixed(1)} * ATR).`;
+            condDict["Pullback & Retest Setup (Setup 1)"] = { status: "PASS", reason: pullbackRetestMessage };
           } else {
             pullbackRetestMessage = "Blocked Retest: Pullback volume is abnormally high, indicating excessive accumulation/buying pressure.";
+            condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: pullbackRetestMessage };
           }
+        } else {
+          condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: `Waiting for bearish confirmation candle pattern at broken LL resistance level $${breakoutLevel.toFixed(2)}.` };
         }
+      } else {
+        condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: `Skipped: Price has not yet pulled back to retest LL level of $${pullbackLimit.toFixed(2)}.` };
       }
 
       // Setup 2: Adaptive EMA Pushback Zone
@@ -3582,28 +3709,34 @@ class TradingEngine {
         if (isVolumeHealthyForPullback) {
           const matchedEmaVal = touchesFirstEma ? firstEmaVal : secondEmaVal;
           emaPushbackMessage = `${emaZoneLabel} Pushback confirmed via [${shortRejectionType}]${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected dynamic EMA resistance at $${matchedEmaVal.toFixed(2)} with bearish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "PASS", reason: emaPushbackMessage };
         } else {
           emaPushbackMessage = "Blocked EMA Pushback: Abnormally high volume pullback during EMA retracement suggests a trend failure.";
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: emaPushbackMessage };
+        }
+      } else {
+        if (hasRetracedToEMA) {
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle.` };
+        } else {
+          const thresholdVal = Math.min(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: `Skipped: Price has not yet retraced into dynamic EMA threshold level of $${thresholdVal.toFixed(2)}.` };
         }
       }
 
       if (isPullbackRetestValid && !pullbackRetestMessage.startsWith("Blocked")) {
-        return { confirmed: true, message: pullbackRetestMessage };
+        return getReturnObj(true, pullbackRetestMessage);
       } else if (isEmaPushbackValid && !emaPushbackMessage.startsWith("Blocked")) {
-        return { confirmed: true, message: emaPushbackMessage };
+        return getReturnObj(true, emaPushbackMessage);
       } else {
         const failureReason = !isVolumeHealthyForPullback
           ? "Pullback volume is abnormally high (accumulation risk); waiting for volume to dry up before confirming a safe entry."
           : `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to ${emaZoneLabel} pushback setup (Adaptive Expected Depth: ${classifiedDepth}, ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
-        return {
-          confirmed: false,
-          message: failureReason
-        };
+        return getReturnObj(false, failureReason);
       }
     }
   }
 
-  private evaluateMarketStructureConfirmation(signalDirection: "LONG" | "SHORT" | "NEUTRAL"): { confirmed: boolean; message: string; swingHigh: number; swingLow: number } {
+  private evaluateMarketStructureConfirmation(signalDirection: "LONG" | "SHORT" | "NEUTRAL"): MarketStructureConfirmationResult {
     const rawResult = this.evaluateMarketStructureConfirmationRaw(signalDirection);
     return this.applyEma200ProximityFilter(signalDirection, this.currentPrice, rawResult);
   }
@@ -3611,8 +3744,8 @@ class TradingEngine {
   private applyEma200ProximityFilter(
     direction: "LONG" | "SHORT" | "NEUTRAL",
     currentPrice: number,
-    result: { confirmed: boolean; message: string; swingHigh: number; swingLow: number }
-  ): { confirmed: boolean; message: string; swingHigh: number; swingLow: number } {
+    result: MarketStructureConfirmationResult
+  ): MarketStructureConfirmationResult {
     if (!result.confirmed || direction === "NEUTRAL") {
       return result;
     }
@@ -3747,7 +3880,7 @@ class TradingEngine {
     return result;
   }
 
-  private evaluateMarketStructureConfirmationRaw(signalDirection: "LONG" | "SHORT" | "NEUTRAL"): { confirmed: boolean; message: string; swingHigh: number; swingLow: number } {
+  private evaluateMarketStructureConfirmationRaw(signalDirection: "LONG" | "SHORT" | "NEUTRAL"): MarketStructureConfirmationResult {
     const config = dbManager.getConfig();
     const struct = this.getTrendMarketStructure();
     const lastIdx = this.candles1m.length - 1;
@@ -3936,21 +4069,25 @@ class TradingEngine {
     const ema50Val = lastIdxVal >= 0 && ema50.length > lastIdxVal ? ema50[lastIdxVal] : currentPrice;
     const ema100Val = lastIdxVal >= 0 && ema100.length > lastIdxVal ? ema100[lastIdxVal] : currentPrice;
 
+    let trendResult: TrendBreakoutSetupResult | null = null;
     if (signalDirection === "LONG") {
-      const result = this.evaluateTrendBreakoutSetup("LONG", currentPrice, ema20Val, ema50Val, ema100Val, struct);
-      confirmed = result.confirmed;
-      message = result.message;
+      trendResult = this.evaluateTrendBreakoutSetup("LONG", currentPrice, ema20Val, ema50Val, ema100Val, struct);
+      confirmed = trendResult.confirmed;
+      message = trendResult.message;
     } else if (signalDirection === "SHORT") {
-      const result = this.evaluateTrendBreakoutSetup("SHORT", currentPrice, ema20Val, ema50Val, ema100Val, struct);
-      confirmed = result.confirmed;
-      message = result.message;
+      trendResult = this.evaluateTrendBreakoutSetup("SHORT", currentPrice, ema20Val, ema50Val, ema100Val, struct);
+      confirmed = trendResult.confirmed;
+      message = trendResult.message;
     }
 
     return {
       confirmed,
       message,
       swingHigh: struct.swingHigh,
-      swingLow: struct.swingLow
+      swingLow: struct.swingLow,
+      ema_check_active: trendResult ? trendResult.ema_check_active : undefined,
+      ema_pair_evaluated: trendResult ? trendResult.ema_pair_evaluated : undefined,
+      sub_conditions: trendResult ? trendResult.sub_conditions : undefined
     };
   }
 
@@ -4790,7 +4927,16 @@ class TradingEngine {
     const vwapLowerVal = lastCandle.vwap_lower !== undefined ? lastCandle.vwap_lower : currentClose * 0.99;
 
     // 2. Conditions Check (Strict 10-Conditions Checklist)
-    const conditions: { name: string; met: boolean; current_value: any; required: string; softened?: boolean }[] = [];
+    const conditions: {
+      name: string;
+      met: boolean;
+      current_value: any;
+      required: string;
+      softened?: boolean;
+      ema_check_active?: boolean;
+      ema_pair_evaluated?: string;
+      sub_conditions?: MarketStructureSubCondition[];
+    }[] = [];
 
     // C1: CatBoost Probability Filter
     const pbTrendStatus = this.detectPullbackTrendlineBreak();
@@ -5083,6 +5229,9 @@ class TradingEngine {
       met: structCheck.confirmed,
       current_value: structCheck.message,
       required: "Pullback HL (LONG) / LH (SHORT), Breakout Retest, or Range Reversal based on Regime",
+      ema_check_active: structCheck.ema_check_active,
+      ema_pair_evaluated: structCheck.ema_pair_evaluated,
+      sub_conditions: structCheck.sub_conditions,
     });
 
     // C16: Wedge Pattern Filter (Avoid entry during rising/falling wedges unless confirmed breakout)

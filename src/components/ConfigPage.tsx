@@ -309,6 +309,9 @@ export default function ConfigPage({
       if (cleaned.confidence_threshold !== undefined) {
         cleaned.confidence_threshold = Number(cleaned.confidence_threshold);
       }
+      if (cleaned.softened_gate_discount_factor !== undefined) {
+        cleaned.softened_gate_discount_factor = Number(cleaned.softened_gate_discount_factor);
+      }
       if (cleaned.weights) {
         const cleanedWeights = { ...cleaned.weights };
         for (const k of Object.keys(cleanedWeights)) {
@@ -2347,6 +2350,49 @@ export default function ConfigPage({
                       <p className="text-[10px] text-slate-400 leading-relaxed">
                         The minimum overall confidence score (out of 100%) required from passed tactical gates to permit trade initiation. The Market Structure Confirmation remains a mandatory final filter regardless of this threshold.
                       </p>
+                    </div>
+
+                    {/* Softened Gate Discounting Controls */}
+                    <div className="border-t border-slate-200/40 pt-4 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <span className="text-xs font-sans font-semibold text-slate-700">Enable Softened Gate Weight Discounting</span>
+                          <p className="text-[10px] text-slate-400">When enabled, any tactical gate that passes via "softened" requirements (relaxed via order flow) has its earned weight discounted.</p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={gateScoringConfig.enable_weight_discounting !== false}
+                          onChange={(e) => setGateScoringConfig({ ...gateScoringConfig, enable_weight_discounting: e.target.checked })}
+                          className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded cursor-pointer"
+                          id="config-enable-weight-discounting"
+                        />
+                      </div>
+
+                      {(gateScoringConfig.enable_weight_discounting !== false) && (
+                        <div className="space-y-2 pl-1 pt-1">
+                          <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                            <span>Softened Gate Weight Discount Factor</span>
+                            <span className="text-indigo-600 font-semibold">
+                              {Math.round((gateScoringConfig.softened_gate_discount_factor !== undefined ? gateScoringConfig.softened_gate_discount_factor : 0.5) * 100)}%
+                            </span>
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="5"
+                            value={Math.round((gateScoringConfig.softened_gate_discount_factor !== undefined ? gateScoringConfig.softened_gate_discount_factor : 0.5) * 100)}
+                            onChange={(e) => setGateScoringConfig({ 
+                              ...gateScoringConfig, 
+                              softened_gate_discount_factor: Number(e.target.value) / 100 
+                            })}
+                            className="w-full accent-indigo-600 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                          />
+                          <p className="text-[10px] text-slate-400 leading-relaxed">
+                            The percentage of the original gate's weight that is earned when it passes in a "softened" state. E.g., at 50%, a softened gate with 10% weight only contributes 5% to the cumulative score.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

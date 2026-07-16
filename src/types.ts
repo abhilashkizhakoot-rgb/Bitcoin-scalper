@@ -181,6 +181,9 @@ export interface StrategyConfig {
     order_book_min_depth?: number;
     order_book_max_imbalance?: number;
     regime_change_cooldown_minutes?: number;
+    regime_macro_slope_lookback?: number;
+    regime_macro_slope_threshold?: number;
+    regime_ribbon_compression_threshold?: number;
   };
   ml_settings: {
     entry_threshold_long: number; // e.g. 0.80

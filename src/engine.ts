@@ -4573,6 +4573,28 @@ class TradingEngine {
     const ema50Val = ema50[lastIdx];
     const spread21to50Percent = Math.abs(ema21Val - ema50Val) / ema50Val;
 
+    // Calculate Macro Slope (Flatness)
+    const slopeLookback = config.general.regime_macro_slope_lookback !== undefined ? config.general.regime_macro_slope_lookback : 5;
+    const slopeThreshold = config.general.regime_macro_slope_threshold !== undefined ? config.general.regime_macro_slope_threshold : 0.0005;
+    const slopeEma = (ema100.length > lastIdx && ema100[lastIdx] !== undefined) ? ema100 : ema50;
+    const prevIdx = Math.max(0, lastIdx - slopeLookback);
+    const currentEmaVal = slopeEma[lastIdx];
+    const prevEmaVal = slopeEma[prevIdx];
+    const macroSlope = prevEmaVal !== 0 ? Math.abs(currentEmaVal - prevEmaVal) / prevEmaVal : 0;
+    const isSlopeFlat = macroSlope < slopeThreshold;
+
+    // Calculate Ribbon Ribbon Compression (Tightness)
+    const compressionThreshold = config.general.regime_ribbon_compression_threshold !== undefined ? config.general.regime_ribbon_compression_threshold : 0.0015;
+    const emaMean = (ema9Val + ema21Val + ema50Val) / 3;
+    const emaVariance = (
+      Math.pow(ema9Val - emaMean, 2) +
+      Math.pow(ema21Val - emaMean, 2) +
+      Math.pow(ema50Val - emaMean, 2)
+    ) / 3;
+    const emaStdDev = Math.sqrt(emaVariance);
+    const normalizedSpread = emaStdDev / currentClose;
+    const isRibbonCompressed = normalizedSpread < compressionThreshold;
+
     // Simple Directional trend direction count to combine with ADX
     let upwardCount = 0;
     let downwardCount = 0;
@@ -4597,19 +4619,29 @@ class TradingEngine {
     let regime = MarketRegime.RANGE_BOUND;
     let confidence = 0.5;
 
+    // Step 1: Volatility Extremes
     if (atrExpansionRatio < 0.6) {
       regime = MarketRegime.LOW_VOLATILITY;
       confidence = 0.65 + (0.6 - atrExpansionRatio) * 0.5;
     } else if (atrExpansionRatio > 1.5) {
       regime = MarketRegime.HIGH_VOLATILITY;
       confidence = 0.7 + (atrExpansionRatio - 1.5) * 0.2;
-    } else if (isStrongUptrend) {
+    } 
+    // Step 2: Compression Intercept (NEW)
+    else if (isSlopeFlat && isRibbonCompressed) {
+      regime = MarketRegime.RANGE_BOUND;
+      confidence = 0.8 + (1 - normalizedSpread / compressionThreshold) * 0.15;
+    } 
+    // Step 3: Trend Alignment
+    else if (isStrongUptrend) {
       regime = MarketRegime.STRONG_UPTREND;
       confidence = 0.6 + (currentAdx / 100) * 0.35;
     } else if (isStrongDowntrend) {
       regime = MarketRegime.STRONG_DOWNTREND;
       confidence = 0.6 + (currentAdx / 100) * 0.35;
-    } else {
+    } 
+    // Step 4: Fallback
+    else {
       regime = MarketRegime.RANGE_BOUND;
       confidence = 0.5 + (1 - (currentAdx / 100)) * 0.3;
     }

@@ -208,6 +208,9 @@ export default function ConfigPage({
         adx_threshold: 22.0,
         order_book_min_depth: 4.0,
         order_book_max_imbalance: 0.35,
+        regime_macro_slope_lookback: 5,
+        regime_macro_slope_threshold: 0.0005,
+        regime_ribbon_compression_threshold: 0.0015,
       },
       risk_management: {
         default_quantity_btc: 0.001,
@@ -695,6 +698,57 @@ export default function ConfigPage({
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Minimum value of the 14-period Average Directional Index (ADX) required to verify a solid structural trend. Values above 22 confirm sufficient macro-momentum to support break-out trades.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Regime Macro Slope Lookback</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    max="50"
+                    value={generalConfig.regime_macro_slope_lookback !== undefined ? generalConfig.regime_macro_slope_lookback : 5}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, regime_macro_slope_lookback: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    id="config-regime-slope-lookback"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Lookback window (in aggregated periods) to calculate the rate of change of EMA 100/50. Default is 5.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Regime Macro Slope Threshold</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    min="0.0000"
+                    max="0.0100"
+                    value={generalConfig.regime_macro_slope_threshold !== undefined ? generalConfig.regime_macro_slope_threshold : 0.0005}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, regime_macro_slope_threshold: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    id="config-regime-slope-threshold"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Threshold below which the macro trend EMA is considered flat. Default is 0.0005.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Regime Ribbon Compression Threshold</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    min="0.0000"
+                    max="0.0200"
+                    value={generalConfig.regime_ribbon_compression_threshold !== undefined ? generalConfig.regime_ribbon_compression_threshold : 0.0015}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, regime_ribbon_compression_threshold: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    id="config-regime-compression-threshold"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Threshold standard deviation of EMAs (9, 21, 50) relative to price below which they are considered compressed/tangled. Default is 0.0015.
                   </p>
                 </div>
 

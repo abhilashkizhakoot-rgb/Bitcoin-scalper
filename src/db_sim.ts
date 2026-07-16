@@ -117,6 +117,9 @@ const DEFAULT_CONFIG: StrategyConfig = {
     order_book_min_depth: 4.0,
     order_book_max_imbalance: 0.35,
     regime_change_cooldown_minutes: 15,
+    regime_macro_slope_lookback: 5,
+    regime_macro_slope_threshold: 0.0005,
+    regime_ribbon_compression_threshold: 0.0015,
   },
   ml_settings: {
     entry_threshold_long: 0.80,
@@ -920,6 +923,18 @@ class DatabaseManager {
       }
       if (this.cache.config.general.regime_change_cooldown_minutes === undefined) {
         this.cache.config.general.regime_change_cooldown_minutes = 15;
+        changed = true;
+      }
+      if (this.cache.config.general.regime_macro_slope_lookback === undefined) {
+        this.cache.config.general.regime_macro_slope_lookback = 5;
+        changed = true;
+      }
+      if (this.cache.config.general.regime_macro_slope_threshold === undefined) {
+        this.cache.config.general.regime_macro_slope_threshold = 0.0005;
+        changed = true;
+      }
+      if (this.cache.config.general.regime_ribbon_compression_threshold === undefined) {
+        this.cache.config.general.regime_ribbon_compression_threshold = 0.0015;
         changed = true;
       }
     }

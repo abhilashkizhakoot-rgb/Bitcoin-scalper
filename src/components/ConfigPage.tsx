@@ -2581,6 +2581,25 @@ export default function ConfigPage({
                     />
                     <p className="text-[10px] text-slate-400 leading-relaxed">Weight of bid/ask imbalance at core depth levels.</p>
                   </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>MTF Volume Profile Gate</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.volume_profile !== undefined ? gateScoringConfig.weights.volume_profile : 10}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, volume_profile: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of multi-timeframe volume profiling and horizontal level checks.</p>
+                  </div>
                 </div>
               </div>
 
@@ -2640,6 +2659,31 @@ export default function ConfigPage({
                           className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
                         />
                       </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Volume Profile Weight Boost/Reduction</span>
+                          <span className="text-indigo-600 font-semibold font-mono">
+                            {(gateScoringConfig.adaptive_modifiers?.trending?.volume_profile_weight_boost ?? -5) >= 0 ? "+" : ""}
+                            {gateScoringConfig.adaptive_modifiers?.trending?.volume_profile_weight_boost ?? -5}%
+                          </span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.trending?.volume_profile_weight_boost ?? -5}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              trending: {
+                                ...gateScoringConfig.adaptive_modifiers?.trending,
+                                volume_profile_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -2685,6 +2729,31 @@ export default function ConfigPage({
                               ranging: {
                                 ...gateScoringConfig.adaptive_modifiers?.ranging,
                                 trend_alignment_weight_reduction: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Volume Profile Weight Boost/Reduction</span>
+                          <span className="text-indigo-600 font-semibold font-mono">
+                            {(gateScoringConfig.adaptive_modifiers?.ranging?.volume_profile_weight_boost ?? 10) >= 0 ? "+" : ""}
+                            {gateScoringConfig.adaptive_modifiers?.ranging?.volume_profile_weight_boost ?? 10}%
+                          </span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.ranging?.volume_profile_weight_boost ?? 10}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              ranging: {
+                                ...gateScoringConfig.adaptive_modifiers?.ranging,
+                                volume_profile_weight_boost: Number(e.target.value)
                               }
                             }
                           })}
@@ -2742,6 +2811,31 @@ export default function ConfigPage({
                           className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
                         />
                       </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Volume Profile Weight Boost/Reduction</span>
+                          <span className="text-indigo-600 font-semibold font-mono">
+                            {(gateScoringConfig.adaptive_modifiers?.high_volatility?.volume_profile_weight_boost ?? 5) >= 0 ? "+" : ""}
+                            {gateScoringConfig.adaptive_modifiers?.high_volatility?.volume_profile_weight_boost ?? 5}%
+                          </span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.high_volatility?.volume_profile_weight_boost ?? 5}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              high_volatility: {
+                                ...gateScoringConfig.adaptive_modifiers?.high_volatility,
+                                volume_profile_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -2765,6 +2859,31 @@ export default function ConfigPage({
                               low_volatility: {
                                 ...gateScoringConfig.adaptive_modifiers?.low_volatility,
                                 squeeze_filter_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Volume Profile Weight Boost/Reduction</span>
+                          <span className="text-indigo-600 font-semibold font-mono">
+                            {(gateScoringConfig.adaptive_modifiers?.low_volatility?.volume_profile_weight_boost ?? 0) >= 0 ? "+" : ""}
+                            {gateScoringConfig.adaptive_modifiers?.low_volatility?.volume_profile_weight_boost ?? 0}%
+                          </span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.low_volatility?.volume_profile_weight_boost ?? 0}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              low_volatility: {
+                                ...gateScoringConfig.adaptive_modifiers?.low_volatility,
+                                volume_profile_weight_boost: Number(e.target.value)
                               }
                             }
                           })}

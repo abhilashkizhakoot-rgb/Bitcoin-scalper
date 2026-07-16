@@ -229,22 +229,27 @@ const DEFAULT_CONFIG: StrategyConfig = {
       order_flow: 10,
       squeeze_filter: 5,
       order_book: 5,
+      volume_profile: 10,
     },
     adaptive_modifiers: {
       trending: {
         trend_alignment_weight_boost: 10,
         catboost_weight_boost: 5,
+        volume_profile_weight_boost: -5,
       },
       ranging: {
         order_flow_weight_boost: 15,
         trend_alignment_weight_reduction: -10,
+        volume_profile_weight_boost: 10,
       },
       high_volatility: {
         relative_volume_weight_boost: 10,
         overextension_weight_boost: 10,
+        volume_profile_weight_boost: 5,
       },
       low_volatility: {
         squeeze_filter_weight_boost: 15,
+        volume_profile_weight_boost: 0,
       },
     },
   },
@@ -1057,10 +1062,23 @@ class DatabaseManager {
         if (gs.weights.order_flow === undefined) { gs.weights.order_flow = def.weights.order_flow; changed = true; }
         if (gs.weights.squeeze_filter === undefined) { gs.weights.squeeze_filter = def.weights.squeeze_filter; changed = true; }
         if (gs.weights.order_book === undefined) { gs.weights.order_book = def.weights.order_book; changed = true; }
+        if (gs.weights.volume_profile === undefined) { gs.weights.volume_profile = def.weights.volume_profile ?? 10; changed = true; }
       }
       if (!gs.adaptive_modifiers) {
         gs.adaptive_modifiers = { ...def.adaptive_modifiers };
         changed = true;
+      } else {
+        if (!gs.adaptive_modifiers.trending) { gs.adaptive_modifiers.trending = { ...def.adaptive_modifiers.trending }; changed = true; }
+        else if (gs.adaptive_modifiers.trending.volume_profile_weight_boost === undefined) { gs.adaptive_modifiers.trending.volume_profile_weight_boost = def.adaptive_modifiers.trending.volume_profile_weight_boost ?? -5; changed = true; }
+
+        if (!gs.adaptive_modifiers.ranging) { gs.adaptive_modifiers.ranging = { ...def.adaptive_modifiers.ranging }; changed = true; }
+        else if (gs.adaptive_modifiers.ranging.volume_profile_weight_boost === undefined) { gs.adaptive_modifiers.ranging.volume_profile_weight_boost = def.adaptive_modifiers.ranging.volume_profile_weight_boost ?? 10; changed = true; }
+
+        if (!gs.adaptive_modifiers.high_volatility) { gs.adaptive_modifiers.high_volatility = { ...def.adaptive_modifiers.high_volatility }; changed = true; }
+        else if (gs.adaptive_modifiers.high_volatility.volume_profile_weight_boost === undefined) { gs.adaptive_modifiers.high_volatility.volume_profile_weight_boost = def.adaptive_modifiers.high_volatility.volume_profile_weight_boost ?? 5; changed = true; }
+
+        if (!gs.adaptive_modifiers.low_volatility) { gs.adaptive_modifiers.low_volatility = { ...def.adaptive_modifiers.low_volatility }; changed = true; }
+        else if (gs.adaptive_modifiers.low_volatility.volume_profile_weight_boost === undefined) { gs.adaptive_modifiers.low_volatility.volume_profile_weight_boost = def.adaptive_modifiers.low_volatility.volume_profile_weight_boost ?? 0; changed = true; }
       }
     }
 

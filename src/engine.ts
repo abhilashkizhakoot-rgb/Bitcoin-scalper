@@ -5558,14 +5558,14 @@ class TradingEngine {
       order_flow: config.gate_scoring?.weights?.order_flow ?? 10,
       squeeze_filter: config.gate_scoring?.weights?.squeeze_filter ?? 5,
       order_book: config.gate_scoring?.weights?.order_book ?? 5,
-      volume_profile: (config.gate_scoring?.weights as any)?.volume_profile ?? 10,
+      volume_profile: config.gate_scoring?.weights?.volume_profile ?? 10,
     };
 
     const modifiers = config.gate_scoring?.adaptive_modifiers ?? {
-      trending: { trend_alignment_weight_boost: 10, catboost_weight_boost: 5 },
-      ranging: { order_flow_weight_boost: 15, trend_alignment_weight_reduction: -10 },
-      high_volatility: { relative_volume_weight_boost: 10, overextension_weight_boost: 10 },
-      low_volatility: { squeeze_filter_weight_boost: 15 },
+      trending: { trend_alignment_weight_boost: 10, catboost_weight_boost: 5, volume_profile_weight_boost: -5 },
+      ranging: { order_flow_weight_boost: 15, trend_alignment_weight_reduction: -10, volume_profile_weight_boost: 10 },
+      high_volatility: { relative_volume_weight_boost: 10, overextension_weight_boost: 10, volume_profile_weight_boost: 5 },
+      low_volatility: { squeeze_filter_weight_boost: 15, volume_profile_weight_boost: 0 },
     };
 
     const activeWeights = { ...baseWeights };
@@ -5573,14 +5573,18 @@ class TradingEngine {
     if (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.STRONG_DOWNTREND) {
       activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + (modifiers.trending?.trend_alignment_weight_boost ?? 10));
       activeWeights.catboost_ai = Math.max(0, activeWeights.catboost_ai + (modifiers.trending?.catboost_weight_boost ?? 5));
+      activeWeights.volume_profile = Math.max(0, activeWeights.volume_profile + (modifiers.trending?.volume_profile_weight_boost ?? -5));
     } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       activeWeights.order_flow = Math.max(0, activeWeights.order_flow + (modifiers.ranging?.order_flow_weight_boost ?? 15));
       activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + (modifiers.ranging?.trend_alignment_weight_reduction ?? -10));
+      activeWeights.volume_profile = Math.max(0, activeWeights.volume_profile + (modifiers.ranging?.volume_profile_weight_boost ?? 10));
     } else if (this.currentRegime === MarketRegime.HIGH_VOLATILITY) {
       activeWeights.relative_volume = Math.max(0, activeWeights.relative_volume + (modifiers.high_volatility?.relative_volume_weight_boost ?? 10));
       activeWeights.overextension = Math.max(0, activeWeights.overextension + (modifiers.high_volatility?.overextension_weight_boost ?? 10));
+      activeWeights.volume_profile = Math.max(0, activeWeights.volume_profile + (modifiers.high_volatility?.volume_profile_weight_boost ?? 5));
     } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
       activeWeights.squeeze_filter = Math.max(0, activeWeights.squeeze_filter + (modifiers.low_volatility?.squeeze_filter_weight_boost ?? 15));
+      activeWeights.volume_profile = Math.max(0, activeWeights.volume_profile + (modifiers.low_volatility?.volume_profile_weight_boost ?? 0));
     }
 
     const tacticalGatesMap = [

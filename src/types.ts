@@ -273,22 +273,27 @@ export interface StrategyConfig {
       order_flow: number;
       squeeze_filter: number;
       order_book: number;
+      volume_profile: number;
     };
     adaptive_modifiers?: {
       trending: {
         trend_alignment_weight_boost: number;
         catboost_weight_boost: number;
+        volume_profile_weight_boost?: number;
       };
       ranging: {
         order_flow_weight_boost: number;
         trend_alignment_weight_reduction: number;
+        volume_profile_weight_boost?: number;
       };
       high_volatility: {
         relative_volume_weight_boost: number;
         overextension_weight_boost: number;
+        volume_profile_weight_boost?: number;
       };
       low_volatility: {
         squeeze_filter_weight_boost: number;
+        volume_profile_weight_boost?: number;
       };
     };
   };

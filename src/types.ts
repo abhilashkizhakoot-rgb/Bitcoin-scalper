@@ -184,6 +184,7 @@ export interface StrategyConfig {
     regime_macro_slope_lookback?: number;
     regime_macro_slope_threshold?: number;
     regime_ribbon_compression_threshold?: number;
+    require_volume_profile_in_ranging?: boolean;
   };
   ml_settings: {
     entry_threshold_long: number; // e.g. 0.80

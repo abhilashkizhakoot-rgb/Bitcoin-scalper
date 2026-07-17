@@ -120,6 +120,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     regime_macro_slope_lookback: 5,
     regime_macro_slope_threshold: 0.0005,
     regime_ribbon_compression_threshold: 0.0015,
+    require_volume_profile_in_ranging: true,
   },
   ml_settings: {
     entry_threshold_long: 0.80,
@@ -935,6 +936,10 @@ class DatabaseManager {
       }
       if (this.cache.config.general.regime_ribbon_compression_threshold === undefined) {
         this.cache.config.general.regime_ribbon_compression_threshold = 0.0015;
+        changed = true;
+      }
+      if (this.cache.config.general.require_volume_profile_in_ranging === undefined) {
+        this.cache.config.general.require_volume_profile_in_ranging = true;
         changed = true;
       }
     }

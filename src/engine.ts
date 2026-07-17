@@ -1880,10 +1880,22 @@ class TradingEngine {
 
       const marketStructurePassed = conditions.find(c => c.name === "Market Structure Confirmation")?.met ?? false;
 
-      allConditionsMet = allSafetyPassed && marketStructurePassed && tacticalConfidenceMet;
+      // Handle optional mandatory volume profile in ranging regime
+      let isMtfVpPassedIfRequired = true;
+      if (this.currentRegime === MarketRegime.RANGE_BOUND && config.general.require_volume_profile_in_ranging !== false) {
+        const vpGate = conditions.find(c => c.name === "Multi-Timeframe Volume Profiling (Horizontal Liquidity)");
+        if (vpGate && !vpGate.met) {
+          isMtfVpPassedIfRequired = false;
+        }
+      }
+
+      allConditionsMet = allSafetyPassed && marketStructurePassed && tacticalConfidenceMet && isMtfVpPassedIfRequired;
 
       failedConditions = conditions.filter((c) => {
         if (safetyGates.includes(c.name) || c.name === "Market Structure Confirmation") {
+          return !c.met;
+        }
+        if (this.currentRegime === MarketRegime.RANGE_BOUND && config.general.require_volume_profile_in_ranging !== false && c.name === "Multi-Timeframe Volume Profiling (Horizontal Liquidity)") {
           return !c.met;
         }
         return false;
@@ -5676,9 +5688,18 @@ class TradingEngine {
 
     const marketStructurePassed = conditions.find(c => c.name === "Market Structure Confirmation")?.met ?? false;
 
+    // Handle optional mandatory volume profile in ranging regime
+    let isMtfVpPassedIfRequired = true;
+    if (this.currentRegime === MarketRegime.RANGE_BOUND && config.general.require_volume_profile_in_ranging !== false) {
+      const vpGate = conditions.find(c => c.name === "Multi-Timeframe Volume Profiling (Horizontal Liquidity)");
+      if (vpGate && !vpGate.met) {
+        isMtfVpPassedIfRequired = false;
+      }
+    }
+
     let allConditionsMet = false;
     if (isWeightedEnabled) {
-      allConditionsMet = allSafetyPassed && marketStructurePassed && tacticalConfidenceMet;
+      allConditionsMet = allSafetyPassed && marketStructurePassed && tacticalConfidenceMet && isMtfVpPassedIfRequired;
     } else {
       allConditionsMet = conditions.every((c) => c.met);
     }
@@ -5686,6 +5707,9 @@ class TradingEngine {
     const failedConditions = conditions.filter((c) => {
       if (isWeightedEnabled) {
         if (safetyGates.includes(c.name) || c.name === "Market Structure Confirmation") {
+          return !c.met;
+        }
+        if (this.currentRegime === MarketRegime.RANGE_BOUND && config.general.require_volume_profile_in_ranging !== false && c.name === "Multi-Timeframe Volume Profiling (Horizontal Liquidity)") {
           return !c.met;
         }
         return false;

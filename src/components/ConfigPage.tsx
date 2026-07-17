@@ -20,6 +20,8 @@ import {
   Globe,
   Sliders,
   Layers,
+  Download,
+  Upload,
 } from "lucide-react";
 import { StrategyConfig, ConfigHistoryEntry, NewsSource } from "../types.js";
 
@@ -445,6 +447,91 @@ export default function ConfigPage({
     }
   };
 
+  const getActiveConfigObject = (): StrategyConfig => {
+    return {
+      ...config,
+      general: generalConfig,
+      ml_settings: mlConfig,
+      sentiment_settings: sentimentConfig,
+      risk_management: riskConfig,
+      market_structure: msConfig,
+      gate_scoring: gateScoringConfig,
+    };
+  };
+
+  const handleExportActiveToFile = () => {
+    try {
+      const activeConfig = getActiveConfigObject();
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(activeConfig, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `active_strategy_profile.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    } catch (err) {
+      alert("Failed to export active configuration to file.");
+    }
+  };
+
+  const handleExportStoredToFile = (name: string) => {
+    try {
+      const profileConfig = profiles[name];
+      if (!profileConfig) {
+        alert("Profile not found.");
+        return;
+      }
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(profileConfig, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `${name.toLowerCase().replace(/\s+/g, "_")}_profile.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    } catch (err) {
+      alert("Failed to export stored profile to file.");
+    }
+  };
+
+  const handleImportProfile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const fileContent = event.target?.result as string;
+        const parsed = JSON.parse(fileContent);
+
+        if (!parsed.general || !parsed.ml_settings || !parsed.risk_management) {
+          alert("Invalid profile file structure. Missing required configuration sections.");
+          return;
+        }
+
+        const defaultName = file.name.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
+        const name = prompt("Enter a name for this imported profile:", defaultName);
+        if (!name || !name.trim()) return;
+
+        const res = await apiFetch("/api/config/profiles/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name.trim(), config: parsed }),
+        });
+
+        if (res.ok) {
+          onRefresh();
+          alert(`Profile "${name}" successfully imported and saved.`);
+        } else {
+          alert("Failed to save imported profile to backend.");
+        }
+      } catch (err) {
+        alert("Failed to parse JSON file. Please ensure it is a valid JSON config.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   const handleAddKeyword = () => {
     if (!keywordInput.trim()) return;
     const kw = keywordInput.trim();
@@ -847,6 +934,22 @@ export default function ConfigPage({
                   </label>
                   <p className="text-[10px] text-slate-400 leading-relaxed pl-6.5">
                     Actively records all trade execution details, final parameters (SL, TP, ATR), and complete entry checkpoint gates status into the backend file <code className="bg-slate-100 text-indigo-600 font-mono text-[9px] px-1 py-0.5 rounded">trade_log</code> at entry/exit.
+                  </p>
+                </div>
+
+                <div className="space-y-2 flex flex-col justify-end pb-1">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                    <input
+                      type="checkbox"
+                      checked={generalConfig.require_volume_profile_in_ranging !== false}
+                      onChange={(e) => setGeneralConfig({ ...generalConfig, require_volume_profile_in_ranging: e.target.checked })}
+                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
+                      id="config-require-vp-ranging"
+                    />
+                    <span className="text-xs font-semibold text-slate-700">Require MTF Volume Profiling in Range-Bound</span>
+                  </label>
+                  <p className="text-[10px] text-slate-400 leading-relaxed pl-6.5">
+                    Enforces the Multi-Timeframe Volume Profiling (Horizontal Liquidity) gate as a strict, mandatory filter when the market is in a Range-Bound regime. When active, entries are strictly blocked if they are trading directly into heavy overhead/underhead order walls or if there is no high breakout volume.
                   </p>
                 </div>
               </div>
@@ -1920,6 +2023,36 @@ export default function ConfigPage({
               </div>
             </div>
 
+            {/* File-based import and export panel */}
+            <div className="bg-slate-50/50 p-4 border border-slate-200 rounded-xl space-y-4">
+              <h4 className="text-xs font-sans font-bold text-indigo-700 uppercase">File-Based Profile Portability</h4>
+              <p className="text-[10px] text-slate-400 leading-relaxed font-sans">
+                Export your current active configuration to a `.json` file, or import an offline profile file directly.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={handleExportActiveToFile}
+                  className="bg-white hover:bg-slate-50 text-slate-700 text-xs font-sans font-semibold px-4 py-2.5 rounded-lg cursor-pointer flex items-center justify-center gap-2 border border-slate-200 shadow-sm transition-colors"
+                >
+                  <Download className="w-4 h-4 text-slate-500" /> Export Active to JSON File
+                </button>
+                <div className="relative flex-1">
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleImportProfile}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    id="profile-import-file-input"
+                  />
+                  <button
+                    className="w-full bg-white hover:bg-indigo-50/50 text-indigo-600 text-xs font-sans font-semibold px-4 py-2.5 rounded-lg cursor-pointer flex items-center justify-center gap-2 border border-indigo-100 shadow-sm transition-colors"
+                  >
+                    <Upload className="w-4 h-4 text-indigo-500" /> Import Profile from File
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <div className="space-y-3">
               <h4 className="text-xs font-sans font-bold text-slate-400 uppercase">Stored Configs</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1939,6 +2072,13 @@ export default function ConfigPage({
                         title="Load Strategy Profile"
                       >
                         <FolderOpen className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleExportStoredToFile(name)}
+                        className="p-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-600 rounded-lg cursor-pointer"
+                        title="Export Profile to File"
+                      >
+                        <Download className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleDeleteProfile(name)}

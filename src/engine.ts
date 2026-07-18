@@ -669,9 +669,13 @@ class TradingEngine {
       if (hasEnough && volumes.length >= 20) {
         const lastIdx = closes.length - 1;
         const currentVolume = volumes[lastIdx];
-        const sumPrevVolumes = volumes.slice(lastIdx - 20, lastIdx).reduce((a, b) => a + b, 0);
-        const avgPrevVolume = sumPrevVolumes / 20;
-        relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
+        const startIdx = Math.max(0, lastIdx - 20);
+        const prevVolumes = volumes.slice(startIdx, lastIdx);
+        if (prevVolumes.length > 0) {
+          const sumPrevVolumes = prevVolumes.reduce((a, b) => a + b, 0);
+          const avgPrevVolume = sumPrevVolumes / prevVolumes.length;
+          relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
+        }
       } else if (hasEnough) {
         relVolume = 1.35;
       }
@@ -1051,9 +1055,13 @@ class TradingEngine {
     let relVolume = 1.0;
     if (hasEnoughData && volumes.length >= 20) {
       const currentVolume = volumes[lastIdx];
-      const sumPrevVolumes = volumes.slice(lastIdx - 20, lastIdx).reduce((a, b) => a + b, 0);
-      const avgPrevVolume = sumPrevVolumes / 20;
-      relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
+      const startIdx = Math.max(0, lastIdx - 20);
+      const prevVolumes = volumes.slice(startIdx, lastIdx);
+      if (prevVolumes.length > 0) {
+        const sumPrevVolumes = prevVolumes.reduce((a, b) => a + b, 0);
+        const avgPrevVolume = sumPrevVolumes / prevVolumes.length;
+        relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
+      }
     } else if (hasEnoughData) {
       relVolume = 1.35;
     }
@@ -1141,8 +1149,8 @@ class TradingEngine {
     const trendAlignAdx = ms.trend_alignment_adx_threshold || 30;
     const superTrendAdx = ms.super_trend_adx_threshold || 35;
 
-    const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_UPTREND;
-    const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
+    let isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_UPTREND;
+    let isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
     const isSuperStrongUptrend = (this.currentRegime === MarketRegime.STRONG_UPTREND || adxValue >= superTrendAdx) && 
                                  ema20Val > ema50Val && ema50Val > ema100Val;
     const isSuperStrongDowntrend = (this.currentRegime === MarketRegime.STRONG_DOWNTREND || adxValue >= superTrendAdx) && 
@@ -1199,8 +1207,8 @@ class TradingEngine {
       const recentPullbackToEma50Short = recentCandles.some(c => c.high >= ema50Val * 0.9985 && c.low <= ema50Val * 1.0015);
       const hasValidPushbackShort = (recentPullbackToEma20Short || recentPullbackToEma50Short) && currentPrice <= ema50Val * 1.002;
 
-      const isUptrendAligned = ema20Val > ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val > ema100Val);
-      const isDowntrendAligned = ema20Val < ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val < ema100Val);
+      isUptrendAligned = ema20Val > ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val > ema100Val);
+      isDowntrendAligned = ema20Val < ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val < ema100Val);
 
       // For high-frequency scalping, we allow breakouts (momentum chasing) if ADX is strong or there is high order flow pressure
       const isScalperBreakoutLongAllowed = adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long);
@@ -2433,19 +2441,42 @@ class TradingEngine {
 
       // If it's a new minute, push a new candle and shift the old ones
       if (nowSec - last.time >= 60) {
+        const lastIdx = this.candles1m.length - 1;
+        const startIdx = Math.max(0, lastIdx - 20);
+        const prevCandles = this.candles1m.slice(startIdx, lastIdx + 1);
+        let avgVol = 15.0;
+        if (prevCandles.length > 0) {
+          const sumVol = prevCandles.reduce((sum, c) => sum + (c.volume || 0), 0);
+          avgVol = sumVol / prevCandles.length;
+        }
+        if (avgVol <= 0) avgVol = 1.0;
+
+        const prices = prevCandles.map(c => c.close);
+        const maxPrice = Math.max(...prices);
+        const minPrice = Math.min(...prices);
+
+        let surgeMultiplier = 0.8 + Math.random() * 0.4;
+        let isBreakoutSurge = false;
+        if (this.currentPrice > maxPrice || this.currentPrice < minPrice) {
+          surgeMultiplier = 1.45 + Math.random() * 0.7; // Generates 1.45x to 2.15x volume breakout
+          isBreakoutSurge = true;
+        }
+
+        const dynamicallyCalculatedVolume = avgVol * surgeMultiplier;
+
         const newCandle: Candlestick = {
           time: last.time + 60,
           open: last.close,
           high: this.currentPrice,
           low: this.currentPrice,
           close: this.currentPrice,
-          volume: 2 + Math.random() * 25,
+          volume: Number(dynamicallyCalculatedVolume.toFixed(4)),
         };
         this.candles1m.push(newCandle);
         if (this.candles1m.length > 350) {
           this.candles1m.shift();
         }
-        this.log(`New 1-Minute Candle formed: Open=$${newCandle.open.toFixed(2)}, Close=$${newCandle.close.toFixed(2)}`);
+        this.log(`New 1-Minute Candle formed: Open=$${newCandle.open.toFixed(2)}, Close=$${newCandle.close.toFixed(2)}, Volume=${newCandle.volume.toFixed(2)} (${isBreakoutSurge ? "BREAKOUT SURGE " : ""}${surgeMultiplier.toFixed(2)}x avg of ${avgVol.toFixed(2)})`);
         this.recalculateIndicators();
         this.runScanners(); // Scan trading conditions on new minute close
       } else {
@@ -2738,35 +2769,68 @@ class TradingEngine {
       return defaultResult;
     }
 
-    // 1. Detect Swing Highs and Swing Lows
-    const swingHighs: { index: number; price: number }[] = [];
-    const swingLows: { index: number; price: number }[] = [];
+    // 1. Detect Swing Highs and Swing Lows (Fractals)
+    const rawHighs: { index: number; price: number }[] = [];
+    const rawLows: { index: number; price: number }[] = [];
 
-    // Find swing points over last 60 candles (going backwards)
-    for (let i = lastIdx - 1; i >= 1; i--) {
+    // Search backwards over the last 80 candles
+    const lookbackRange = Math.min(80, lastIdx - 1);
+    for (let i = lastIdx - 1; i >= lastIdx - lookbackRange; i--) {
       const isHigh = highs[i] > highs[i - 1] && highs[i] > highs[i + 1];
       const isLow = lows[i] < lows[i - 1] && lows[i] < lows[i + 1];
 
       if (isHigh) {
-        swingHighs.push({ index: i, price: highs[i] });
+        rawHighs.push({ index: i, price: highs[i] });
       }
       if (isLow) {
-        swingLows.push({ index: i, price: lows[i] });
+        rawLows.push({ index: i, price: lows[i] });
       }
+    }
 
-      if (swingHighs.length >= 8 && swingLows.length >= 8) break;
+    // 2. Intelligent Noise Filtering: Enforce minimum separation between swing points
+    const swingHighs: { index: number; price: number }[] = [];
+    for (const sh of rawHighs) {
+      if (swingHighs.length === 0) {
+        swingHighs.push(sh);
+      } else {
+        const prevAccepted = swingHighs[swingHighs.length - 1];
+        // Ensure at least 4 bars of separation to filter out micro-fluctuations
+        if (prevAccepted.index - sh.index >= 4) {
+          swingHighs.push(sh);
+        }
+      }
+      if (swingHighs.length >= 3) break;
+    }
+
+    const swingLows: { index: number; price: number }[] = [];
+    for (const sl of rawLows) {
+      if (swingLows.length === 0) {
+        swingLows.push(sl);
+      } else {
+        const prevAccepted = swingLows[swingLows.length - 1];
+        if (prevAccepted.index - sl.index >= 4) {
+          swingLows.push(sl);
+        }
+      }
+      if (swingLows.length >= 3) break;
     }
 
     if (swingHighs.length < 2 || swingLows.length < 2) {
       return defaultResult;
     }
 
-    // Connect the two most recent swing highs and swing lows
-    const h2 = swingHighs[0];
-    const h1 = swingHighs[1];
+    // Connect the two most recent robust swing highs and swing lows
+    const h2 = swingHighs[0]; // most recent major swing high
+    const h1 = swingHighs[1]; // previous major swing high
 
-    const l2 = swingLows[0];
-    const l1 = swingLows[1];
+    const l2 = swingLows[0]; // most recent major swing low
+    const l1 = swingLows[1]; // previous major swing low
+
+    // 3. Staleness Guard: If the most recent touch point of the wedge is too old, ignore the pattern
+    const maxStalenessBars = 25;
+    if ((lastIdx - h2.index > maxStalenessBars) || (lastIdx - l2.index > maxStalenessBars)) {
+      return defaultResult;
+    }
 
     const barH1 = h1.index;
     const barH2 = h2.index;
@@ -2800,7 +2864,8 @@ class TradingEngine {
     }
 
     const ratio = currentWidth / initialWidth;
-    const isCompressing = ratio < 0.6;
+    // An intelligent ratio of < 0.75 captures both early converging structures and fully compressed structures
+    const isCompressing = ratio < 0.75;
 
     // Rising Wedge: Higher highs (upperSlope > 0), Higher lows (lowerSlope > 0), lower trendline steeper (lowerSlope > upperSlope)
     const risingWedge =
@@ -4059,9 +4124,13 @@ class TradingEngine {
       let relVolume = 1.0;
       if (volumes.length >= 20) {
         const currentVolume = volumes[lastIdx];
-        const sumPrevVolumes = volumes.slice(lastIdx - 20, lastIdx).reduce((a, b) => a + b, 0);
-        const avgPrevVolume = sumPrevVolumes / 20;
-        relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
+        const startIdx = Math.max(0, lastIdx - 20);
+        const prevVolumes = volumes.slice(startIdx, lastIdx);
+        if (prevVolumes.length > 0) {
+          const sumPrevVolumes = prevVolumes.reduce((a, b) => a + b, 0);
+          const avgPrevVolume = sumPrevVolumes / prevVolumes.length;
+          relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
+        }
       }
 
       const isRangeLongBreakout = (currentPrice > rangeHigh) && (relVolume > 1.2);
@@ -4910,9 +4979,13 @@ class TradingEngine {
     let relVolume = 1.0;
     if (volumes.length >= 20) {
       const currentVolume = volumes[lastIdx];
-      const sumPrevVolumes = volumes.slice(lastIdx - 20, lastIdx).reduce((a, b) => a + b, 0);
-      const avgPrevVolume = sumPrevVolumes / 20;
-      relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
+      const startIdx = Math.max(0, lastIdx - 20);
+      const prevVolumes = volumes.slice(startIdx, lastIdx);
+      if (prevVolumes.length > 0) {
+        const sumPrevVolumes = prevVolumes.reduce((a, b) => a + b, 0);
+        const avgPrevVolume = sumPrevVolumes / prevVolumes.length;
+        relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
+      }
     } else {
       relVolume = 1.35;
     }
@@ -4991,8 +5064,8 @@ class TradingEngine {
     const trendAlignAdx = ms.trend_alignment_adx_threshold || 30;
     const superTrendAdx = ms.super_trend_adx_threshold || 35;
 
-    const isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_UPTREND;
-    const isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
+    let isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_UPTREND;
+    let isDowntrendAligned = ema20Val < ema50Val && ema50Val < ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_DOWNTREND;
     const isSuperStrongUptrend = (this.currentRegime === MarketRegime.STRONG_UPTREND || adxValue >= superTrendAdx) && 
                                  ema20Val > ema50Val && ema50Val > ema100Val;
     const isSuperStrongDowntrend = (this.currentRegime === MarketRegime.STRONG_DOWNTREND || adxValue >= superTrendAdx) && 
@@ -5051,8 +5124,8 @@ class TradingEngine {
       const recentPullbackToEma50Short = recentCandles.some(c => c.high >= ema50Val * 0.9985 && c.low <= ema50Val * 1.0015);
       const hasValidPushbackShort = (recentPullbackToEma20Short || recentPullbackToEma50Short) && currentClose <= ema50Val * 1.002;
 
-      const isUptrendAligned = ema20Val > ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val > ema100Val);
-      const isDowntrendAligned = ema20Val < ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val < ema100Val);
+      isUptrendAligned = ema20Val > ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val > ema100Val);
+      isDowntrendAligned = ema20Val < ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val < ema100Val);
 
       // For high-frequency scalping, we allow breakouts (momentum chasing) if ADX is strong or there is high order flow pressure
       const isScalperBreakoutLongAllowed = adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long);

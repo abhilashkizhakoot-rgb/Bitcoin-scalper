@@ -3551,7 +3551,8 @@ class TradingEngine {
       let isVolumeHealthyForPullback = true;
       if (postBreakoutCandles.length > 0) {
         const avgPullbackVol = postBreakoutCandles.reduce((sum, c) => sum + c.volume, 0) / postBreakoutCandles.length;
-        const volumeThreshold = Math.max(boCandle.volume * 1.8, avgVol20 * 2.2);
+        // ENFORCED DRY-UP: Pullback volume must dry up relative to both the breakout spike (<= 80%) and 20-period average volume (<= 125%)
+        const volumeThreshold = Math.min(boCandle.volume * 0.8, avgVol20 * 1.25);
         if (avgPullbackVol > volumeThreshold) {
           isVolumeHealthyForPullback = false;
         }
@@ -3792,7 +3793,8 @@ class TradingEngine {
       let isVolumeHealthyForPullback = true;
       if (postBreakoutCandles.length > 0) {
         const avgPullbackVol = postBreakoutCandles.reduce((sum, c) => sum + c.volume, 0) / postBreakoutCandles.length;
-        const volumeThreshold = Math.max(boCandle.volume * 1.8, avgVol20 * 2.2);
+        // ENFORCED DRY-UP: Pullback volume must dry up relative to both the breakout spike (<= 80%) and 20-period average volume (<= 125%)
+        const volumeThreshold = Math.min(boCandle.volume * 0.8, avgVol20 * 1.25);
         if (avgPullbackVol > volumeThreshold) {
           isVolumeHealthyForPullback = false;
         }

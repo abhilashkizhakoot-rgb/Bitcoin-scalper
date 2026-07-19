@@ -1166,7 +1166,7 @@ class TradingEngine {
     if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       // Mean-Reversion and Breakout rules for RANGE_BOUND
       const rangeLookback = 30;
-      const recentCandlesForRange = this.candles1m.slice(-rangeLookback);
+      const recentCandlesForRange = this.candles1m.slice(-rangeLookback - 1, -1);
       const rangeHigh = recentCandlesForRange.length > 0 ? Math.max(...recentCandlesForRange.map(c => c.high)) : struct.swingHigh;
       const rangeLow = recentCandlesForRange.length > 0 ? Math.min(...recentCandlesForRange.map(c => c.low)) : struct.swingLow;
 
@@ -4108,7 +4108,7 @@ class TradingEngine {
       };
 
       const rangeLookback = 30;
-      const recentCandlesForRange = this.candles1m.slice(-rangeLookback);
+      const recentCandlesForRange = this.candles1m.slice(-rangeLookback - 1, -1);
       const rangeHigh = recentCandlesForRange.length > 0 ? Math.max(...recentCandlesForRange.map(c => c.high)) : struct.swingHigh;
       const rangeLow = recentCandlesForRange.length > 0 ? Math.min(...recentCandlesForRange.map(c => c.low)) : struct.swingLow;
 
@@ -4423,7 +4423,7 @@ class TradingEngine {
         const idx = Math.min(numBins - 1, Math.max(0, Math.floor((c.close - minPrice) / binSize)));
         bins[idx].volume += cVol;
       } else {
-        const startIdx = Math.max(0, Math.floor((c.low - minPrice) / binSize));
+        const startIdx = Math.min(numBins - 1, Math.max(0, Math.floor((c.low - minPrice) / binSize)));
         const endIdx = Math.min(numBins - 1, Math.floor((c.high - minPrice) / binSize));
         if (startIdx === endIdx) {
           bins[startIdx].volume += cVol;
@@ -5083,7 +5083,7 @@ class TradingEngine {
     if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       // Mean-Reversion and Breakout rules for RANGE_BOUND
       const rangeLookback = 30;
-      const recentCandlesForRange = this.candles1m.slice(-rangeLookback);
+      const recentCandlesForRange = this.candles1m.slice(-rangeLookback - 1, -1);
       const rangeHigh = recentCandlesForRange.length > 0 ? Math.max(...recentCandlesForRange.map(c => c.high)) : struct.swingHigh;
       const rangeLow = recentCandlesForRange.length > 0 ? Math.min(...recentCandlesForRange.map(c => c.low)) : struct.swingLow;
 

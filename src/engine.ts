@@ -3558,19 +3558,41 @@ class TradingEngine {
       }
 
       let isVolumeHealthyForPullback = true;
-      if (postBreakoutCandles.length > 0) {
-        const avgPullbackVol = postBreakoutCandles.reduce((sum, c) => sum + c.volume, 0) / postBreakoutCandles.length;
-        // ENFORCED DRY-UP: Pullback volume must dry up relative to both the breakout spike (<= 80%) and 20-period average volume (<= 125%)
-        const volumeThreshold = Math.min(boCandle.volume * 0.8, avgVol20 * 1.25);
+      let pullbackVolDetails = "";
+      const dryupMult = ms.pullback_volume_dryup_threshold_mult ?? 1.5;
+      const boRatio = ms.pullback_volume_breakout_ratio ?? 0.85;
+
+      if (postBreakoutCandles.length > 1) {
+        // Exclude the current active confirmation candle because rejection/entry candles naturally expand in volume
+        const pullbackCandlesPriorToCurrent = postBreakoutCandles.slice(0, -1);
+        const avgPullbackVol = pullbackCandlesPriorToCurrent.reduce((sum, c) => sum + c.volume, 0) / pullbackCandlesPriorToCurrent.length;
+        
+        // We use Math.max instead of Math.min so that standard/low breakout spikes do not force an impossibly low threshold,
+        // and we allow a healthy multiplier of the 20-period average volume.
+        const volumeThreshold = Math.max(boCandle.volume * boRatio, avgVol20 * dryupMult);
         if (avgPullbackVol > volumeThreshold) {
           isVolumeHealthyForPullback = false;
+          pullbackVolDetails = `Avg pullback vol (${avgPullbackVol.toFixed(0)}) > Threshold (${volumeThreshold.toFixed(0)}) [Max of BO Vol * ${boRatio} (${(boCandle.volume * boRatio).toFixed(0)}) or 20-period avg * ${dryupMult} (${(avgVol20 * dryupMult).toFixed(0)})]`;
+        } else {
+          pullbackVolDetails = `Avg pullback vol (${avgPullbackVol.toFixed(0)}) <= Threshold (${volumeThreshold.toFixed(0)}) [Max of BO Vol * ${boRatio} (${(boCandle.volume * boRatio).toFixed(0)}) or 20-period avg * ${dryupMult} (${(avgVol20 * dryupMult).toFixed(0)})]`;
         }
+      } else if (postBreakoutCandles.length === 1) {
+        // Only 1 candle elapsed (which is the current confirmation candle). Give it more breathing room.
+        const volumeThreshold = Math.max(boCandle.volume * (boRatio + 0.15), avgVol20 * (dryupMult + 0.3));
+        if (currentCandle.volume > volumeThreshold) {
+          isVolumeHealthyForPullback = false;
+          pullbackVolDetails = `Single candle vol (${currentCandle.volume.toFixed(0)}) > Threshold (${volumeThreshold.toFixed(0)})`;
+        } else {
+          pullbackVolDetails = `Single candle vol (${currentCandle.volume.toFixed(0)}) <= Threshold (${volumeThreshold.toFixed(0)})`;
+        }
+      } else {
+        pullbackVolDetails = "No pullback candles elapsed yet.";
       }
 
       if (!isVolumeHealthyForPullback) {
-        condDict["Volume-Validated Pullback"] = { status: "FAIL", reason: "Pullback volume exceeds healthy distribution thresholds." };
+        condDict["Volume-Validated Pullback"] = { status: "FAIL", reason: `Pullback volume exceeds healthy distribution thresholds. Details: ${pullbackVolDetails}` };
       } else {
-        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Pullback volume is within safe thresholds." };
+        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: `Pullback volume is within safe thresholds. Details: ${pullbackVolDetails}` };
       }
 
       // Objective Candle Rejection Evaluation for LONG (Support)
@@ -3806,19 +3828,41 @@ class TradingEngine {
       }
 
       let isVolumeHealthyForPullback = true;
-      if (postBreakoutCandles.length > 0) {
-        const avgPullbackVol = postBreakoutCandles.reduce((sum, c) => sum + c.volume, 0) / postBreakoutCandles.length;
-        // ENFORCED DRY-UP: Pullback volume must dry up relative to both the breakout spike (<= 80%) and 20-period average volume (<= 125%)
-        const volumeThreshold = Math.min(boCandle.volume * 0.8, avgVol20 * 1.25);
+      let pullbackVolDetails = "";
+      const dryupMult = ms.pullback_volume_dryup_threshold_mult ?? 1.5;
+      const boRatio = ms.pullback_volume_breakout_ratio ?? 0.85;
+
+      if (postBreakoutCandles.length > 1) {
+        // Exclude the current active confirmation candle because rejection/entry candles naturally expand in volume
+        const pullbackCandlesPriorToCurrent = postBreakoutCandles.slice(0, -1);
+        const avgPullbackVol = pullbackCandlesPriorToCurrent.reduce((sum, c) => sum + c.volume, 0) / pullbackCandlesPriorToCurrent.length;
+        
+        // We use Math.max instead of Math.min so that standard/low breakout spikes do not force an impossibly low threshold,
+        // and we allow a healthy multiplier of the 20-period average volume.
+        const volumeThreshold = Math.max(boCandle.volume * boRatio, avgVol20 * dryupMult);
         if (avgPullbackVol > volumeThreshold) {
           isVolumeHealthyForPullback = false;
+          pullbackVolDetails = `Avg pullback vol (${avgPullbackVol.toFixed(0)}) > Threshold (${volumeThreshold.toFixed(0)}) [Max of BO Vol * ${boRatio} (${(boCandle.volume * boRatio).toFixed(0)}) or 20-period avg * ${dryupMult} (${(avgVol20 * dryupMult).toFixed(0)})]`;
+        } else {
+          pullbackVolDetails = `Avg pullback vol (${avgPullbackVol.toFixed(0)}) <= Threshold (${volumeThreshold.toFixed(0)}) [Max of BO Vol * ${boRatio} (${(boCandle.volume * boRatio).toFixed(0)}) or 20-period avg * ${dryupMult} (${(avgVol20 * dryupMult).toFixed(0)})]`;
         }
+      } else if (postBreakoutCandles.length === 1) {
+        // Only 1 candle elapsed (which is the current confirmation candle). Give it more breathing room.
+        const volumeThreshold = Math.max(boCandle.volume * (boRatio + 0.15), avgVol20 * (dryupMult + 0.3));
+        if (currentCandle.volume > volumeThreshold) {
+          isVolumeHealthyForPullback = false;
+          pullbackVolDetails = `Single candle vol (${currentCandle.volume.toFixed(0)}) > Threshold (${volumeThreshold.toFixed(0)})`;
+        } else {
+          pullbackVolDetails = `Single candle vol (${currentCandle.volume.toFixed(0)}) <= Threshold (${volumeThreshold.toFixed(0)})`;
+        }
+      } else {
+        pullbackVolDetails = "No pullback candles elapsed yet.";
       }
 
       if (!isVolumeHealthyForPullback) {
-        condDict["Volume-Validated Pullback"] = { status: "FAIL", reason: "Pullback volume exceeds healthy distribution thresholds." };
+        condDict["Volume-Validated Pullback"] = { status: "FAIL", reason: `Pullback volume exceeds healthy distribution thresholds. Details: ${pullbackVolDetails}` };
       } else {
-        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Pullback volume is within safe thresholds." };
+        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: `Pullback volume is within safe thresholds. Details: ${pullbackVolDetails}` };
       }
 
       // Objective Candle Rejection Evaluation for SHORT (Resistance)

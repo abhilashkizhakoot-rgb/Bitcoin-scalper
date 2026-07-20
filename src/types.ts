@@ -249,6 +249,8 @@ export interface StrategyConfig {
     hf_orderflow_imbalance_ratio_short: number; // e.g. -0.30 (Imbalance Ratio for immediate entry)
     pullback_multiplier_limit: number; // e.g. 0.6 (Minimum allowed retrace factor)
     ema_retrace_multiplier_limit: number; // e.g. 0.4 (EMA dynamic support/resistance)
+    pullback_volume_dryup_threshold_mult?: number; // Multiplier of average volume for pullback dry-up (default: 1.5)
+    pullback_volume_breakout_ratio?: number; // Ratio of breakout volume for pullback (default: 0.85)
     bypass_ema200_on_momentum: boolean; // e.g. true (By-pass EMA 200 restriction on strong ADX/orderflow)
     ema200_proximity_divisor: number; // e.g. 3.0 (Scale down proximity barriers)
     weak_trend_adx_threshold: number; // e.g. 25 (Threshold above which trend EMAs are fast-aligned)

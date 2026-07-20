@@ -205,6 +205,8 @@ const DEFAULT_CONFIG: StrategyConfig = {
     hf_orderflow_imbalance_ratio_short: -0.30,
     pullback_multiplier_limit: 0.6,
     ema_retrace_multiplier_limit: 0.4,
+    pullback_volume_dryup_threshold_mult: 1.5,
+    pullback_volume_breakout_ratio: 0.85,
     bypass_ema200_on_momentum: true,
     ema200_proximity_divisor: 3.0,
     weak_trend_adx_threshold: 25,
@@ -1046,6 +1048,8 @@ class DatabaseManager {
       if (ms.hf_orderflow_imbalance_ratio_short === undefined) { ms.hf_orderflow_imbalance_ratio_short = def.hf_orderflow_imbalance_ratio_short; changed = true; }
       if (ms.pullback_multiplier_limit === undefined) { ms.pullback_multiplier_limit = def.pullback_multiplier_limit; changed = true; }
       if (ms.ema_retrace_multiplier_limit === undefined) { ms.ema_retrace_multiplier_limit = def.ema_retrace_multiplier_limit; changed = true; }
+      if (ms.pullback_volume_dryup_threshold_mult === undefined) { ms.pullback_volume_dryup_threshold_mult = def.pullback_volume_dryup_threshold_mult ?? 1.5; changed = true; }
+      if (ms.pullback_volume_breakout_ratio === undefined) { ms.pullback_volume_breakout_ratio = def.pullback_volume_breakout_ratio ?? 0.85; changed = true; }
       if (ms.bypass_ema200_on_momentum === undefined) { ms.bypass_ema200_on_momentum = def.bypass_ema200_on_momentum; changed = true; }
       if (ms.ema200_proximity_divisor === undefined) { ms.ema200_proximity_divisor = def.ema200_proximity_divisor; changed = true; }
       if (ms.weak_trend_adx_threshold === undefined) { ms.weak_trend_adx_threshold = def.weak_trend_adx_threshold; changed = true; }

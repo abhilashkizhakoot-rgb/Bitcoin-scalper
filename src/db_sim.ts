@@ -217,6 +217,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     micro_trend_fast_period: 5,
     micro_trend_slow_period: 15,
     timeframe_minutes: 5,
+    very_high_probability_threshold: 0.82,
   },
   gate_scoring: {
     enabled: true,
@@ -1057,6 +1058,7 @@ class DatabaseManager {
       if (ms.micro_trend_fast_period === undefined) { ms.micro_trend_fast_period = def.micro_trend_fast_period || 5; changed = true; }
       if (ms.micro_trend_slow_period === undefined) { ms.micro_trend_slow_period = def.micro_trend_slow_period || 15; changed = true; }
       if (ms.timeframe_minutes === undefined) { ms.timeframe_minutes = def.timeframe_minutes || 5; changed = true; }
+      if (ms.very_high_probability_threshold === undefined) { ms.very_high_probability_threshold = def.very_high_probability_threshold || 0.82; changed = true; }
     }
 
     if (!this.cache?.config?.gate_scoring) {

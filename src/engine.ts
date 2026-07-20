@@ -1511,7 +1511,7 @@ class TradingEngine {
     });
 
     // C15: Market Structure & Entry Confirmation Check (Pullback, Retest, Reversal, High-Vol Confirmation)
-    const structCheck = this.evaluateMarketStructureConfirmation(signalDirection);
+    const structCheck = this.evaluateMarketStructureConfirmation(signalDirection, probabilityLong);
     
     // Override market structure confirmation if Special Super Strong Trend Logic is active
     if (isSpecialSuperStrongTrendLogicActive) {
@@ -3235,7 +3235,8 @@ class TradingEngine {
     ema20Val: number,
     ema50Val: number,
     ema100Val: number,
-    struct: any
+    struct: any,
+    probabilityLong: number
   ): TrendBreakoutSetupResult {
     const config = dbManager.getConfig();
     const ms = config.market_structure || {
@@ -3499,18 +3500,23 @@ class TradingEngine {
       condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: `Body ratio ${(boBodyRatio * 100).toFixed(0)}% >= ${(ms.min_breakout_body_ratio * 100).toFixed(0)}%` };
 
       if (breakoutIdx === lastIdx) {
+        const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.82;
+        const hasHighProbability = probabilityLong >= veryHighProbThreshold;
         const hasHighHFPressure = ms.allow_immediate_breakout && (adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long));
-        if (hasHighHFPressure) {
-          condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Immediate breakout entry allowed under high-frequency pressure." };
+        if (hasHighProbability && hasHighHFPressure) {
+          condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: `Immediate breakout entry allowed under high-frequency pressure with high probability (${(probabilityLong * 100).toFixed(1)}%).` };
           return getReturnObj(
             true,
-            `[HF Scalp Boost] Immediate Breakout Entry Confirmed! Price ($${currentPrice.toFixed(2)}) broke out above $${breakoutLevel.toFixed(2)} under high frequency momentum (ADX: ${adxValue.toFixed(1)}) and order flow pressure.`
+            `[HF Scalp Boost] Immediate Breakout Entry Confirmed! Price ($${currentPrice.toFixed(2)}) broke out above $${breakoutLevel.toFixed(2)} with very high probability (${(probabilityLong * 100).toFixed(1)}% >= ${(veryHighProbThreshold * 100).toFixed(0)}%) and high frequency momentum.`
           );
         } else {
-          condDict["Immediate Breakout Entry Allowance"] = { status: "FAIL", reason: "Immediate entry forbidden on breakout candle." };
+          const reasonMsg = !hasHighProbability
+            ? `breakout probability is not high enough (P(LONG) = ${(probabilityLong * 100).toFixed(1)}% < ${(veryHighProbThreshold * 100).toFixed(0)}%)`
+            : "insufficient high frequency momentum/pressure";
+          condDict["Immediate Breakout Entry Allowance"] = { status: "FAIL", reason: `Immediate entry forbidden on breakout candle: ${reasonMsg}.` };
           return getReturnObj(
             false,
-            `Blocked: Immediate LONG entry on the Higher High breakout candle ($${breakoutLevel.toFixed(2)}) is forbidden. Waiting for pullback/retest or EMA pushback.`
+            `Blocked: Immediate LONG entry on the Higher High breakout candle ($${breakoutLevel.toFixed(2)}) is forbidden because ${reasonMsg}. Waiting for breakout pullback.`
           );
         }
       }
@@ -3741,18 +3747,24 @@ class TradingEngine {
       condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: `Body ratio ${(boBodyRatio * 100).toFixed(0)}% >= ${(ms.min_breakout_body_ratio * 100).toFixed(0)}%` };
 
       if (breakoutIdx === lastIdx) {
+        const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.82;
+        const probabilityShort = 1 - probabilityLong;
+        const hasHighProbability = probabilityShort >= veryHighProbThreshold;
         const hasHighHFPressure = ms.allow_immediate_breakout && (adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short));
-        if (hasHighHFPressure) {
-          condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Immediate breakout entry allowed under high-frequency pressure." };
+        if (hasHighProbability && hasHighHFPressure) {
+          condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: `Immediate breakdown entry allowed under high-frequency pressure with high probability (${(probabilityShort * 100).toFixed(1)}%).` };
           return getReturnObj(
             true,
-            `[HF Scalp Boost] Immediate Breakdown Entry Confirmed! Price ($${currentPrice.toFixed(2)}) broke down below $${breakoutLevel.toFixed(2)} under high frequency momentum (ADX: ${adxValue.toFixed(1)}) and order flow pressure.`
+            `[HF Scalp Boost] Immediate Breakdown Entry Confirmed! Price ($${currentPrice.toFixed(2)}) broke down below $${breakoutLevel.toFixed(2)} with very high probability (${(probabilityShort * 100).toFixed(1)}% >= ${(veryHighProbThreshold * 100).toFixed(0)}%) and high frequency momentum.`
           );
         } else {
-          condDict["Immediate Breakout Entry Allowance"] = { status: "FAIL", reason: "Immediate entry forbidden on breakout candle." };
+          const reasonMsg = !hasHighProbability
+            ? `breakout probability is not high enough (P(SHORT) = ${(probabilityShort * 100).toFixed(1)}% < ${(veryHighProbThreshold * 100).toFixed(0)}%)`
+            : "insufficient high frequency momentum/pressure";
+          condDict["Immediate Breakout Entry Allowance"] = { status: "FAIL", reason: `Immediate entry forbidden on breakout candle: ${reasonMsg}.` };
           return getReturnObj(
             false,
-            `Blocked: Immediate SHORT entry on the Lower Low breakout candle ($${breakoutLevel.toFixed(2)}) is forbidden. Waiting for pullback/retest or EMA pushback.`
+            `Blocked: Immediate SHORT entry on the Lower Low breakout candle ($${breakoutLevel.toFixed(2)}) is forbidden because ${reasonMsg}. Waiting for breakout pullback.`
           );
         }
       }
@@ -4018,8 +4030,8 @@ class TradingEngine {
     return { isValid: true, reason: "Breakout validated." };
   }
 
-  private evaluateMarketStructureConfirmation(signalDirection: "LONG" | "SHORT" | "NEUTRAL"): MarketStructureConfirmationResult {
-    const rawResult = this.evaluateMarketStructureConfirmationRaw(signalDirection);
+  private evaluateMarketStructureConfirmation(signalDirection: "LONG" | "SHORT" | "NEUTRAL", probabilityLong: number): MarketStructureConfirmationResult {
+    const rawResult = this.evaluateMarketStructureConfirmationRaw(signalDirection, probabilityLong);
     return this.applyEma200ProximityFilter(signalDirection, this.currentPrice, rawResult);
   }
 
@@ -4162,7 +4174,7 @@ class TradingEngine {
     return result;
   }
 
-  private evaluateMarketStructureConfirmationRaw(signalDirection: "LONG" | "SHORT" | "NEUTRAL"): MarketStructureConfirmationResult {
+  private evaluateMarketStructureConfirmationRaw(signalDirection: "LONG" | "SHORT" | "NEUTRAL", probabilityLong: number): MarketStructureConfirmationResult {
     const config = dbManager.getConfig();
     const struct = this.getTrendMarketStructure();
     const lastIdx = this.candles1m.length - 1;
@@ -4188,11 +4200,7 @@ class TradingEngine {
         };
       }
 
-      const ms = config.market_structure || {
-        micro_trend_alignment_enabled: true,
-        micro_trend_fast_period: 5,
-        micro_trend_slow_period: 15,
-      };
+      const ms = config.market_structure;
 
       const rangeLookback = 30;
       const recentCandlesForRange = this.candles1m.slice(-rangeLookback - 1, -1);
@@ -4225,6 +4233,101 @@ class TradingEngine {
 
       const isRangeLongBreakout = (currentPrice > rangeHigh) && breakoutValidationLong.isValid;
       const isRangeShortBreakdown = (currentPrice < rangeLow) && breakoutValidationShort.isValid;
+
+      // Range LONG Breakout Pullback Check
+      let isRangeLongPullback = false;
+      let rangeLongPullbackDetails = "";
+      let boRangeHigh = rangeHigh;
+
+      let rangeLongBreakoutIdx = -1;
+      for (let i = lastIdx - 15; i < lastIdx; i++) {
+        if (i < 30) continue;
+        const prevCandles = this.candles1m.slice(i - 30, i);
+        const rHigh = Math.max(...prevCandles.map(c => c.high));
+        if (this.candles1m[i].close > rHigh) {
+          rangeLongBreakoutIdx = i;
+          boRangeHigh = rHigh;
+          break;
+        }
+      }
+
+      const atr14ForPullback = this.calculateATR(this.candles1m, 14);
+      const currentAtrForPullback = atr14ForPullback[lastIdx] || 50;
+
+      if (rangeLongBreakoutIdx !== -1) {
+        const postBreakoutCandles = this.candles1m.slice(rangeLongBreakoutIdx + 1);
+        const pullbackThreshold = boRangeHigh + 0.5 * currentAtrForPullback;
+        const hasPulledBackToZone = postBreakoutCandles.some(c => c.low <= pullbackThreshold);
+        
+        // Check for bullish rejection on the current candle
+        const currentCandleVal = this.candles1m[lastIdx];
+        const range = currentCandleVal.high - currentCandleVal.low;
+        const body = Math.abs(currentCandleVal.close - currentCandleVal.open);
+        const upperWick = currentCandleVal.high - Math.max(currentCandleVal.close, currentCandleVal.open);
+        const lowerWick = Math.min(currentCandleVal.close, currentCandleVal.open) - currentCandleVal.low;
+        const isBullish = currentCandleVal.close > currentCandleVal.open;
+        const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
+
+        const isPinBar = range > 0 && lowerWick >= 0.5 * range && upperWick <= 0.25 * range;
+        const hasStrongClose = range > 0 && (currentCandleVal.close - currentCandleVal.low) / range >= 0.70;
+        const isBullishEngulfing = prevCandle && (prevCandle.close < prevCandle.open) && isBullish && (currentCandleVal.close >= prevCandle.open) && (currentCandleVal.open <= prevCandle.close);
+        const isMomentumCandle = isBullish && body >= 0.7 * currentAtrForPullback;
+
+        const isLongRejectionConfirmed = isPinBar || isBullishEngulfing || (isMomentumCandle && hasStrongClose) || (hasStrongClose && (lowerWick > upperWick || isBullish));
+
+        const isNearBrokenSupport = currentPrice >= boRangeHigh - 0.25 * currentAtrForPullback && currentPrice <= boRangeHigh + 0.8 * currentAtrForPullback;
+
+        if (hasPulledBackToZone && isLongRejectionConfirmed && isNearBrokenSupport) {
+          isRangeLongPullback = true;
+          rangeLongPullbackDetails = `Range LONG Breakout Pullback Confirmed: Price broke out above range resistance ($${boRangeHigh.toFixed(2)}) recently (index ${rangeLongBreakoutIdx}) and successfully retested it as support with a bullish rejection.`;
+        }
+      }
+
+      // Range SHORT Breakdown Pullback Check
+      let isRangeShortPullback = false;
+      let rangeShortPullbackDetails = "";
+      let boRangeLow = rangeLow;
+
+      let rangeShortBreakoutIdx = -1;
+      for (let i = lastIdx - 15; i < lastIdx; i++) {
+        if (i < 30) continue;
+        const prevCandles = this.candles1m.slice(i - 30, i);
+        const rLow = Math.min(...prevCandles.map(c => c.low));
+        if (this.candles1m[i].close < rLow) {
+          rangeShortBreakoutIdx = i;
+          boRangeLow = rLow;
+          break;
+        }
+      }
+
+      if (rangeShortBreakoutIdx !== -1) {
+        const postBreakoutCandles = this.candles1m.slice(rangeShortBreakoutIdx + 1);
+        const pullbackThreshold = boRangeLow - 0.5 * currentAtrForPullback;
+        const hasPulledBackToZone = postBreakoutCandles.some(c => c.high >= pullbackThreshold);
+        
+        // Check for bearish rejection on current candle
+        const currentCandleVal = this.candles1m[lastIdx];
+        const range = currentCandleVal.high - currentCandleVal.low;
+        const body = Math.abs(currentCandleVal.close - currentCandleVal.open);
+        const upperWick = currentCandleVal.high - Math.max(currentCandleVal.close, currentCandleVal.open);
+        const lowerWick = Math.min(currentCandleVal.close, currentCandleVal.open) - currentCandleVal.low;
+        const isBearish = currentCandleVal.close < currentCandleVal.open;
+        const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
+
+        const isPinBar = range > 0 && upperWick >= 0.5 * range && lowerWick <= 0.25 * range;
+        const hasStrongClose = range > 0 && (currentCandleVal.high - currentCandleVal.close) / range >= 0.70;
+        const isBearishEngulfing = prevCandle && (prevCandle.close > prevCandle.open) && isBearish && (currentCandleVal.close <= prevCandle.open) && (currentCandleVal.open <= prevCandle.close);
+        const isMomentumCandle = isBearish && body >= 0.7 * currentAtrForPullback;
+
+        const isShortRejectionConfirmed = isPinBar || isBearishEngulfing || (isMomentumCandle && hasStrongClose) || (hasStrongClose && (upperWick > lowerWick || isBearish));
+
+        const isNearBrokenResistance = currentPrice <= boRangeLow + 0.25 * currentAtrForPullback && currentPrice >= boRangeLow - 0.8 * currentAtrForPullback;
+
+        if (hasPulledBackToZone && isShortRejectionConfirmed && isNearBrokenResistance) {
+          isRangeShortPullback = true;
+          rangeShortPullbackDetails = `Range SHORT Breakdown Pullback Confirmed: Price broke below range support ($${boRangeLow.toFixed(2)}) recently (index ${rangeShortBreakoutIdx}) and successfully retested it as resistance with a bearish rejection.`;
+        }
+      }
 
       // Calculate Micro-Trend alignment using fast/slow EMAs on 1m chart
       const closes = this.candles1m.map((c) => c.close);
@@ -4271,6 +4374,15 @@ class TradingEngine {
             swingLow: rangeLow
           };
         } else if (isRangeLongBreakout) {
+          const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.82;
+          if (probabilityLong < veryHighProbThreshold) {
+            return {
+              confirmed: false,
+              message: `Range LONG Breakout Blocked: Breakout probability is not high enough (P(LONG) = ${(probabilityLong * 100).toFixed(1)}% < ${(veryHighProbThreshold * 100).toFixed(1)}%). Waiting for range breakout pullback.`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
             return {
               confirmed: false,
@@ -4281,7 +4393,22 @@ class TradingEngine {
           }
           return {
             confirmed: true,
-            message: `Ranging Bullish Breakout Confirmed. Price ($${currentPrice.toFixed(2)}) broke above major range resistance ($${rangeHigh.toFixed(2)}) on high relative volume (${relVolume.toFixed(2)}x). ${microTrendDetails}`,
+            message: `Ranging Bullish Breakout Confirmed. Price ($${currentPrice.toFixed(2)}) broke above major range resistance ($${rangeHigh.toFixed(2)}) on high relative volume (${relVolume.toFixed(2)}x) with high probability (${(probabilityLong * 100).toFixed(1)}%). ${microTrendDetails}`,
+            swingHigh: rangeHigh,
+            swingLow: rangeLow
+          };
+        } else if (isRangeLongPullback) {
+          if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
+            return {
+              confirmed: false,
+              message: `Range LONG Pullback Blocked: Micro-Trend is strongly bearish and does not support entry. ${microTrendDetails}`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
+          return {
+            confirmed: true,
+            message: `${rangeLongPullbackDetails} ${microTrendDetails}`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -4295,7 +4422,7 @@ class TradingEngine {
         } else {
           return {
             confirmed: false,
-            message: `Range-bound Reversal Filter: Price ($${currentPrice.toFixed(2)}) is inside the range [$${rangeLow.toFixed(2)} - $${rangeHigh.toFixed(2)}] without a valid reversal or breakout.`,
+            message: `Range-bound Reversal Filter: Price ($${currentPrice.toFixed(2)}) is inside the range [$${rangeLow.toFixed(2)} - $${rangeHigh.toFixed(2)}] without a valid reversal, breakout, or pullback.`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -4317,6 +4444,16 @@ class TradingEngine {
             swingLow: rangeLow
           };
         } else if (isRangeShortBreakdown) {
+          const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.82;
+          const probabilityShort = 1 - probabilityLong;
+          if (probabilityShort < veryHighProbThreshold) {
+            return {
+              confirmed: false,
+              message: `Range SHORT Breakdown Blocked: Breakdown probability is not high enough (P(SHORT) = ${(probabilityShort * 100).toFixed(1)}% < ${(veryHighProbThreshold * 100).toFixed(1)}%). Waiting for range breakdown pullback.`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
             return {
               confirmed: false,
@@ -4327,7 +4464,22 @@ class TradingEngine {
           }
           return {
             confirmed: true,
-            message: `Ranging Bearish Breakdown Confirmed. Price ($${currentPrice.toFixed(2)}) broke below major range support ($${rangeLow.toFixed(2)}) on high relative volume (${relVolume.toFixed(2)}x). ${microTrendDetails}`,
+            message: `Ranging Bearish Breakdown Confirmed. Price ($${currentPrice.toFixed(2)}) broke below major range support ($${rangeLow.toFixed(2)}) on high relative volume (${relVolume.toFixed(2)}x) with high probability (${(probabilityShort * 100).toFixed(1)}%). ${microTrendDetails}`,
+            swingHigh: rangeHigh,
+            swingLow: rangeLow
+          };
+        } else if (isRangeShortPullback) {
+          if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
+            return {
+              confirmed: false,
+              message: `Range SHORT Pullback Blocked: Micro-Trend is strongly bullish and does not support entry. ${microTrendDetails}`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
+          return {
+            confirmed: true,
+            message: `${rangeShortPullbackDetails} ${microTrendDetails}`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -4341,7 +4493,7 @@ class TradingEngine {
         } else {
           return {
             confirmed: false,
-            message: `Range-bound Reversal Filter: Price ($${currentPrice.toFixed(2)}) is inside the range [$${rangeLow.toFixed(2)} - $${rangeHigh.toFixed(2)}] without a valid reversal or breakdown.`,
+            message: `Range-bound Reversal Filter: Price ($${currentPrice.toFixed(2)}) is inside the range [$${rangeLow.toFixed(2)} - $${rangeHigh.toFixed(2)}] without a valid reversal, breakdown, or pullback.`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -4374,11 +4526,11 @@ class TradingEngine {
 
     let trendResult: TrendBreakoutSetupResult | null = null;
     if (signalDirection === "LONG") {
-      trendResult = this.evaluateTrendBreakoutSetup("LONG", currentPrice, ema20Val, ema50Val, ema100Val, struct);
+      trendResult = this.evaluateTrendBreakoutSetup("LONG", currentPrice, ema20Val, ema50Val, ema100Val, struct, probabilityLong);
       confirmed = trendResult.confirmed;
       message = trendResult.message;
     } else if (signalDirection === "SHORT") {
-      trendResult = this.evaluateTrendBreakoutSetup("SHORT", currentPrice, ema20Val, ema50Val, ema100Val, struct);
+      trendResult = this.evaluateTrendBreakoutSetup("SHORT", currentPrice, ema20Val, ema50Val, ema100Val, struct, probabilityLong);
       confirmed = trendResult.confirmed;
       message = trendResult.message;
     }
@@ -5521,7 +5673,7 @@ class TradingEngine {
     });
 
     // C15: Market Structure & Entry Confirmation Check (Pullback, Retest, Reversal, High-Vol Confirmation)
-    const structCheck = this.evaluateMarketStructureConfirmation(signalDirection);
+    const structCheck = this.evaluateMarketStructureConfirmation(signalDirection, probabilityLong);
     
     // Override market structure confirmation if Special Super Strong Trend Logic is active
     if (isSpecialSuperStrongTrendLogicActive) {

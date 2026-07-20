@@ -3596,62 +3596,9 @@ class TradingEngine {
       }
 
       // Objective Candle Rejection Evaluation for LONG (Support)
-      const range = currentCandle.high - currentCandle.low;
-      const body = Math.abs(currentCandle.close - currentCandle.open);
-      const upperWick = currentCandle.high - Math.max(currentCandle.close, currentCandle.open);
-      const lowerWick = Math.min(currentCandle.close, currentCandle.open) - currentCandle.low;
-      const isBullish = currentCandle.close > currentCandle.open;
-      const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
-
-      // 1. Classic Pin Bar (Bullish)
-      const isPinBar = range > 0 && lowerWick >= 0.5 * range && upperWick <= 0.25 * range;
-
-      // 2. Strong Close (Top 30% of candle range)
-      const hasStrongClose = range > 0 && (currentCandle.close - currentCandle.low) / range >= 0.70;
-
-      // 3. Bullish Engulfing
-      const isBullishEngulfing = prevCandle && 
-        (prevCandle.close < prevCandle.open) && 
-        isBullish && 
-        (currentCandle.close >= prevCandle.open) && 
-        (currentCandle.open <= prevCandle.close);
-
-      // 4. Momentum Candle (Large bullish body relative to average range)
-      const isMomentumCandle = isBullish && body >= 0.7 * currentAtr;
-
-      // 5. Multi-Candle Double Bottom / Multi-Wick Rejection
-      const hasMultiWickRejection = prevCandle && 
-        (lowerWick >= 0.35 * range) && 
-        ((Math.min(prevCandle.close, prevCandle.open) - prevCandle.low) >= 0.35 * (prevCandle.high - prevCandle.low)) && 
-        Math.abs(currentCandle.low - prevCandle.low) < 0.15 * currentAtr;
-
-      // 6. Indecision check (Reject weak spinning tops and Dojis)
-      const isIndecision = range > 0 && (body / range < 0.15) && !isPinBar;
-
-      // Combine into robust rejection check
-      let isLongRejectionConfirmed = false;
-      let longRejectionType = "";
-
-      if (isPinBar) {
-        isLongRejectionConfirmed = true;
-        longRejectionType = "Bullish Pin Bar";
-      } else if (isBullishEngulfing) {
-        isLongRejectionConfirmed = true;
-        longRejectionType = "Bullish Engulfing Pattern";
-      } else if (hasMultiWickRejection) {
-        isLongRejectionConfirmed = true;
-        longRejectionType = "Multi-Candle Wick Rejection";
-      } else if (isMomentumCandle && hasStrongClose) {
-        isLongRejectionConfirmed = true;
-        longRejectionType = "Bullish Momentum Candle";
-      } else if (hasStrongClose && (lowerWick > upperWick || isBullish)) {
-        isLongRejectionConfirmed = true;
-        longRejectionType = "Strong Close Support Rejection";
-      }
-
-      if (isIndecision) {
-        isLongRejectionConfirmed = false; // Override and reject weak indecision
-      }
+      const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtr);
+      const isLongRejectionConfirmed = rejectionCheck.confirmed;
+      const longRejectionType = rejectionCheck.type;
 
       // Setup 1: Pullback and Retest
       const effectivePullbackMult = Math.max(pullbackMultiplier, ms.pullback_multiplier_limit);
@@ -3663,7 +3610,7 @@ class TradingEngine {
       let pullbackRetestMessage = "";
       if (hasPulledBackToZone) {
         const isRejection = isLongRejectionConfirmed;
-        const isContinuation = currentCandle.close > currentCandle.open && (currentCandle.close >= breakoutLevel || isPinBar || isBullishEngulfing || hasMultiWickRejection);
+        const isContinuation = currentCandle.close > currentCandle.open && (currentCandle.close >= breakoutLevel || isLongRejectionConfirmed);
         if (isRejection && isContinuation) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
@@ -3866,62 +3813,9 @@ class TradingEngine {
       }
 
       // Objective Candle Rejection Evaluation for SHORT (Resistance)
-      const range = currentCandle.high - currentCandle.low;
-      const body = Math.abs(currentCandle.close - currentCandle.open);
-      const upperWick = currentCandle.high - Math.max(currentCandle.close, currentCandle.open);
-      const lowerWick = Math.min(currentCandle.close, currentCandle.open) - currentCandle.low;
-      const isBearish = currentCandle.close < currentCandle.open;
-      const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
-
-      // 1. Classic Pin Bar (Bearish)
-      const isPinBar = range > 0 && upperWick >= 0.5 * range && lowerWick <= 0.25 * range;
-
-      // 2. Strong Close (Bottom 30% of candle range)
-      const hasStrongClose = range > 0 && (currentCandle.high - currentCandle.close) / range >= 0.70;
-
-      // 3. Bearish Engulfing
-      const isBearishEngulfing = prevCandle && 
-        (prevCandle.close > prevCandle.open) && 
-        isBearish && 
-        (currentCandle.close <= prevCandle.open) && 
-        (currentCandle.open >= prevCandle.close);
-
-      // 4. Momentum Candle (Large bearish body relative to average range)
-      const isMomentumCandle = isBearish && body >= 0.7 * currentAtr;
-
-      // 5. Multi-Candle Double Top / Multi-Wick Rejection
-      const hasMultiWickRejection = prevCandle && 
-        (upperWick >= 0.35 * range) && 
-        ((prevCandle.high - Math.max(prevCandle.close, prevCandle.open)) >= 0.35 * (prevCandle.high - prevCandle.low)) && 
-        Math.abs(currentCandle.high - prevCandle.high) < 0.15 * currentAtr;
-
-      // 6. Indecision check (Reject weak spinning tops and Dojis)
-      const isIndecision = range > 0 && (body / range < 0.15) && !isPinBar;
-
-      // Combine into robust rejection check
-      let isShortRejectionConfirmed = false;
-      let shortRejectionType = "";
-
-      if (isPinBar) {
-        isShortRejectionConfirmed = true;
-        shortRejectionType = "Bearish Pin Bar";
-      } else if (isBearishEngulfing) {
-        isShortRejectionConfirmed = true;
-        shortRejectionType = "Bearish Engulfing Pattern";
-      } else if (hasMultiWickRejection) {
-        isShortRejectionConfirmed = true;
-        shortRejectionType = "Multi-Candle Wick Rejection";
-      } else if (isMomentumCandle && hasStrongClose) {
-        isShortRejectionConfirmed = true;
-        shortRejectionType = "Bearish Momentum Candle";
-      } else if (hasStrongClose && (upperWick > lowerWick || isBearish)) {
-        isShortRejectionConfirmed = true;
-        shortRejectionType = "Strong Close Resistance Rejection";
-      }
-
-      if (isIndecision) {
-        isShortRejectionConfirmed = false; // Override and reject weak indecision
-      }
+      const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtr);
+      const isShortRejectionConfirmed = rejectionCheck.confirmed;
+      const shortRejectionType = rejectionCheck.type;
 
       // Setup 1: Pullback and Retest
       const effectivePullbackMult = Math.max(pullbackMultiplier, ms.pullback_multiplier_limit);
@@ -3933,7 +3827,7 @@ class TradingEngine {
       let pullbackRetestMessage = "";
       if (hasPulledBackToZone) {
         const isRejection = isShortRejectionConfirmed;
-        const isContinuation = currentCandle.close < currentCandle.open && (currentCandle.close <= breakoutLevel || isPinBar || isBearishEngulfing || hasMultiWickRejection);
+        const isContinuation = currentCandle.close < currentCandle.open && (currentCandle.close <= breakoutLevel || isShortRejectionConfirmed);
         if (isRejection && isContinuation) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
@@ -4218,6 +4112,236 @@ class TradingEngine {
     return result;
   }
 
+  private isMultiCandleLongRejection(lastIdx: number, currentAtr: number): { confirmed: boolean; type: string } {
+    if (lastIdx < 0) return { confirmed: false, type: "" };
+    const currentCandle = this.candles1m[lastIdx];
+    const range = currentCandle.high - currentCandle.low;
+    const body = Math.abs(currentCandle.close - currentCandle.open);
+    const upperWick = currentCandle.high - Math.max(currentCandle.close, currentCandle.open);
+    const lowerWick = Math.min(currentCandle.close, currentCandle.open) - currentCandle.low;
+    const isBullish = currentCandle.close > currentCandle.open;
+    const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
+
+    // Single Candle Patterns
+    const isPinBar = range > 0 && lowerWick >= 0.5 * range && upperWick <= 0.25 * range;
+    const hasStrongClose = range > 0 && (currentCandle.close - currentCandle.low) / range >= 0.70;
+    const isMomentumCandle = isBullish && body >= 0.7 * currentAtr;
+    const isIndecision = range > 0 && (body / range < 0.15) && !isPinBar;
+
+    // Two-Candle Patterns
+    const isBullishEngulfing = prevCandle && 
+      (prevCandle.close < prevCandle.open) && 
+      isBullish && 
+      (currentCandle.close >= prevCandle.open) && 
+      (currentCandle.open <= prevCandle.close);
+
+    const hasMultiWickRejection = prevCandle && 
+      (lowerWick >= 0.35 * range) && 
+      ((Math.min(prevCandle.close, prevCandle.open) - prevCandle.low) >= 0.35 * (prevCandle.high - prevCandle.low)) && 
+      Math.abs(currentCandle.low - prevCandle.low) < 0.15 * currentAtr;
+
+    // 1. Tweezer Bottom (Two-candle)
+    let isTweezerBottom = false;
+    if (prevCandle) {
+      const prevRange = prevCandle.high - prevCandle.low;
+      const prevLowerWick = Math.min(prevCandle.close, prevCandle.open) - prevCandle.low;
+      const matchingLows = Math.abs(currentCandle.low - prevCandle.low) < 0.05 * currentAtr;
+      const currentHasLowerWick = range > 0 && lowerWick >= 0.25 * range;
+      const prevHasLowerWick = prevRange > 0 && prevLowerWick >= 0.25 * prevRange;
+      if (matchingLows && currentHasLowerWick && prevHasLowerWick && (isBullish || hasStrongClose)) {
+        isTweezerBottom = true;
+      }
+    }
+
+    // 2. Piercing Line (Two-candle)
+    let isPiercingLine = false;
+    if (prevCandle) {
+      const prevRange = prevCandle.high - prevCandle.low;
+      const prevBody = prevCandle.open - prevCandle.close;
+      const isPrevStrongBearish = prevCandle.close < prevCandle.open && prevBody >= 0.3 * prevRange;
+      const opensBelowPrevClose = currentCandle.open < prevCandle.close + 0.05 * currentAtr;
+      const closesAboveMidpoint = currentCandle.close >= (prevCandle.open + prevCandle.close) / 2;
+      if (isPrevStrongBearish && opensBelowPrevClose && closesAboveMidpoint && isBullish && currentCandle.close < prevCandle.open) {
+        isPiercingLine = true;
+      }
+    }
+
+    // Three-Candle Patterns
+    // 3. Morning Star
+    let isMorningStar = false;
+    if (lastIdx >= 2) {
+      const c2 = this.candles1m[lastIdx - 2];
+      const c1 = this.candles1m[lastIdx - 1];
+      const c0 = currentCandle;
+
+      const r2 = c2.high - c2.low;
+      const b2 = c2.open - c2.close;
+      const isC2StrongBearish = c2.close < c2.open && b2 >= 0.3 * r2;
+
+      const r1 = c1.high - c1.low;
+      const b1 = Math.abs(c1.close - c1.open);
+      const isC1Indecision = r1 > 0 && (b1 / r1 < 0.3);
+      const isC1Low = c1.low <= Math.min(c2.low, c0.low) + 0.1 * currentAtr;
+
+      const isC0BullishStarRetest = c0.close > c0.open && c0.close >= (c2.open + c2.close) / 2;
+
+      if (isC2StrongBearish && isC1Indecision && isC1Low && isC0BullishStarRetest) {
+        isMorningStar = true;
+      }
+    }
+
+    // 4. Three White Soldiers
+    let isThreeWhiteSoldiers = false;
+    if (lastIdx >= 2) {
+      const c2 = this.candles1m[lastIdx - 2];
+      const c1 = this.candles1m[lastIdx - 1];
+      const c0 = currentCandle;
+
+      const c2Bullish = c2.close > c2.open;
+      const c1Bullish = c1.close > c1.open;
+      const c0Bullish = c0.close > c0.open;
+
+      const ascendingCloses = c0.close > c1.close && c1.close > c2.close;
+      
+      const b2 = c2.close - c2.open;
+      const b1 = c1.close - c1.open;
+      const b0 = c0.close - c0.open;
+
+      const healthyBodies = b2 >= 0.2 * currentAtr && b1 >= 0.2 * currentAtr && b0 >= 0.2 * currentAtr;
+
+      if (c2Bullish && c1Bullish && c0Bullish && ascendingCloses && healthyBodies) {
+        isThreeWhiteSoldiers = true;
+      }
+    }
+
+    if (isPinBar) return { confirmed: !isIndecision, type: "Bullish Pin Bar" };
+    if (isBullishEngulfing) return { confirmed: !isIndecision, type: "Bullish Engulfing Pattern" };
+    if (hasMultiWickRejection) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
+    if (isTweezerBottom) return { confirmed: !isIndecision, type: "Tweezer Bottom Reversal Pattern" };
+    if (isPiercingLine) return { confirmed: !isIndecision, type: "Piercing Line Reversal Pattern" };
+    if (isMorningStar) return { confirmed: !isIndecision, type: "Morning Star Reversal Pattern" };
+    if (isThreeWhiteSoldiers) return { confirmed: !isIndecision, type: "Three White Soldiers Continuation Pattern" };
+    if (isMomentumCandle && hasStrongClose) return { confirmed: !isIndecision, type: "Bullish Momentum Candle" };
+    if (hasStrongClose && (lowerWick > upperWick || isBullish)) return { confirmed: !isIndecision, type: "Strong Close Support Rejection" };
+
+    return { confirmed: false, type: "" };
+  }
+
+  private isMultiCandleShortRejection(lastIdx: number, currentAtr: number): { confirmed: boolean; type: string } {
+    if (lastIdx < 0) return { confirmed: false, type: "" };
+    const currentCandle = this.candles1m[lastIdx];
+    const range = currentCandle.high - currentCandle.low;
+    const body = Math.abs(currentCandle.close - currentCandle.open);
+    const upperWick = currentCandle.high - Math.max(currentCandle.close, currentCandle.open);
+    const lowerWick = Math.min(currentCandle.close, currentCandle.open) - currentCandle.low;
+    const isBearish = currentCandle.close < currentCandle.open;
+    const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
+
+    // Single Candle Patterns
+    const isPinBar = range > 0 && upperWick >= 0.5 * range && lowerWick <= 0.25 * range;
+    const hasStrongClose = range > 0 && (currentCandle.high - currentCandle.close) / range >= 0.70;
+    const isMomentumCandle = isBearish && body >= 0.7 * currentAtr;
+    const isIndecision = range > 0 && (body / range < 0.15) && !isPinBar;
+
+    // Two-Candle Patterns
+    const isBearishEngulfing = prevCandle && 
+      (prevCandle.close > prevCandle.open) && 
+      isBearish && 
+      (currentCandle.close <= prevCandle.open) && 
+      (currentCandle.open >= prevCandle.close);
+
+    const hasMultiWickRejection = prevCandle && 
+      (upperWick >= 0.35 * range) && 
+      ((prevCandle.high - Math.max(prevCandle.close, prevCandle.open)) >= 0.35 * (prevCandle.high - prevCandle.low)) && 
+      Math.abs(currentCandle.high - prevCandle.high) < 0.15 * currentAtr;
+
+    // 1. Tweezer Top (Two-candle)
+    let isTweezerTop = false;
+    if (prevCandle) {
+      const prevRange = prevCandle.high - prevCandle.low;
+      const prevUpperWick = prevCandle.high - Math.max(prevCandle.close, prevCandle.open);
+      const matchingHighs = Math.abs(currentCandle.high - prevCandle.high) < 0.05 * currentAtr;
+      const currentHasUpperWick = range > 0 && upperWick >= 0.25 * range;
+      const prevHasUpperWick = prevRange > 0 && prevUpperWick >= 0.25 * prevRange;
+      if (matchingHighs && currentHasUpperWick && prevHasUpperWick && (isBearish || hasStrongClose)) {
+        isTweezerTop = true;
+      }
+    }
+
+    // 2. Dark Cloud Cover (Two-candle)
+    let isDarkCloudCover = false;
+    if (prevCandle) {
+      const prevRange = prevCandle.high - prevCandle.low;
+      const prevBody = prevCandle.close - prevCandle.open;
+      const isPrevStrongBullish = prevCandle.close > prevCandle.open && prevBody >= 0.3 * prevRange;
+      const opensAbovePrevClose = currentCandle.open > prevCandle.close - 0.05 * currentAtr;
+      const closesBelowMidpoint = currentCandle.close <= (prevCandle.open + prevCandle.close) / 2;
+      if (isPrevStrongBullish && opensAbovePrevClose && closesBelowMidpoint && isBearish && currentCandle.close > prevCandle.open) {
+        isDarkCloudCover = true;
+      }
+    }
+
+    // Three-Candle Patterns
+    // 3. Evening Star
+    let isEveningStar = false;
+    if (lastIdx >= 2) {
+      const c2 = this.candles1m[lastIdx - 2];
+      const c1 = this.candles1m[lastIdx - 1];
+      const c0 = currentCandle;
+
+      const r2 = c2.high - c2.low;
+      const b2 = c2.close - c2.open;
+      const isC2StrongBullish = c2.close > c2.open && b2 >= 0.3 * r2;
+
+      const r1 = c1.high - c1.low;
+      const b1 = Math.abs(c1.close - c1.open);
+      const isC1Indecision = r1 > 0 && (b1 / r1 < 0.3);
+      const isC1High = c1.high >= Math.max(c2.high, c0.high) - 0.1 * currentAtr;
+
+      const isC0BearishStarRetest = c0.close < c0.open && c0.close <= (c2.open + c2.close) / 2;
+
+      if (isC2StrongBullish && isC1Indecision && isC1High && isC0BearishStarRetest) {
+        isEveningStar = true;
+      }
+    }
+
+    // 4. Three Black Crows
+    let isThreeBlackCrows = false;
+    if (lastIdx >= 2) {
+      const c2 = this.candles1m[lastIdx - 2];
+      const c1 = this.candles1m[lastIdx - 1];
+      const c0 = currentCandle;
+
+      const c2Bearish = c2.close < c2.open;
+      const c1Bearish = c1.close < c1.open;
+      const c0Bearish = c0.close < c0.open;
+
+      const descendingCloses = c0.close < c1.close && c1.close < c2.close;
+
+      const b2 = c2.open - c2.close;
+      const b1 = c1.open - c1.close;
+      const b0 = c0.open - c0.close;
+
+      const healthyBodies = b2 >= 0.2 * currentAtr && b1 >= 0.2 * currentAtr && b0 >= 0.2 * currentAtr;
+
+      if (c2Bearish && c1Bearish && c0Bearish && descendingCloses && healthyBodies) {
+        isThreeBlackCrows = true;
+      }
+    }
+
+    if (isPinBar) return { confirmed: !isIndecision, type: "Bearish Pin Bar" };
+    if (isBearishEngulfing) return { confirmed: !isIndecision, type: "Bearish Engulfing Pattern" };
+    if (hasMultiWickRejection) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
+    if (isTweezerTop) return { confirmed: !isIndecision, type: "Tweezer Top Reversal Pattern" };
+    if (isDarkCloudCover) return { confirmed: !isIndecision, type: "Dark Cloud Cover Reversal Pattern" };
+    if (isEveningStar) return { confirmed: !isIndecision, type: "Evening Star Reversal Pattern" };
+    if (isThreeBlackCrows) return { confirmed: !isIndecision, type: "Three Black Crows Continuation Pattern" };
+    if (isMomentumCandle && hasStrongClose) return { confirmed: !isIndecision, type: "Bearish Momentum Candle" };
+    if (hasStrongClose && (upperWick > lowerWick || isBearish)) return { confirmed: !isIndecision, type: "Strong Close Resistance Rejection" };
+
+    return { confirmed: false, type: "" };
+  }
+
   private evaluateMarketStructureConfirmationRaw(signalDirection: "LONG" | "SHORT" | "NEUTRAL", probabilityLong: number): MarketStructureConfirmationResult {
     const config = dbManager.getConfig();
     const struct = this.getTrendMarketStructure();
@@ -4304,20 +4428,9 @@ class TradingEngine {
         const hasPulledBackToZone = postBreakoutCandles.some(c => c.low <= pullbackThreshold);
         
         // Check for bullish rejection on the current candle
-        const currentCandleVal = this.candles1m[lastIdx];
-        const range = currentCandleVal.high - currentCandleVal.low;
-        const body = Math.abs(currentCandleVal.close - currentCandleVal.open);
-        const upperWick = currentCandleVal.high - Math.max(currentCandleVal.close, currentCandleVal.open);
-        const lowerWick = Math.min(currentCandleVal.close, currentCandleVal.open) - currentCandleVal.low;
-        const isBullish = currentCandleVal.close > currentCandleVal.open;
-        const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
-
-        const isPinBar = range > 0 && lowerWick >= 0.5 * range && upperWick <= 0.25 * range;
-        const hasStrongClose = range > 0 && (currentCandleVal.close - currentCandleVal.low) / range >= 0.70;
-        const isBullishEngulfing = prevCandle && (prevCandle.close < prevCandle.open) && isBullish && (currentCandleVal.close >= prevCandle.open) && (currentCandleVal.open <= prevCandle.close);
-        const isMomentumCandle = isBullish && body >= 0.7 * currentAtrForPullback;
-
-        const isLongRejectionConfirmed = isPinBar || isBullishEngulfing || (isMomentumCandle && hasStrongClose) || (hasStrongClose && (lowerWick > upperWick || isBullish));
+        const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtrForPullback);
+        const isLongRejectionConfirmed = rejectionCheck.confirmed;
+        const longRejectionType = rejectionCheck.type;
 
         const isNearBrokenSupport = currentPrice >= boRangeHigh - 0.25 * currentAtrForPullback && currentPrice <= boRangeHigh + 0.8 * currentAtrForPullback;
 
@@ -4350,20 +4463,9 @@ class TradingEngine {
         const hasPulledBackToZone = postBreakoutCandles.some(c => c.high >= pullbackThreshold);
         
         // Check for bearish rejection on current candle
-        const currentCandleVal = this.candles1m[lastIdx];
-        const range = currentCandleVal.high - currentCandleVal.low;
-        const body = Math.abs(currentCandleVal.close - currentCandleVal.open);
-        const upperWick = currentCandleVal.high - Math.max(currentCandleVal.close, currentCandleVal.open);
-        const lowerWick = Math.min(currentCandleVal.close, currentCandleVal.open) - currentCandleVal.low;
-        const isBearish = currentCandleVal.close < currentCandleVal.open;
-        const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
-
-        const isPinBar = range > 0 && upperWick >= 0.5 * range && lowerWick <= 0.25 * range;
-        const hasStrongClose = range > 0 && (currentCandleVal.high - currentCandleVal.close) / range >= 0.70;
-        const isBearishEngulfing = prevCandle && (prevCandle.close > prevCandle.open) && isBearish && (currentCandleVal.close <= prevCandle.open) && (currentCandleVal.open <= prevCandle.close);
-        const isMomentumCandle = isBearish && body >= 0.7 * currentAtrForPullback;
-
-        const isShortRejectionConfirmed = isPinBar || isBearishEngulfing || (isMomentumCandle && hasStrongClose) || (hasStrongClose && (upperWick > lowerWick || isBearish));
+        const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtrForPullback);
+        const isShortRejectionConfirmed = rejectionCheck.confirmed;
+        const shortRejectionType = rejectionCheck.type;
 
         const isNearBrokenResistance = currentPrice <= boRangeLow + 0.25 * currentAtrForPullback && currentPrice >= boRangeLow - 0.8 * currentAtrForPullback;
 

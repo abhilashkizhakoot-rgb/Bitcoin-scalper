@@ -1131,7 +1131,7 @@ class TradingEngine {
           return Math.abs(c - openVal);
         }).reduce((a, b) => a + b, 0) / 20
       : 50;
-    const currentCandle = hasEnoughData ? this.candles1m[lastIdx] : { open: currentPrice, close: currentPrice, high: currentPrice, low: currentPrice };
+    const currentCandle = hasEnoughData ? this.candles1m[lastIdx] : { time: Date.now() / 1000, open: currentPrice, close: currentPrice, high: currentPrice, low: currentPrice, volume: 0 };
     const currentBodySize = Math.abs(currentCandle.close - currentCandle.open);
     const atr14_cp = hasEnoughData ? this.calculateATR(this.candles1m, 14) : [50];
     const currentAtr_cp = atr14_cp[lastIdx] || 50;
@@ -1178,9 +1178,12 @@ class TradingEngine {
       const isRangeLongReversal = (currentPrice <= rangeSupportThreshold) && (currentCandle.close > currentCandle.open);
       const isRangeShortReversal = (currentPrice >= rangeResistanceThreshold) && (currentCandle.close < currentCandle.open);
 
-      // Breakout signals: Price breaks outside the 30-candle range with high relative volume
-      const isRangeLongBreakout = (currentPrice > rangeHigh) && (relVolume > 1.2);
-      const isRangeShortBreakdown = (currentPrice < rangeLow) && (relVolume > 1.2);
+      // Breakout signals: Price breaks outside the 30-candle range with validated breakout candle
+      const breakoutValidationLong = this.validateRangeBreakout("LONG", currentCandle, relVolume, recentCandlesForRange);
+      const breakoutValidationShort = this.validateRangeBreakout("SHORT", currentCandle, relVolume, recentCandlesForRange);
+
+      const isRangeLongBreakout = (currentPrice > rangeHigh) && breakoutValidationLong.isValid;
+      const isRangeShortBreakdown = (currentPrice < rangeLow) && breakoutValidationShort.isValid;
 
       if (isRangeLongReversal) {
         signalDirection = "LONG";
@@ -3933,6 +3936,88 @@ class TradingEngine {
     }
   }
 
+  private validateRangeBreakout(
+    direction: "LONG" | "SHORT",
+    currentCandle: Candlestick,
+    relVolume: number,
+    recentCandles: Candlestick[]
+  ): { isValid: boolean; reason: string } {
+    const candleRange = currentCandle.high - currentCandle.low;
+    if (candleRange <= 0) {
+      return { isValid: false, reason: "Zero candle range." };
+    }
+
+    const bodySize = Math.abs(currentCandle.close - currentCandle.open);
+    const bodyRatio = bodySize / candleRange;
+
+    // Calculate average candle range of the last 15 candles
+    const sliceCount = Math.min(recentCandles.length, 15);
+    const lastCandles = recentCandles.slice(-sliceCount);
+    const avgRange = lastCandles.length > 0
+      ? lastCandles.reduce((sum, c) => sum + (c.high - c.low), 0) / lastCandles.length
+      : candleRange;
+
+    if (direction === "LONG") {
+      // 1. Must be a green candle
+      if (currentCandle.close <= currentCandle.open) {
+        return { isValid: false, reason: "Breakout candle is not bullish (red or doji)." };
+      }
+
+      // 2. Volume Expansion: Require strong volume for range breakouts
+      if (relVolume < 1.4) {
+        return { isValid: false, reason: `Insufficient relative volume (${relVolume.toFixed(2)}x < 1.4x).` };
+      }
+
+      // 3. Candle Body Ratio: At least 45% of the candle range should be body
+      if (bodyRatio < 0.45) {
+        return { isValid: false, reason: `Weak candle body structure (body ratio ${bodyRatio.toFixed(2)} < 0.45).` };
+      }
+
+      // 4. Upper Wick Rejection: Upper wick should not exceed 30% of total candle range
+      const upperWick = currentCandle.high - currentCandle.close;
+      const upperWickRatio = upperWick / candleRange;
+      if (upperWickRatio > 0.30) {
+        return { isValid: false, reason: `Excessive upper wick rejection (${(upperWickRatio * 100).toFixed(1)}% > 30.0%) indicating a bull trap.` };
+      }
+
+      // 5. Candle Size Check: Prevent micro-candles from drifting above range resistance
+      if (candleRange < avgRange * 0.8) {
+        return { isValid: false, reason: `Breakout candle size is too small (${candleRange.toFixed(2)} < 80% of average range ${avgRange.toFixed(2)}).` };
+      }
+
+    } else {
+      // SHORT breakdown
+      // 1. Must be a red candle
+      if (currentCandle.close >= currentCandle.open) {
+        return { isValid: false, reason: "Breakdown candle is not bearish (green or doji)." };
+      }
+
+      // 2. Volume Expansion
+      if (relVolume < 1.4) {
+        return { isValid: false, reason: `Insufficient relative volume (${relVolume.toFixed(2)}x < 1.4x).` };
+      }
+
+      // 3. Candle Body Ratio
+      if (bodyRatio < 0.45) {
+        return { isValid: false, reason: `Weak candle body structure (body ratio ${bodyRatio.toFixed(2)} < 0.45).` };
+      }
+
+      // 4. Lower Wick Rejection: Lower wick should not exceed 30% of total candle range
+      const lowerWick = currentCandle.close - currentCandle.low;
+      const lowerWickRatio = lowerWick / candleRange;
+      if (lowerWickRatio > 0.30) {
+        return { isValid: false, reason: `Excessive lower wick rejection (${(lowerWickRatio * 100).toFixed(1)}% > 30.0%) indicating a bear trap.` };
+      }
+
+      // 5. Candle Size Check
+      if (candleRange < avgRange * 0.8) {
+        return { isValid: false, reason: `Breakdown candle size is too small (${candleRange.toFixed(2)} < 80% of average range ${avgRange.toFixed(2)}).` };
+      }
+    }
+
+    return { isValid: true, reason: "Breakout validated." };
+  }
+
   private evaluateMarketStructureConfirmation(signalDirection: "LONG" | "SHORT" | "NEUTRAL"): MarketStructureConfirmationResult {
     const rawResult = this.evaluateMarketStructureConfirmationRaw(signalDirection);
     return this.applyEma200ProximityFilter(signalDirection, this.currentPrice, rawResult);
@@ -4082,7 +4167,7 @@ class TradingEngine {
     const struct = this.getTrendMarketStructure();
     const lastIdx = this.candles1m.length - 1;
     const currentPrice = this.currentPrice;
-    const currentCandle = lastIdx >= 0 ? this.candles1m[lastIdx] : { open: currentPrice, close: currentPrice };
+    const currentCandle = lastIdx >= 0 ? this.candles1m[lastIdx] : { time: Date.now() / 1000, open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice, volume: 0 };
 
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
       return {
@@ -4135,8 +4220,11 @@ class TradingEngine {
         }
       }
 
-      const isRangeLongBreakout = (currentPrice > rangeHigh) && (relVolume > 1.2);
-      const isRangeShortBreakdown = (currentPrice < rangeLow) && (relVolume > 1.2);
+      const breakoutValidationLong = this.validateRangeBreakout("LONG", currentCandle, relVolume, recentCandlesForRange);
+      const breakoutValidationShort = this.validateRangeBreakout("SHORT", currentCandle, relVolume, recentCandlesForRange);
+
+      const isRangeLongBreakout = (currentPrice > rangeHigh) && breakoutValidationLong.isValid;
+      const isRangeShortBreakdown = (currentPrice < rangeLow) && breakoutValidationShort.isValid;
 
       // Calculate Micro-Trend alignment using fast/slow EMAs on 1m chart
       const closes = this.candles1m.map((c) => c.close);
@@ -4197,6 +4285,13 @@ class TradingEngine {
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
+        } else if (currentPrice > rangeHigh) {
+          return {
+            confirmed: false,
+            message: `Fake LONG Breakout (Bull Trap) Detected: Price ($${currentPrice.toFixed(2)}) crossed above range resistance ($${rangeHigh.toFixed(2)}) but failed validation. Reason: ${breakoutValidationLong.reason}`,
+            swingHigh: rangeHigh,
+            swingLow: rangeLow
+          };
         } else {
           return {
             confirmed: false,
@@ -4233,6 +4328,13 @@ class TradingEngine {
           return {
             confirmed: true,
             message: `Ranging Bearish Breakdown Confirmed. Price ($${currentPrice.toFixed(2)}) broke below major range support ($${rangeLow.toFixed(2)}) on high relative volume (${relVolume.toFixed(2)}x). ${microTrendDetails}`,
+            swingHigh: rangeHigh,
+            swingLow: rangeLow
+          };
+        } else if (currentPrice < rangeLow) {
+          return {
+            confirmed: false,
+            message: `Fake SHORT Breakdown (Bear Trap) Detected: Price ($${currentPrice.toFixed(2)}) crossed below range support ($${rangeLow.toFixed(2)}) but failed validation. Reason: ${breakoutValidationShort.reason}`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -5097,9 +5199,12 @@ class TradingEngine {
       const isRangeLongReversal = (currentClose <= rangeSupportThreshold) && (currentCandle.close > currentCandle.open);
       const isRangeShortReversal = (currentClose >= rangeResistanceThreshold) && (currentCandle.close < currentCandle.open);
 
-      // Breakout signals: Price breaks outside the 30-candle range with high relative volume
-      const isRangeLongBreakout = (currentClose > rangeHigh) && (relVolume > 1.2);
-      const isRangeShortBreakdown = (currentClose < rangeLow) && (relVolume > 1.2);
+      // Breakout signals: Price breaks outside the 30-candle range with validated breakout candle
+      const breakoutValidationLong = this.validateRangeBreakout("LONG", currentCandle, relVolume, recentCandlesForRange);
+      const breakoutValidationShort = this.validateRangeBreakout("SHORT", currentCandle, relVolume, recentCandlesForRange);
+
+      const isRangeLongBreakout = (currentClose > rangeHigh) && breakoutValidationLong.isValid;
+      const isRangeShortBreakdown = (currentClose < rangeLow) && breakoutValidationShort.isValid;
 
       if (isRangeLongReversal) {
         signalDirection = "LONG";

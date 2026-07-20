@@ -3604,7 +3604,12 @@ class TradingEngine {
       const effectivePullbackMult = Math.max(pullbackMultiplier, ms.pullback_multiplier_limit);
       const effectiveEmaMult = Math.max(emaRetraceMultiplier, ms.ema_retrace_multiplier_limit);
       const pullbackLimit = breakoutLevel + effectivePullbackMult * currentAtr;
-      const hasPulledBackToZone = postBreakoutCandles.some(c => c.low <= pullbackLimit);
+      
+      // To prevent buying the top/late chasing after price has moved away,
+      // we check if the actual retest/pullback touch occurred within the last 3 candles
+      // (which matches our 1-candle, 2-candle, and 3-candle rejection pattern window).
+      const recentPostBreakoutCandles = postBreakoutCandles.slice(-3);
+      const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.low <= pullbackLimit);
       
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
@@ -3624,17 +3629,20 @@ class TradingEngine {
           condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: `Waiting for bullish confirmation candle pattern at broken HH support level $${breakoutLevel.toFixed(2)}.` };
         }
       } else {
-        condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: `Skipped: Price has not yet pulled back to retest HH level of $${pullbackLimit.toFixed(2)}.` };
+        condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: `Skipped: Price has not recently pulled back to retest HH level of $${pullbackLimit.toFixed(2)} (or has already drifted too far above).` };
       }
 
       // Setup 2: Adaptive EMA Pushback Zone
       const emaRetraceThresholdFirst = firstEmaVal + effectiveEmaMult * currentAtr;
       const emaRetraceThresholdSecond = secondEmaVal + effectiveEmaMult * currentAtr;
-      const hasRetracedToEMA = postBreakoutCandles.some(c => c.low <= emaRetraceThresholdFirst || c.low <= emaRetraceThresholdSecond);
       
-      // Touch or rejection proximity to dynamic EMA zone
-      const touchesFirstEma = currentCandle.low <= firstEmaVal + 0.25 * currentAtr && currentCandle.high >= firstEmaVal - 0.15 * currentAtr;
-      const touchesSecondEma = currentCandle.low <= secondEmaVal + 0.25 * currentAtr && currentCandle.high >= secondEmaVal - 0.15 * currentAtr;
+      // We similarly scan the recent 3 candles for the EMA retracement to align with multi-candle rejection patterns,
+      // preventing late triggers when price is far away from the EMA zone.
+      const hasRetracedToEMA = recentPostBreakoutCandles.some(c => c.low <= emaRetraceThresholdFirst || c.low <= emaRetraceThresholdSecond);
+      
+      // Touch or rejection proximity to dynamic EMA zone within the last 3 candles (to support multi-candle patterns where the confirmation candle closes higher)
+      const touchesFirstEma = recentPostBreakoutCandles.some(c => c.low <= firstEmaVal + 0.25 * currentAtr && c.high >= firstEmaVal - 0.15 * currentAtr);
+      const touchesSecondEma = recentPostBreakoutCandles.some(c => c.low <= secondEmaVal + 0.25 * currentAtr && c.high >= secondEmaVal - 0.15 * currentAtr);
       
       const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isLongRejectionConfirmed && hasRetracedToEMA;
       let emaPushbackMessage = "";
@@ -3652,7 +3660,7 @@ class TradingEngine {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle.` };
         } else {
           const thresholdVal = Math.max(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
-          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: `Skipped: Price has not yet retraced into dynamic EMA threshold level of $${thresholdVal.toFixed(2)}.` };
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: `Skipped: Price has not recently retraced into dynamic EMA threshold level of $${thresholdVal.toFixed(2)}.` };
         }
       }
 
@@ -3821,7 +3829,12 @@ class TradingEngine {
       const effectivePullbackMult = Math.max(pullbackMultiplier, ms.pullback_multiplier_limit);
       const effectiveEmaMult = Math.max(emaRetraceMultiplier, ms.ema_retrace_multiplier_limit);
       const pullbackLimit = breakoutLevel - effectivePullbackMult * currentAtr;
-      const hasPulledBackToZone = postBreakoutCandles.some(c => c.high >= pullbackLimit);
+      
+      // To prevent shorting the bottom/late chasing after price has moved away,
+      // we check if the actual retest/pullback touch occurred within the last 3 candles
+      // (which matches our 1-candle, 2-candle, and 3-candle rejection pattern window).
+      const recentPostBreakoutCandles = postBreakoutCandles.slice(-3);
+      const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.high >= pullbackLimit);
       
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
@@ -3841,17 +3854,20 @@ class TradingEngine {
           condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: `Waiting for bearish confirmation candle pattern at broken LL resistance level $${breakoutLevel.toFixed(2)}.` };
         }
       } else {
-        condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: `Skipped: Price has not yet pulled back to retest LL level of $${pullbackLimit.toFixed(2)}.` };
+        condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: `Skipped: Price has not recently pulled back to retest LL level of $${pullbackLimit.toFixed(2)} (or has already drifted too far below).` };
       }
 
       // Setup 2: Adaptive EMA Pushback Zone
       const emaRetraceThresholdFirst = firstEmaVal - effectiveEmaMult * currentAtr;
       const emaRetraceThresholdSecond = secondEmaVal - effectiveEmaMult * currentAtr;
-      const hasRetracedToEMA = postBreakoutCandles.some(c => c.high >= emaRetraceThresholdFirst || c.high >= emaRetraceThresholdSecond);
       
-      // Touch or rejection proximity to dynamic EMA zone
-      const touchesFirstEma = currentCandle.high >= firstEmaVal - 0.25 * currentAtr && currentCandle.low <= firstEmaVal + 0.15 * currentAtr;
-      const touchesSecondEma = currentCandle.high >= secondEmaVal - 0.25 * currentAtr && currentCandle.low <= secondEmaVal + 0.15 * currentAtr;
+      // We similarly scan the recent 3 candles for the EMA retracement to align with multi-candle rejection patterns,
+      // preventing late triggers when price is far away from the EMA zone.
+      const hasRetracedToEMA = recentPostBreakoutCandles.some(c => c.high >= emaRetraceThresholdFirst || c.high >= emaRetraceThresholdSecond);
+      
+      // Touch or rejection proximity to dynamic EMA zone within the last 3 candles (to support multi-candle patterns where the confirmation candle closes lower)
+      const touchesFirstEma = recentPostBreakoutCandles.some(c => c.high >= firstEmaVal - 0.25 * currentAtr && c.low <= firstEmaVal + 0.15 * currentAtr);
+      const touchesSecondEma = recentPostBreakoutCandles.some(c => c.high >= secondEmaVal - 0.25 * currentAtr && c.low <= secondEmaVal + 0.15 * currentAtr);
       
       const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isShortRejectionConfirmed && hasRetracedToEMA;
       let emaPushbackMessage = "";
@@ -3869,7 +3885,7 @@ class TradingEngine {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle.` };
         } else {
           const thresholdVal = Math.min(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
-          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: `Skipped: Price has not yet retraced into dynamic EMA threshold level of $${thresholdVal.toFixed(2)}.` };
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: `Skipped: Price has not recently retraced into dynamic EMA threshold level of $${thresholdVal.toFixed(2)}.` };
         }
       }
 
@@ -4425,7 +4441,9 @@ class TradingEngine {
       if (rangeLongBreakoutIdx !== -1) {
         const postBreakoutCandles = this.candles1m.slice(rangeLongBreakoutIdx + 1);
         const pullbackThreshold = boRangeHigh + 0.5 * currentAtrForPullback;
-        const hasPulledBackToZone = postBreakoutCandles.some(c => c.low <= pullbackThreshold);
+        
+        const recentPostBreakoutCandles = postBreakoutCandles.slice(-3);
+        const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.low <= pullbackThreshold);
         
         // Check for bullish rejection on the current candle
         const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtrForPullback);
@@ -4460,7 +4478,9 @@ class TradingEngine {
       if (rangeShortBreakoutIdx !== -1) {
         const postBreakoutCandles = this.candles1m.slice(rangeShortBreakoutIdx + 1);
         const pullbackThreshold = boRangeLow - 0.5 * currentAtrForPullback;
-        const hasPulledBackToZone = postBreakoutCandles.some(c => c.high >= pullbackThreshold);
+        
+        const recentPostBreakoutCandles = postBreakoutCandles.slice(-3);
+        const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.high >= pullbackThreshold);
         
         // Check for bearish rejection on current candle
         const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtrForPullback);

@@ -3282,6 +3282,33 @@ class TradingEngine {
     const ema100ValComputed = ema100Series[lastIdx] || ema100Val;
     const ema200ValComputed = ema200Series[lastIdx] || currentPrice;
 
+    // Configurable micro EMAs for fallback crossover confirmation
+    const microFastPeriod = ms.micro_trend_fast_period || 5;
+    const microSlowPeriod = ms.micro_trend_slow_period || 15;
+    const microFastSeries = this.calculateEMA(closes, microFastPeriod);
+    const microSlowSeries = this.calculateEMA(closes, microSlowPeriod);
+
+    let isMicroCrossoverBullish = false;
+    let isMicroCrossoverBearish = false;
+    if (closes.length >= microSlowPeriod + 2) {
+      // Check the last 3 candles (current and prior 2) for an active/recent crossover
+      for (let i = 0; i < 3; i++) {
+        const idx = lastIdx - i;
+        if (idx - 1 >= 0) {
+          const fCurrent = microFastSeries[idx];
+          const sCurrent = microSlowSeries[idx];
+          const fPrev = microFastSeries[idx - 1];
+          const sPrev = microSlowSeries[idx - 1];
+          if (fCurrent > sCurrent && fPrev <= sPrev) {
+            isMicroCrossoverBullish = true;
+          }
+          if (fCurrent < sCurrent && fPrev >= sPrev) {
+            isMicroCrossoverBearish = true;
+          }
+        }
+      }
+    }
+
     // 1. EMA Slope of EMA20 (over last 5 candles)
     const slopePeriod = 5;
     let ema20SlopePct = 0;
@@ -3658,12 +3685,16 @@ class TradingEngine {
       const touchesFirstEma = recentPostBreakoutCandles.some(c => c.low <= firstEmaVal + 0.25 * currentAtr && c.high >= firstEmaVal - 0.15 * currentAtr);
       const touchesSecondEma = recentPostBreakoutCandles.some(c => c.low <= secondEmaVal + 0.25 * currentAtr && c.high >= secondEmaVal - 0.15 * currentAtr);
       
-      const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isLongRejectionConfirmed && hasRetracedToEMA && !isSetup2Invalidated;
+      const isRejectionOrMicroCrossoverConfirmed = isLongRejectionConfirmed || isMicroCrossoverBullish;
+      const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isRejectionOrMicroCrossoverConfirmed && hasRetracedToEMA && !isSetup2Invalidated;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
           const matchedEmaVal = touchesFirstEma ? firstEmaVal : secondEmaVal;
-          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed via [${longRejectionType}]${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected dynamic EMA support at $${matchedEmaVal.toFixed(2)} with bullish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
+          const confirmType = isLongRejectionConfirmed 
+            ? `via [${longRejectionType}]` 
+            : `via Fallback Micro EMA Crossover (${microFastPeriod}/${microSlowPeriod} EMA)`;
+          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed ${confirmType}${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected/bounced off dynamic EMA support at $${matchedEmaVal.toFixed(2)} (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "PASS", reason: emaPushbackMessage };
         } else {
           emaPushbackMessage = "Blocked EMA Pushback: Abnormally high volume pullback during EMA retracement suggests a trend failure.";
@@ -3673,7 +3704,7 @@ class TradingEngine {
         if (isSetup2Invalidated) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Blocked: Price broke below dynamic EMA invalidation floor $${emaInvalidationFloor.toFixed(2)}.` };
         } else if (hasRetracedToEMA) {
-          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle.` };
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle or fallback micro EMA crossover (${microFastPeriod}/${microSlowPeriod} EMA).` };
         } else {
           const thresholdVal = Math.max(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: `Skipped: Price has not recently retraced into dynamic EMA threshold level of $${thresholdVal.toFixed(2)}.` };
@@ -3899,12 +3930,16 @@ class TradingEngine {
       const touchesFirstEma = recentPostBreakoutCandles.some(c => c.high >= firstEmaVal - 0.25 * currentAtr && c.low <= firstEmaVal + 0.15 * currentAtr);
       const touchesSecondEma = recentPostBreakoutCandles.some(c => c.high >= secondEmaVal - 0.25 * currentAtr && c.low <= secondEmaVal + 0.15 * currentAtr);
       
-      const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isShortRejectionConfirmed && hasRetracedToEMA && !isSetup2Invalidated;
+      const isRejectionOrMicroCrossoverConfirmed = isShortRejectionConfirmed || isMicroCrossoverBearish;
+      const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isRejectionOrMicroCrossoverConfirmed && hasRetracedToEMA && !isSetup2Invalidated;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
           const matchedEmaVal = touchesFirstEma ? firstEmaVal : secondEmaVal;
-          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed via [${shortRejectionType}]${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected dynamic EMA resistance at $${matchedEmaVal.toFixed(2)} with bearish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
+          const confirmType = isShortRejectionConfirmed 
+            ? `via [${shortRejectionType}]` 
+            : `via Fallback Micro EMA Crossover (${microFastPeriod}/${microSlowPeriod} EMA)`;
+          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed ${confirmType}${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected/bounced off dynamic EMA resistance at $${matchedEmaVal.toFixed(2)} (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "PASS", reason: emaPushbackMessage };
         } else {
           emaPushbackMessage = "Blocked EMA Pushback: Abnormally high volume pullback during EMA retracement suggests a trend failure.";
@@ -3914,7 +3949,7 @@ class TradingEngine {
         if (isSetup2Invalidated) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Blocked: Price broke above dynamic EMA invalidation ceiling $${emaInvalidationCeiling.toFixed(2)}.` };
         } else if (hasRetracedToEMA) {
-          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle.` };
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle or fallback micro EMA crossover (${microFastPeriod}/${microSlowPeriod} EMA).` };
         } else {
           const thresholdVal = Math.min(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: `Skipped: Price has not recently retraced into dynamic EMA threshold level of $${thresholdVal.toFixed(2)}.` };

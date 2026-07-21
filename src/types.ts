@@ -262,6 +262,9 @@ export interface StrategyConfig {
     micro_trend_alignment_enabled?: boolean; // Enable Micro-Trend Alignment Filter (default: true)
     micro_trend_fast_period?: number; // Fast period for micro-trend tracking (default: 5)
     micro_trend_slow_period?: number; // Slow period for micro-trend tracking (default: 15)
+    fallback_crossover_enabled?: boolean; // Enable Fallback Crossover Confirmation (default: true)
+    fallback_crossover_fast_period?: number; // Fast period for fallback crossover (default: 5)
+    fallback_crossover_slow_period?: number; // Slow period for fallback crossover (default: 15)
     timeframe_minutes?: number; // Market Structure Timeframe in minutes (default: 5)
     very_high_probability_threshold?: number; // Probability threshold above which direct breakouts are traded, otherwise waiting for pullback (default: 0.82)
   };

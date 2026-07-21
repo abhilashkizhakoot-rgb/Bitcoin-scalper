@@ -3528,12 +3528,24 @@ class TradingEngine {
       const structuralHL = struct.current_HL ? struct.current_HL.price : 0;
       const reclaimThreshold = Math.max(breakoutLevel - invalidationMultiplier * currentAtr, structuralHL - 0.1 * currentAtr);
       const hasReclaimed = postBreakoutCandles.some(c => c.close < reclaimThreshold);
-      if (hasReclaimed || currentPrice < reclaimThreshold) {
-        const reclaimMsg = `Blocked: Higher High breakout setup was invalidated because price strongly reclaimed/broke below the structural/reclaim floor level of $${reclaimThreshold.toFixed(2)} (Breakout Level: $${breakoutLevel.toFixed(2)}).`;
-        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "FAIL", reason: `Price broken below reclaim level $${reclaimThreshold.toFixed(2)}` };
+      const isSetup1Invalidated = hasReclaimed || currentPrice < reclaimThreshold;
+
+      // Deep invalidation floor for EMA retracements
+      const emaInvalidationFloor = Math.max(secondEmaVal - 0.5 * currentAtr, structuralHL - 0.2 * currentAtr);
+      const hasEmaInvalidated = postBreakoutCandles.some(c => c.close < emaInvalidationFloor);
+      const isSetup2Invalidated = hasEmaInvalidated || currentPrice < emaInvalidationFloor;
+
+      if (isSetup1Invalidated && isSetup2Invalidated) {
+        const reclaimMsg = `Blocked: Market structure setup was fully invalidated because price broke below both the breakout reclaim level of $${reclaimThreshold.toFixed(2)} and the dynamic EMA invalidation floor of $${emaInvalidationFloor.toFixed(2)}.`;
+        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "FAIL", reason: `Price broke below reclaim level $${reclaimThreshold.toFixed(2)} and EMA invalidation floor $${emaInvalidationFloor.toFixed(2)}` };
         return getReturnObj(false, reclaimMsg);
       }
-      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `Price stayed above reclaim level $${reclaimThreshold.toFixed(2)}` };
+
+      if (isSetup1Invalidated) {
+        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `Price broke below breakout reclaim level $${reclaimThreshold.toFixed(2)}, but remains above dynamic EMA invalidation floor $${emaInvalidationFloor.toFixed(2)}.` };
+      } else {
+        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `Price stayed above breakout reclaim level $${reclaimThreshold.toFixed(2)} and dynamic EMA invalidation floor $${emaInvalidationFloor.toFixed(2)}.` };
+      }
 
       // Chasing check: too many candles elapsed without entry (adaptive lookback based on trend strength)
       let maxPostBreakoutCandles = 30;
@@ -3613,7 +3625,9 @@ class TradingEngine {
       
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
-      if (hasPulledBackToZone) {
+      if (isSetup1Invalidated) {
+        condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: `Blocked: Price broke below breakout reclaim level $${reclaimThreshold.toFixed(2)}.` };
+      } else if (hasPulledBackToZone) {
         const isRejection = isLongRejectionConfirmed;
         const isContinuation = currentCandle.close > currentCandle.open && (currentCandle.close >= breakoutLevel || isLongRejectionConfirmed);
         if (isRejection && isContinuation) {
@@ -3644,7 +3658,7 @@ class TradingEngine {
       const touchesFirstEma = recentPostBreakoutCandles.some(c => c.low <= firstEmaVal + 0.25 * currentAtr && c.high >= firstEmaVal - 0.15 * currentAtr);
       const touchesSecondEma = recentPostBreakoutCandles.some(c => c.low <= secondEmaVal + 0.25 * currentAtr && c.high >= secondEmaVal - 0.15 * currentAtr);
       
-      const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isLongRejectionConfirmed && hasRetracedToEMA;
+      const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isLongRejectionConfirmed && hasRetracedToEMA && !isSetup2Invalidated;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
@@ -3656,7 +3670,9 @@ class TradingEngine {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: emaPushbackMessage };
         }
       } else {
-        if (hasRetracedToEMA) {
+        if (isSetup2Invalidated) {
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Blocked: Price broke below dynamic EMA invalidation floor $${emaInvalidationFloor.toFixed(2)}.` };
+        } else if (hasRetracedToEMA) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle.` };
         } else {
           const thresholdVal = Math.max(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
@@ -3753,12 +3769,24 @@ class TradingEngine {
       const structuralLH = struct.current_LH ? struct.current_LH.price : Infinity;
       const reclaimThreshold = Math.min(breakoutLevel + invalidationMultiplier * currentAtr, structuralLH + 0.1 * currentAtr);
       const hasReclaimed = postBreakoutCandles.some(c => c.close > reclaimThreshold);
-      if (hasReclaimed || currentPrice > reclaimThreshold) {
-        const reclaimMsg = `Blocked: Lower Low breakout setup was invalidated because price strongly reclaimed/broke above the structural/reclaim floor level of $${reclaimThreshold.toFixed(2)} (Breakout Level: $${breakoutLevel.toFixed(2)}).`;
-        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "FAIL", reason: `Price broken above reclaim level $${reclaimThreshold.toFixed(2)}` };
+      const isSetup1Invalidated = hasReclaimed || currentPrice > reclaimThreshold;
+
+      // Deep invalidation ceiling for EMA retracements
+      const emaInvalidationCeiling = Math.min(secondEmaVal + 0.5 * currentAtr, structuralLH + 0.2 * currentAtr);
+      const hasEmaInvalidated = postBreakoutCandles.some(c => c.close > emaInvalidationCeiling);
+      const isSetup2Invalidated = hasEmaInvalidated || currentPrice > emaInvalidationCeiling;
+
+      if (isSetup1Invalidated && isSetup2Invalidated) {
+        const reclaimMsg = `Blocked: Market structure setup was fully invalidated because price broke above both the breakout reclaim level of $${reclaimThreshold.toFixed(2)} and the dynamic EMA invalidation ceiling of $${emaInvalidationCeiling.toFixed(2)}.`;
+        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "FAIL", reason: `Price broke above reclaim level $${reclaimThreshold.toFixed(2)} and EMA invalidation ceiling $${emaInvalidationCeiling.toFixed(2)}` };
         return getReturnObj(false, reclaimMsg);
       }
-      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `Price stayed below reclaim level $${reclaimThreshold.toFixed(2)}` };
+
+      if (isSetup1Invalidated) {
+        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `Price broke above breakout reclaim level $${reclaimThreshold.toFixed(2)}, but remains below dynamic EMA invalidation ceiling $${emaInvalidationCeiling.toFixed(2)}.` };
+      } else {
+        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `Price stayed below breakout reclaim level $${reclaimThreshold.toFixed(2)} and dynamic EMA invalidation ceiling $${emaInvalidationCeiling.toFixed(2)}.` };
+      }
 
       // Chasing check: too many candles elapsed without entry (adaptive lookback based on trend strength)
       let maxPostBreakoutCandles = 30;
@@ -3838,7 +3866,9 @@ class TradingEngine {
       
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
-      if (hasPulledBackToZone) {
+      if (isSetup1Invalidated) {
+        condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: `Blocked: Price broke above breakout reclaim level $${reclaimThreshold.toFixed(2)}.` };
+      } else if (hasPulledBackToZone) {
         const isRejection = isShortRejectionConfirmed;
         const isContinuation = currentCandle.close < currentCandle.open && (currentCandle.close <= breakoutLevel || isShortRejectionConfirmed);
         if (isRejection && isContinuation) {
@@ -3869,7 +3899,7 @@ class TradingEngine {
       const touchesFirstEma = recentPostBreakoutCandles.some(c => c.high >= firstEmaVal - 0.25 * currentAtr && c.low <= firstEmaVal + 0.15 * currentAtr);
       const touchesSecondEma = recentPostBreakoutCandles.some(c => c.high >= secondEmaVal - 0.25 * currentAtr && c.low <= secondEmaVal + 0.15 * currentAtr);
       
-      const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isShortRejectionConfirmed && hasRetracedToEMA;
+      const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isShortRejectionConfirmed && hasRetracedToEMA && !isSetup2Invalidated;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
@@ -3881,7 +3911,9 @@ class TradingEngine {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: emaPushbackMessage };
         }
       } else {
-        if (hasRetracedToEMA) {
+        if (isSetup2Invalidated) {
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Blocked: Price broke above dynamic EMA invalidation ceiling $${emaInvalidationCeiling.toFixed(2)}.` };
+        } else if (hasRetracedToEMA) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle.` };
         } else {
           const thresholdVal = Math.min(emaRetraceThresholdFirst, emaRetraceThresholdSecond);

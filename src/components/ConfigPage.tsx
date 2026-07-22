@@ -170,6 +170,8 @@ export default function ConfigPage({
     fallback_crossover_enabled: true,
     fallback_crossover_fast_period: 5,
     fallback_crossover_slow_period: 15,
+    fallback_crossover_bounce_atr_fraction: 0.15,
+    fallback_crossover_invalidation_atr_fraction: 0.25,
     timeframe_minutes: 5,
   });
 
@@ -271,6 +273,8 @@ export default function ConfigPage({
         fallback_crossover_enabled: true,
         fallback_crossover_fast_period: 5,
         fallback_crossover_slow_period: 15,
+        fallback_crossover_bounce_atr_fraction: 0.15,
+        fallback_crossover_invalidation_atr_fraction: 0.25,
         timeframe_minutes: 5,
       }
     };
@@ -2547,6 +2551,40 @@ export default function ConfigPage({
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Slow EMA period for the fallback crossover confirmation (Standard: 15).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Fallback Bounce ATR Fraction</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max="1.0"
+                    disabled={!msConfig.fallback_crossover_enabled}
+                    value={msConfig.fallback_crossover_bounce_atr_fraction !== undefined ? msConfig.fallback_crossover_bounce_atr_fraction : 0.15}
+                    onChange={(e) => setMsConfig({ ...msConfig, fallback_crossover_bounce_atr_fraction: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Required bounce off the dynamic EMA (expressed as a fraction of ATR) to confirm return of trend momentum (Standard: 0.15).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Fallback Invalidation ATR Fraction</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max="2.0"
+                    disabled={!msConfig.fallback_crossover_enabled}
+                    value={msConfig.fallback_crossover_invalidation_atr_fraction !== undefined ? msConfig.fallback_crossover_invalidation_atr_fraction : 0.25}
+                    onChange={(e) => setMsConfig({ ...msConfig, fallback_crossover_invalidation_atr_fraction: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Maximum price breakout/retracement penetration below the slow fallback EMA (expressed as a fraction of ATR) before the setup is invalidated (Standard: 0.25).
                   </p>
                 </div>
               </div>

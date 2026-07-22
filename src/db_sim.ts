@@ -221,6 +221,8 @@ const DEFAULT_CONFIG: StrategyConfig = {
     fallback_crossover_enabled: true,
     fallback_crossover_fast_period: 5,
     fallback_crossover_slow_period: 15,
+    fallback_crossover_bounce_atr_fraction: 0.15,
+    fallback_crossover_invalidation_atr_fraction: 0.25,
     timeframe_minutes: 5,
     very_high_probability_threshold: 0.82,
   },
@@ -1067,6 +1069,8 @@ class DatabaseManager {
       if (ms.fallback_crossover_enabled === undefined) { ms.fallback_crossover_enabled = def.fallback_crossover_enabled !== false; changed = true; }
       if (ms.fallback_crossover_fast_period === undefined) { ms.fallback_crossover_fast_period = def.fallback_crossover_fast_period || 5; changed = true; }
       if (ms.fallback_crossover_slow_period === undefined) { ms.fallback_crossover_slow_period = def.fallback_crossover_slow_period || 15; changed = true; }
+      if (ms.fallback_crossover_bounce_atr_fraction === undefined) { ms.fallback_crossover_bounce_atr_fraction = def.fallback_crossover_bounce_atr_fraction ?? 0.15; changed = true; }
+      if (ms.fallback_crossover_invalidation_atr_fraction === undefined) { ms.fallback_crossover_invalidation_atr_fraction = def.fallback_crossover_invalidation_atr_fraction ?? 0.25; changed = true; }
       if (ms.timeframe_minutes === undefined) { ms.timeframe_minutes = def.timeframe_minutes || 5; changed = true; }
       if (ms.very_high_probability_threshold === undefined) { ms.very_high_probability_threshold = def.very_high_probability_threshold || 0.82; changed = true; }
     }

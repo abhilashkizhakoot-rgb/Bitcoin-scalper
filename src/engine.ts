@@ -3682,8 +3682,8 @@ class TradingEngine {
         // 2. Bounce Confirmation (close is at least bounce fraction above slow EMA)
         const isBounceConfirmed = currentPrice >= sCurrent + bounceAtrFraction * currentAtr;
         
-        // 3. Fallback Crossover Invalidation Check (any post-breakout close drops below fallback slow EMA by more than invalidation ATR fraction)
-        const isFallbackCrossoverInvalidated = postBreakoutCandles.some(c => {
+        // 3. Fallback Crossover Invalidation Check (any recent post-breakout close drops below fallback slow EMA by more than invalidation ATR fraction)
+        const isFallbackCrossoverInvalidated = recentPostBreakoutCandles.some(c => {
           const idx = this.candles1m.indexOf(c);
           if (idx !== -1) {
             const sVal = fallbackSlowSeries[idx];
@@ -3956,8 +3956,8 @@ class TradingEngine {
         // 2. Bounce Confirmation (close is at least bounce fraction below slow EMA)
         const isBounceConfirmed = currentPrice <= sCurrent - bounceAtrFraction * currentAtr;
         
-        // 3. Fallback Crossover Invalidation Check (any post-breakout close climbs above fallback slow EMA by more than invalidation ATR fraction)
-        const isFallbackCrossoverInvalidated = postBreakoutCandles.some(c => {
+        // 3. Fallback Crossover Invalidation Check (any recent post-breakout close climbs above fallback slow EMA by more than invalidation ATR fraction)
+        const isFallbackCrossoverInvalidated = recentPostBreakoutCandles.some(c => {
           const idx = this.candles1m.indexOf(c);
           if (idx !== -1) {
             const sVal = fallbackSlowSeries[idx];

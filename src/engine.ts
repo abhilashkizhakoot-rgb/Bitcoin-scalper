@@ -4482,6 +4482,103 @@ class TradingEngine {
       };
     }
 
+    // Isolated Fast EMA Crossover Strategy bypass logic
+    if (config.market_structure?.crossover_only_strategy_enabled) {
+      const fastPeriod = config.market_structure.crossover_only_fast_period || 5;
+      const slowPeriod = config.market_structure.crossover_only_slow_period || 15;
+      
+      const closes = this.candles1m.map(c => c.close);
+      const minRequiredCandles = Math.max(fastPeriod, slowPeriod) * 2;
+      const hasEnoughDataForCrossover = closes.length >= minRequiredCandles;
+      
+      if (signalDirection === "NEUTRAL") {
+        return {
+          confirmed: true,
+          message: "No active trend entry signal scanning.",
+          swingHigh: struct.swingHigh,
+          swingLow: struct.swingLow
+        };
+      }
+      
+      if (!hasEnoughDataForCrossover) {
+        return {
+          confirmed: false,
+          message: `Blocked: Insufficient candle history for crossover strategy (${closes.length}/${minRequiredCandles} required).`,
+          swingHigh: struct.swingHigh,
+          swingLow: struct.swingLow
+        };
+      }
+      
+      const emaFastList = this.calculateEMA(closes, fastPeriod);
+      const emaSlowList = this.calculateEMA(closes, slowPeriod);
+      const lastIdxVal = closes.length - 1;
+      const emaFastVal = emaFastList[lastIdxVal] !== undefined ? emaFastList[lastIdxVal] : currentPrice;
+      const emaSlowVal = emaSlowList[lastIdxVal] !== undefined ? emaSlowList[lastIdxVal] : currentPrice;
+      
+      // Calculate confirmation indicators
+      const adxThreshold = config.market_structure.crossover_only_adx_threshold !== undefined ? config.market_structure.crossover_only_adx_threshold : 25;
+      const rsiLimit = config.market_structure.crossover_only_rsi_limit !== undefined ? config.market_structure.crossover_only_rsi_limit : 70;
+      
+      const adxList = this.calculateADX(this.candles1m, 14);
+      const rsiList = this.calculateRSI(closes, 14);
+      
+      const currentAdx = adxList[lastIdxVal] !== undefined ? adxList[lastIdxVal] : 25;
+      const currentRsi = rsiList[lastIdxVal] !== undefined ? rsiList[lastIdxVal] : 50;
+
+      // ADX Filter
+      if (currentAdx < adxThreshold) {
+        return {
+          confirmed: false,
+          message: `Blocked: ADX is ${currentAdx.toFixed(1)} which is below the crossover trend confirmation threshold (${adxThreshold}).`,
+          swingHigh: struct.swingHigh,
+          swingLow: struct.swingLow
+        };
+      }
+      
+      if (signalDirection === "LONG") {
+        // RSI Filter for LONG
+        if (currentRsi > rsiLimit) {
+          return {
+            confirmed: false,
+            message: `Blocked: RSI is ${currentRsi.toFixed(1)} which is overbought (> ${rsiLimit}).`,
+            swingHigh: struct.swingHigh,
+            swingLow: struct.swingLow
+          };
+        }
+
+        const isBullishCrossover = emaFastVal > emaSlowVal;
+        return {
+          confirmed: isBullishCrossover,
+          message: isBullishCrossover
+            ? `Isolated Crossover LONG Confirmed: Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is above Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}) with RSI ${currentRsi.toFixed(1)} and ADX ${currentAdx.toFixed(1)}.`
+            : `Isolated Crossover LONG Blocked: Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is not above Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}).`,
+          swingHigh: struct.swingHigh,
+          swingLow: struct.swingLow
+        };
+      } else if (signalDirection === "SHORT") {
+        // RSI Filter for SHORT
+        const rsiLowerLimit = 100 - rsiLimit;
+        if (currentRsi < rsiLowerLimit) {
+          return {
+            confirmed: false,
+            message: `Blocked: RSI is ${currentRsi.toFixed(1)} which is oversold (< ${rsiLowerLimit.toFixed(1)}).`,
+            swingHigh: struct.swingHigh,
+            swingLow: struct.swingLow
+          };
+        }
+
+        const isBearishCrossover = emaFastVal < emaSlowVal;
+        return {
+          confirmed: isBearishCrossover,
+          message: isBearishCrossover
+            ? `Isolated Crossover SHORT Confirmed: Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is below Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}) with RSI ${currentRsi.toFixed(1)} and ADX ${currentAdx.toFixed(1)}.`
+            : `Isolated Crossover SHORT Blocked: Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is not below Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}).`,
+          swingHigh: struct.swingHigh,
+          swingLow: struct.swingLow
+        };
+      }
+    }
+
     if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       if (signalDirection === "NEUTRAL") {
         return {

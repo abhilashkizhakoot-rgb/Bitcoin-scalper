@@ -267,6 +267,11 @@ export interface StrategyConfig {
     fallback_crossover_slow_period?: number; // Slow period for fallback crossover (default: 15)
     fallback_crossover_bounce_atr_fraction?: number; // Bounce confirmation multiplier of ATR (default: 0.15)
     fallback_crossover_invalidation_atr_fraction?: number; // Crossover invalidation multiplier of ATR (default: 0.25)
+    crossover_only_strategy_enabled?: boolean; // Enable/disable isolated 5/15 crossover only strategy
+    crossover_only_fast_period?: number; // Fast EMA period for the crossover-only strategy
+    crossover_only_slow_period?: number; // Slow EMA period for the crossover-only strategy
+    crossover_only_rsi_limit?: number; // RSI limit to prevent overbought longs (>limit) or oversold shorts (<100-limit) (default: 70)
+    crossover_only_adx_threshold?: number; // Minimum ADX to confirm strong trend for crossover (default: 25)
     timeframe_minutes?: number; // Market Structure Timeframe in minutes (default: 5)
     very_high_probability_threshold?: number; // Probability threshold above which direct breakouts are traded, otherwise waiting for pullback (default: 0.82)
   };

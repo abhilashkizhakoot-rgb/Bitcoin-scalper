@@ -172,6 +172,11 @@ export default function ConfigPage({
     fallback_crossover_slow_period: 15,
     fallback_crossover_bounce_atr_fraction: 0.15,
     fallback_crossover_invalidation_atr_fraction: 0.25,
+    crossover_only_strategy_enabled: false,
+    crossover_only_fast_period: 5,
+    crossover_only_slow_period: 15,
+    crossover_only_rsi_limit: 70,
+    crossover_only_adx_threshold: 25,
     timeframe_minutes: 5,
   });
 
@@ -275,6 +280,11 @@ export default function ConfigPage({
         fallback_crossover_slow_period: 15,
         fallback_crossover_bounce_atr_fraction: 0.15,
         fallback_crossover_invalidation_atr_fraction: 0.25,
+        crossover_only_strategy_enabled: false,
+        crossover_only_fast_period: 5,
+        crossover_only_slow_period: 15,
+        crossover_only_rsi_limit: 70,
+        crossover_only_adx_threshold: 25,
         timeframe_minutes: 5,
       }
     };
@@ -2585,6 +2595,97 @@ export default function ConfigPage({
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Maximum price breakout/retracement penetration below the slow fallback EMA (expressed as a fraction of ATR) before the setup is invalidated (Standard: 0.25).
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Isolated Crossover Entry Strategy */}
+            <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800">Isolated Fast EMA Crossover Strategy</h4>
+                  <p className="text-xs text-slate-400">
+                    Bypasses the deeper pullback/market structure logic for high-momentum markets using only fast EMA crossovers.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMsConfig({ ...msConfig, crossover_only_strategy_enabled: !msConfig.crossover_only_strategy_enabled })}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    msConfig.crossover_only_strategy_enabled ? "bg-indigo-600" : "bg-slate-200"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      msConfig.crossover_only_strategy_enabled ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Crossover Fast EMA Period</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    disabled={!msConfig.crossover_only_strategy_enabled}
+                    value={msConfig.crossover_only_fast_period !== undefined ? msConfig.crossover_only_fast_period : 5}
+                    onChange={(e) => setMsConfig({ ...msConfig, crossover_only_fast_period: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    The short-term EMA period for fast crossover signal generation (Standard: 5).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Crossover Slow EMA Period</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    disabled={!msConfig.crossover_only_strategy_enabled}
+                    value={msConfig.crossover_only_slow_period !== undefined ? msConfig.crossover_only_slow_period : 15}
+                    onChange={(e) => setMsConfig({ ...msConfig, crossover_only_slow_period: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    The medium-term EMA period for slow crossover reference (Standard: 15).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Crossover RSI Limit</label>
+                  <input
+                    type="number"
+                    min="10"
+                    max="90"
+                    disabled={!msConfig.crossover_only_strategy_enabled}
+                    value={msConfig.crossover_only_rsi_limit !== undefined ? msConfig.crossover_only_rsi_limit : 70}
+                    onChange={(e) => setMsConfig({ ...msConfig, crossover_only_rsi_limit: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    RSI limit to prevent overbought longs (&gt; limit) or oversold shorts (&lt; 100 - limit) (Standard: 70).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Crossover ADX Threshold</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    disabled={!msConfig.crossover_only_strategy_enabled}
+                    value={msConfig.crossover_only_adx_threshold !== undefined ? msConfig.crossover_only_adx_threshold : 25}
+                    onChange={(e) => setMsConfig({ ...msConfig, crossover_only_adx_threshold: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Minimum ADX to confirm there is a sufficiently strong trend before entering (Standard: 25).
                   </p>
                 </div>
               </div>

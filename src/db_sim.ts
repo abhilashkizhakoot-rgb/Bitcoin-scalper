@@ -223,6 +223,11 @@ const DEFAULT_CONFIG: StrategyConfig = {
     fallback_crossover_slow_period: 15,
     fallback_crossover_bounce_atr_fraction: 0.15,
     fallback_crossover_invalidation_atr_fraction: 0.25,
+    crossover_only_strategy_enabled: false,
+    crossover_only_fast_period: 5,
+    crossover_only_slow_period: 15,
+    crossover_only_rsi_limit: 70,
+    crossover_only_adx_threshold: 25,
     timeframe_minutes: 5,
     very_high_probability_threshold: 0.82,
   },
@@ -1071,6 +1076,11 @@ class DatabaseManager {
       if (ms.fallback_crossover_slow_period === undefined) { ms.fallback_crossover_slow_period = def.fallback_crossover_slow_period || 15; changed = true; }
       if (ms.fallback_crossover_bounce_atr_fraction === undefined) { ms.fallback_crossover_bounce_atr_fraction = def.fallback_crossover_bounce_atr_fraction ?? 0.15; changed = true; }
       if (ms.fallback_crossover_invalidation_atr_fraction === undefined) { ms.fallback_crossover_invalidation_atr_fraction = def.fallback_crossover_invalidation_atr_fraction ?? 0.25; changed = true; }
+      if (ms.crossover_only_strategy_enabled === undefined) { ms.crossover_only_strategy_enabled = def.crossover_only_strategy_enabled ?? false; changed = true; }
+      if (ms.crossover_only_fast_period === undefined) { ms.crossover_only_fast_period = def.crossover_only_fast_period || 5; changed = true; }
+      if (ms.crossover_only_slow_period === undefined) { ms.crossover_only_slow_period = def.crossover_only_slow_period || 15; changed = true; }
+      if (ms.crossover_only_rsi_limit === undefined) { ms.crossover_only_rsi_limit = def.crossover_only_rsi_limit !== undefined ? def.crossover_only_rsi_limit : 70; changed = true; }
+      if (ms.crossover_only_adx_threshold === undefined) { ms.crossover_only_adx_threshold = def.crossover_only_adx_threshold !== undefined ? def.crossover_only_adx_threshold : 25; changed = true; }
       if (ms.timeframe_minutes === undefined) { ms.timeframe_minutes = def.timeframe_minutes || 5; changed = true; }
       if (ms.very_high_probability_threshold === undefined) { ms.very_high_probability_threshold = def.very_high_probability_threshold || 0.82; changed = true; }
     }

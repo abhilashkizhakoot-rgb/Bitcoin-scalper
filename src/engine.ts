@@ -4533,6 +4533,28 @@ class TradingEngine {
       const emaFastVal = emaFastList[lastIdxVal] !== undefined ? emaFastList[lastIdxVal] : currentPrice;
       const emaSlowVal = emaSlowList[lastIdxVal] !== undefined ? emaSlowList[lastIdxVal] : currentPrice;
       
+      // Calculate true crossover events within the configured lookback candles
+      let bullishCrossoverIndex = -1;
+      let bearishCrossoverIndex = -1;
+      const crossoverLookback = config.market_structure.crossover_only_lookback_candles || 5;
+      const startIdx = Math.max(1, lastIdxVal - crossoverLookback + 1);
+
+      for (let i = startIdx; i <= lastIdxVal; i++) {
+        const prevFast = emaFastList[i - 1];
+        const prevSlow = emaSlowList[i - 1];
+        const currFast = emaFastList[i];
+        const currSlow = emaSlowList[i];
+
+        if (prevFast !== undefined && prevSlow !== undefined && currFast !== undefined && currSlow !== undefined) {
+          if (currFast > currSlow && prevFast <= prevSlow) {
+            bullishCrossoverIndex = i;
+          }
+          if (currFast < currSlow && prevFast >= prevSlow) {
+            bearishCrossoverIndex = i;
+          }
+        }
+      }
+
       // Calculate confirmation indicators
       const adxThreshold = config.market_structure.crossover_only_adx_threshold !== undefined ? config.market_structure.crossover_only_adx_threshold : 25;
       const rsiLimit = config.market_structure.crossover_only_rsi_limit !== undefined ? config.market_structure.crossover_only_rsi_limit : 70;
@@ -4564,25 +4586,33 @@ class TradingEngine {
             : `RSI is overbought at ${currentRsi.toFixed(1)} preventing top-buying risks (> ${rsiLimit} limit).`
         });
 
-        const isBullishCrossover = emaFastVal > emaSlowVal;
+        const hasBullishCrossover = bullishCrossoverIndex !== -1;
+        const currentBullishState = emaFastVal > emaSlowVal;
+        const crossoverPassed = hasBullishCrossover && currentBullishState;
+        
+        const candlesAgo = hasBullishCrossover ? (lastIdxVal - bullishCrossoverIndex) : -1;
         sub_conditions.push({
           name: "Fast EMA Bullish Crossover",
-          status: isBullishCrossover ? "PASS" : "FAIL",
-          reason: isBullishCrossover
-            ? `Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is above Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}).`
-            : `Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is below Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}).`
+          status: crossoverPassed ? "PASS" : "FAIL",
+          reason: crossoverPassed
+            ? `Bullish crossover confirmed ${candlesAgo} candle(s) ago. Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is above Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}).`
+            : hasBullishCrossover
+            ? `Fast EMA crossed above Slow EMA ${candlesAgo} candle(s) ago, but current state is no longer bullish (Fast EMA: $${emaFastVal.toFixed(2)}, Slow EMA: $${emaSlowVal.toFixed(2)}).`
+            : `No Bullish crossover event occurred within the last ${crossoverLookback} candles. Waiting for next crossover.`
         });
 
-        const confirmed = adxPassed && rsiPassed && isBullishCrossover;
+        const confirmed = adxPassed && rsiPassed && crossoverPassed;
         let message = "";
         if (!adxPassed) {
           message = `Crossover LONG Blocked: ADX is ${currentAdx.toFixed(1)} which is below the trend confirmation threshold (${adxThreshold}).`;
         } else if (!rsiPassed) {
           message = `Crossover LONG Blocked: RSI is ${currentRsi.toFixed(1)} which is overbought (> ${rsiLimit}).`;
+        } else if (!crossoverPassed) {
+          message = !hasBullishCrossover
+            ? `Crossover LONG Blocked: No crossover event in last ${crossoverLookback} candles.`
+            : `Crossover LONG Blocked: Fast EMA is not currently above Slow EMA.`;
         } else {
-          message = isBullishCrossover
-            ? `Isolated Crossover LONG Confirmed: Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is above Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}) with RSI ${currentRsi.toFixed(1)} and ADX ${currentAdx.toFixed(1)}.`
-            : `Isolated Crossover LONG Blocked: Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is not above Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}).`;
+          message = `Isolated Crossover LONG Confirmed: Bullish crossover ${candlesAgo} candle(s) ago with RSI ${currentRsi.toFixed(1)} and ADX ${currentAdx.toFixed(1)}.`;
         }
 
         return {
@@ -4606,25 +4636,33 @@ class TradingEngine {
             : `RSI is oversold at ${currentRsi.toFixed(1)} preventing bottom-shorting risks (< ${rsiLowerLimit.toFixed(1)} limit).`
         });
 
-        const isBearishCrossover = emaFastVal < emaSlowVal;
+        const hasBearishCrossover = bearishCrossoverIndex !== -1;
+        const currentBearishState = emaFastVal < emaSlowVal;
+        const crossoverPassed = hasBearishCrossover && currentBearishState;
+
+        const candlesAgo = hasBearishCrossover ? (lastIdxVal - bearishCrossoverIndex) : -1;
         sub_conditions.push({
           name: "Fast EMA Bearish Crossover",
-          status: isBearishCrossover ? "PASS" : "FAIL",
-          reason: isBearishCrossover
-            ? `Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is below Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}).`
-            : `Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is above Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}).`
+          status: crossoverPassed ? "PASS" : "FAIL",
+          reason: crossoverPassed
+            ? `Bearish crossover confirmed ${candlesAgo} candle(s) ago. Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is below Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}).`
+            : hasBearishCrossover
+            ? `Fast EMA crossed below Slow EMA ${candlesAgo} candle(s) ago, but current state is no longer bearish (Fast EMA: $${emaFastVal.toFixed(2)}, Slow EMA: $${emaSlowVal.toFixed(2)}).`
+            : `No Bearish crossover event occurred within the last ${crossoverLookback} candles. Waiting for next crossover.`
         });
 
-        const confirmed = adxPassed && rsiPassed && isBearishCrossover;
+        const confirmed = adxPassed && rsiPassed && crossoverPassed;
         let message = "";
         if (!adxPassed) {
           message = `Crossover SHORT Blocked: ADX is ${currentAdx.toFixed(1)} which is below the trend confirmation threshold (${adxThreshold}).`;
         } else if (!rsiPassed) {
           message = `Crossover SHORT Blocked: RSI is ${currentRsi.toFixed(1)} which is oversold (< ${rsiLowerLimit.toFixed(1)}).`;
+        } else if (!crossoverPassed) {
+          message = !hasBearishCrossover
+            ? `Crossover SHORT Blocked: No crossover event in last ${crossoverLookback} candles.`
+            : `Crossover SHORT Blocked: Fast EMA is not currently below Slow EMA.`;
         } else {
-          message = isBearishCrossover
-            ? `Isolated Crossover SHORT Confirmed: Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is below Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}) with RSI ${currentRsi.toFixed(1)} and ADX ${currentAdx.toFixed(1)}.`
-            : `Isolated Crossover SHORT Blocked: Fast EMA ${fastPeriod} ($${emaFastVal.toFixed(2)}) is not below Slow EMA ${slowPeriod} ($${emaSlowVal.toFixed(2)}).`;
+          message = `Isolated Crossover SHORT Confirmed: Bearish crossover ${candlesAgo} candle(s) ago with RSI ${currentRsi.toFixed(1)} and ADX ${currentAdx.toFixed(1)}.`;
         }
 
         return {

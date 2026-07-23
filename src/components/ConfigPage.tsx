@@ -177,6 +177,7 @@ export default function ConfigPage({
     crossover_only_slow_period: 15,
     crossover_only_rsi_limit: 70,
     crossover_only_adx_threshold: 25,
+    crossover_only_lookback_candles: 5,
     timeframe_minutes: 5,
   });
 
@@ -285,6 +286,7 @@ export default function ConfigPage({
         crossover_only_slow_period: 15,
         crossover_only_rsi_limit: 70,
         crossover_only_adx_threshold: 25,
+        crossover_only_lookback_candles: 5,
         timeframe_minutes: 5,
       }
     };
@@ -2686,6 +2688,22 @@ export default function ConfigPage({
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Minimum ADX to confirm there is a sufficiently strong trend before entering (Standard: 25).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Crossover Lookback Candles</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    disabled={!msConfig.crossover_only_strategy_enabled}
+                    value={msConfig.crossover_only_lookback_candles !== undefined ? msConfig.crossover_only_lookback_candles : 5}
+                    onChange={(e) => setMsConfig({ ...msConfig, crossover_only_lookback_candles: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    The number of recent candles to scan for a valid Fast/Slow EMA crossover event (Standard: 5).
                   </p>
                 </div>
               </div>

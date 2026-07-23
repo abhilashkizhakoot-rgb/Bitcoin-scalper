@@ -272,6 +272,7 @@ export interface StrategyConfig {
     crossover_only_slow_period?: number; // Slow EMA period for the crossover-only strategy
     crossover_only_rsi_limit?: number; // RSI limit to prevent overbought longs (>limit) or oversold shorts (<100-limit) (default: 70)
     crossover_only_adx_threshold?: number; // Minimum ADX to confirm strong trend for crossover (default: 25)
+    crossover_only_lookback_candles?: number; // Max lookback candles for crossover event check (default: 5)
     timeframe_minutes?: number; // Market Structure Timeframe in minutes (default: 5)
     very_high_probability_threshold?: number; // Probability threshold above which direct breakouts are traded, otherwise waiting for pullback (default: 0.82)
   };

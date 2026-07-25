@@ -368,9 +368,88 @@ class TradingEngine {
     }
   }
 
-  private isGateSkipped(config: StrategyConfig, name: string): boolean {
+  private getGateIdByName(name: string): string {
+    const n = name.toLowerCase();
+    if (n.includes("catboost")) return "catboost";
+    if (n.includes("regime transition") || n.includes("regime_cooldown")) return "regime_cooldown";
+    if (n.includes("regime") && !n.includes("transition")) return "regime";
+    if (n.includes("exponential trend alignment") || (n.includes("trend") && !n.includes("adx"))) return "trend";
+    if (n.includes("sentiment")) return "sentiment";
+    if (n.includes("volume") && !n.includes("volume profiling")) return "volume";
+    if (n.includes("news")) return "news";
+    if (n.includes("limit")) return "limit";
+    if (n.includes("adx")) return "adx";
+    if (n.includes("equity")) return "equity";
+    if (n.includes("credentials")) return "credentials";
+    if (n.includes("loss streak cooldown") || n.includes("cooldown")) return "cooldown";
+    if (n.includes("timing")) return "timing";
+    if (n.includes("vwap deviation") || (n.includes("vwap") && !n.includes("ema"))) return "vwap";
+    if (n.includes("wedge")) return "wedge";
+    if (n.includes("order flow") || n.includes("orderflow")) return "orderflow";
+    if (n.includes("squeeze")) return "squeeze";
+    if (n.includes("imbalance") || n.includes("orderbook")) return "orderbook";
+    if (n.includes("atr")) return "atr";
+    if (n.includes("volume profiling") || n.includes("volume_profile")) return "volume_profile";
+    if (n.includes("ema 100") || n.includes("ema")) return "ema100";
+    if (n.includes("structure")) return "structure";
+    return n;
+  }
+
+  private isGateMandatory(config: StrategyConfig, name: string): boolean {
+    const gateId = this.getGateIdByName(name);
+    const mandatory = config.general.mandatory_gates || [];
+    return mandatory.includes(gateId);
+  }
+
+  private isGateWeighted(config: StrategyConfig, name: string): boolean {
+    const gateId = this.getGateIdByName(name);
+    const weighted = config.general.weighted_gates || [];
+    return weighted.includes(gateId);
+  }
+
+  private isGateActive(config: StrategyConfig, name: string): boolean {
+    const gateId = this.getGateIdByName(name);
+    if (config.general.mandatory_gates || config.general.weighted_gates) {
+      const mandatory = config.general.mandatory_gates || [];
+      const weighted = config.general.weighted_gates || [];
+      return mandatory.includes(gateId) || weighted.includes(gateId);
+    }
+    return this.isGateRequiredLegacy(config, name);
+  }
+
+  private isGateRequiredLegacy(config: StrategyConfig, name: string): boolean {
+    const requiredGates = config.general.required_gates;
+    if (requiredGates) {
+      return requiredGates.some(
+        (g) =>
+          g.toLowerCase() === name.toLowerCase() ||
+          (name.toLowerCase().includes("regime transition") && g.toLowerCase() === "regime_cooldown") ||
+          (name.toLowerCase().includes("trend") && g.toLowerCase() === "trend") ||
+          (name.toLowerCase().includes("structure") && g.toLowerCase() === "structure") ||
+          (name.toLowerCase().includes("catboost") && g.toLowerCase() === "catboost") ||
+          (name.toLowerCase().includes("regime") && !name.toLowerCase().includes("transition") && g.toLowerCase() === "regime") ||
+          (name.toLowerCase().includes("sentiment") && g.toLowerCase() === "sentiment") ||
+          (name.toLowerCase().includes("volume") && !name.toLowerCase().includes("volume profiling") && g.toLowerCase() === "volume") ||
+          (name.toLowerCase().includes("news") && g.toLowerCase() === "news") ||
+          (name.toLowerCase().includes("limit") && g.toLowerCase() === "limit") ||
+          (name.toLowerCase().includes("adx") && g.toLowerCase() === "adx") ||
+          (name.toLowerCase().includes("equity") && g.toLowerCase() === "equity") ||
+          (name.toLowerCase().includes("credentials") && g.toLowerCase() === "credentials") ||
+          (name.toLowerCase().includes("loss streak cooldown") && g.toLowerCase() === "cooldown") ||
+          (name.toLowerCase().includes("timing") && g.toLowerCase() === "timing") ||
+          (name.toLowerCase().includes("vwap") && g.toLowerCase() === "vwap") ||
+          (name.toLowerCase().includes("wedge") && g.toLowerCase() === "wedge") ||
+          (name.toLowerCase().includes("order flow") && g.toLowerCase() === "orderflow") ||
+          (name.toLowerCase().includes("squeeze") && g.toLowerCase() === "squeeze") ||
+          (name.toLowerCase().includes("imbalance") && g.toLowerCase() === "orderbook") ||
+          (name.toLowerCase().includes("atr") && g.toLowerCase() === "atr") ||
+          (name.toLowerCase().includes("volume profiling") && g.toLowerCase() === "volume_profile") ||
+          ((name.toLowerCase().includes("ema 100") || name.toLowerCase().includes("ema")) && g.toLowerCase() === "ema100")
+      );
+    }
+
     const skippedGates = config.general.skipped_gates || [];
-    return skippedGates.some(
+    const isSkipped = skippedGates.some(
       (g) =>
         g.toLowerCase() === name.toLowerCase() ||
         (name.toLowerCase().includes("trend") && g.toLowerCase().includes("trend")) ||
@@ -393,6 +472,7 @@ class TradingEngine {
         (name.toLowerCase().includes("imbalance") && g.toLowerCase().includes("orderbook")) ||
         ((name.toLowerCase().includes("ema 100") || name.toLowerCase().includes("ema")) && g.toLowerCase().includes("ema100"))
     );
+    return !isSkipped;
   }
 
   /**
@@ -1028,7 +1108,7 @@ class TradingEngine {
     let confidenceThreshold = config.gate_scoring?.confidence_threshold ?? 70;
     let tacticalConfidenceMet = true;
     let safetyGates: string[] = [];
-    let tacticalGatesMap: { condName: string; weightKey: "catboost_ai" | "market_regime" | "trend_alignment" | "relative_volume" | "overextension" | "wedge_filter" | "order_flow" | "squeeze_filter" | "order_book" | "volume_profile" }[] = [];
+    let tacticalGatesMap: { condName: string; weightKey: "catboost_ai" | "market_regime" | "trend_alignment" | "adx_strength" | "relative_volume" | "overextension" | "ema100_overextension" | "wedge_filter" | "order_flow" | "squeeze_filter" | "order_book" | "volume_profile" }[] = [];
     let activeWeights: any = {};
     let marketStructurePassed = true;
     let totalTacticalWeight = 0;
@@ -1350,11 +1430,21 @@ class TradingEngine {
     );
 
     conditions.push({
-      name: "Trend Alignment & Strength (EMA/ADX)",
-      met: trendAligned && adxMet,
-      current_value: `${currentTrendStr} | ADX: ${adxValue.toFixed(1)}`,
-      required: requiredStr,
-      description: `Confirms overall strong trend alignment (EMA ${fastEma}/${medEma}/${slowEma}) and high trend strength (ADX >= ${trendAlignAdx}) or checks safety locks during range bound.`,
+      name: "Exponential Trend Alignment",
+      met: trendAligned,
+      current_value: currentTrendStr,
+      required: requiredStr.split(" & ADX")[0],
+      description: `Confirms overall strong trend alignment (EMA ${fastEma}/${medEma}/${slowEma}) or checks safety locks during range bound.`,
+      priority: "HIGH",
+      softened: isTrendSoftened,
+    });
+
+    conditions.push({
+      name: "ADX Trend Strength Filter",
+      met: adxMet,
+      current_value: `ADX: ${adxValue.toFixed(1)}`,
+      required: `ADX >= ${hasExtremeRealtimePressure ? softenedAdxThreshold.toFixed(1) : standardAdxThreshold.toFixed(1)}`,
+      description: `Confirms strong trend velocity/momentum (ADX >= ${trendAlignAdx}).`,
       priority: "HIGH",
       softened: isTrendSoftened,
     });
@@ -1502,11 +1592,20 @@ class TradingEngine {
     }
 
     conditions.push({
-      name: "Overextension & Level Anchors (VWAP/EMA)",
-      met: vwapDevMet && ema100Met,
-      current_value: `VWAP: ${vwapDevMet ? "PASSING" : "OVEREXTENDED"} | EMA100: ${ema100ValStr}`,
-      required: "Price within VWAP standard deviation bands and not overextended relative to the 100 EMA baseline",
-      description: "Guards against entering trades when price is extremely overextended (preventing buying tops or shorting bottoms).",
+      name: "VWAP Deviation Anchor Check",
+      met: vwapDevMet,
+      current_value: vwapDevMet ? "PASSING" : "OVEREXTENDED",
+      required: "Price within dynamic VWAP standard deviation bands",
+      description: "Guards against entering trades when price is overextended relative to the VWAP standard deviation bands.",
+      priority: "CRITICAL",
+    });
+
+    conditions.push({
+      name: "EMA 100 Overextension Protection",
+      met: ema100Met,
+      current_value: ema100ValStr,
+      required: "Price not overextended relative to the 100 EMA baseline",
+      description: "Guards against buying the exact top or shorting the exact bottom relative to the 100 EMA baseline.",
       priority: "CRITICAL",
     });
 
@@ -1724,6 +1823,7 @@ class TradingEngine {
     let obMet = true;
     const obMinDepth = config.general.order_book_min_depth !== undefined ? config.general.order_book_min_depth : 4.0;
     const obMaxImbalance = config.general.order_book_max_imbalance !== undefined ? config.general.order_book_max_imbalance : 0.35;
+    const obMaxSpoofRisk = config.general.order_book_max_spoof_risk !== undefined ? config.general.order_book_max_spoof_risk : 70;
 
     const obTotalDepth = this.orderBookStats.bidDepthBTC + this.orderBookStats.askDepthBTC;
     const stability = this.getOrderBookStability(signalDirection);
@@ -1734,25 +1834,28 @@ class TradingEngine {
     const rawImbalancePct = this.orderBookStats.imbalanceRatio * 100;
 
     let obVal = `Bids: ${this.orderBookStats.bidDepthBTC.toFixed(1)} | Asks: ${this.orderBookStats.askDepthBTC.toFixed(1)} BTC | Imbalance: ${rawImbalancePct >= 0 ? "+" : ""}${rawImbalancePct.toFixed(1)}% (Adjusted: ${obImbalancePct >= 0 ? "+" : ""}${obImbalancePct.toFixed(1)}%, Stability: ${stability.stabilityIndex}%, Spoof Risk: ${stability.spoofRisk}%)`;
-    let obReq = `Top-10 book depth >= ${obMinDepth.toFixed(1)} BTC; Adjusted Imbalance >= -${(obMaxImbalance * 100).toFixed(0)}% for LONG, <= +${(obMaxImbalance * 100).toFixed(0)}% for SHORT`;
+    let obReq = `Top-10 book depth >= ${obMinDepth.toFixed(1)} BTC; Spoof Risk < ${obMaxSpoofRisk}%; Adjusted Imbalance >= -${(obMaxImbalance * 100).toFixed(0)}% for LONG, <= +${(obMaxImbalance * 100).toFixed(0)}% for SHORT`;
 
     if (obTotalDepth < obMinDepth) {
       obMet = false;
       obVal = `${obVal} - BLOCKED (Insufficient Book Liquidity: ${obTotalDepth.toFixed(1)} < ${obMinDepth.toFixed(1)} BTC)`;
+    } else if (stability.spoofRisk >= obMaxSpoofRisk) {
+      obMet = false;
+      obVal = `${obVal} - BLOCKED (High Spoof Risk: ${stability.spoofRisk}% >= Limit ${obMaxSpoofRisk}%)`;
     } else if (signalDirection === "LONG") {
       // Dynamic tightening of threshold under high spoof risk
-      const dynamicHurdle = stability.spoofRisk >= 70 ? (-obMaxImbalance * 0.5) : -obMaxImbalance;
+      const dynamicHurdle = -obMaxImbalance;
       obMet = evaluatedImbalance >= dynamicHurdle;
       if (!obMet) {
-        obVal = `${obVal} - BLOCKED (${stability.spoofRisk >= 70 ? "High Spoofing / Unstable Ask Wall" : "Heavy Ask Wall / Negative Imbalance"})`;
+        obVal = `${obVal} - BLOCKED (Heavy Ask Wall / Negative Imbalance)`;
       } else {
         obVal = `${obVal} - PASSED (${stability.spoofRisk >= 40 ? "Damped Bid Support" : "Strong Bid Support"})`;
       }
     } else if (signalDirection === "SHORT") {
-      const dynamicHurdle = stability.spoofRisk >= 70 ? (obMaxImbalance * 0.5) : obMaxImbalance;
+      const dynamicHurdle = obMaxImbalance;
       obMet = evaluatedImbalance <= dynamicHurdle;
       if (!obMet) {
-        obVal = `${obVal} - BLOCKED (${stability.spoofRisk >= 70 ? "High Spoofing / Unstable Bid Wall" : "Heavy Bid Floor / Positive Imbalance"})`;
+        obVal = `${obVal} - BLOCKED (Heavy Bid Floor / Positive Imbalance)`;
       } else {
         obVal = `${obVal} - PASSED (${stability.spoofRisk >= 40 ? "Damped Ask Wall" : "Strong Sell Pressure / Ask Dominance"})`;
       }
@@ -1794,7 +1897,7 @@ class TradingEngine {
 
     // Apply bypassed/skipped gates
     for (const c of conditions) {
-      if (this.isGateSkipped(config, c.name)) {
+      if (!this.isGateActive(config, c.name)) {
         c.met = true;
         c.current_value = `${c.current_value} (BYPASS)`;
       }
@@ -1813,21 +1916,19 @@ class TradingEngine {
       confidenceThreshold = config.gate_scoring?.confidence_threshold ?? 70;
       tacticalConfidenceMet = true;
 
-      safetyGates = [
-        "Daily Trade Count Limit",
-        "Account Equity & API Connection Verification",
-        "Loss Streak Cooldown Protection",
-        "Optimal Session Timing Window Check (IST)",
-        "Regime Transition Cooldown",
-        "Minimum ATR Volatility Filter"
-      ];
+      // Dynamically define safetyGates as active gates that are set to mandatory (strictly pass)
+      safetyGates = conditions
+        .filter((c) => this.isGateActive(config, c.name) && this.isGateMandatory(config, c.name))
+        .map((c) => c.name);
 
       const baseWeights = {
         catboost_ai: config.gate_scoring?.weights?.catboost_ai ?? 25,
         market_regime: config.gate_scoring?.weights?.market_regime ?? 15,
-        trend_alignment: config.gate_scoring?.weights?.trend_alignment ?? 15,
+        trend_alignment: config.gate_scoring?.weights?.trend_alignment ?? 10,
+        adx_strength: config.gate_scoring?.weights?.adx_strength ?? 5,
         relative_volume: config.gate_scoring?.weights?.relative_volume ?? 10,
-        overextension: config.gate_scoring?.weights?.overextension ?? 10,
+        overextension: config.gate_scoring?.weights?.overextension ?? 5,
+        ema100_overextension: config.gate_scoring?.weights?.ema100_overextension ?? 5,
         wedge_filter: config.gate_scoring?.weights?.wedge_filter ?? 5,
         order_flow: config.gate_scoring?.weights?.order_flow ?? 10,
         squeeze_filter: config.gate_scoring?.weights?.squeeze_filter ?? 5,
@@ -1836,10 +1937,10 @@ class TradingEngine {
       };
 
       const modifiers = config.gate_scoring?.adaptive_modifiers ?? {
-        trending: { trend_alignment_weight_boost: 10, catboost_weight_boost: 5 },
-        ranging: { order_flow_weight_boost: 15, trend_alignment_weight_reduction: -10 },
-        high_volatility: { relative_volume_weight_boost: 10, overextension_weight_boost: 10 },
-        low_volatility: { squeeze_filter_weight_boost: 15 },
+        trending: { trend_alignment_weight_boost: 10, catboost_weight_boost: 5, volume_profile_weight_boost: -5 },
+        ranging: { order_flow_weight_boost: 15, trend_alignment_weight_reduction: -10, volume_profile_weight_boost: 10 },
+        high_volatility: { relative_volume_weight_boost: 10, overextension_weight_boost: 10, volume_profile_weight_boost: 5 },
+        low_volatility: { squeeze_filter_weight_boost: 15, volume_profile_weight_boost: 0 },
       };
 
       activeWeights = { ...baseWeights };
@@ -1847,22 +1948,28 @@ class TradingEngine {
       if (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.STRONG_DOWNTREND) {
         activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + (modifiers.trending?.trend_alignment_weight_boost ?? 10));
         activeWeights.catboost_ai = Math.max(0, activeWeights.catboost_ai + (modifiers.trending?.catboost_weight_boost ?? 5));
+        activeWeights.volume_profile = Math.max(0, activeWeights.volume_profile + (modifiers.trending?.volume_profile_weight_boost ?? -5));
       } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
         activeWeights.order_flow = Math.max(0, activeWeights.order_flow + (modifiers.ranging?.order_flow_weight_boost ?? 15));
         activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + (modifiers.ranging?.trend_alignment_weight_reduction ?? -10));
+        activeWeights.volume_profile = Math.max(0, activeWeights.volume_profile + (modifiers.ranging?.volume_profile_weight_boost ?? 10));
       } else if (this.currentRegime === MarketRegime.HIGH_VOLATILITY) {
         activeWeights.relative_volume = Math.max(0, activeWeights.relative_volume + (modifiers.high_volatility?.relative_volume_weight_boost ?? 10));
         activeWeights.overextension = Math.max(0, activeWeights.overextension + (modifiers.high_volatility?.overextension_weight_boost ?? 10));
+        activeWeights.volume_profile = Math.max(0, activeWeights.volume_profile + (modifiers.high_volatility?.volume_profile_weight_boost ?? 5));
       } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
         activeWeights.squeeze_filter = Math.max(0, activeWeights.squeeze_filter + (modifiers.low_volatility?.squeeze_filter_weight_boost ?? 15));
+        activeWeights.volume_profile = Math.max(0, activeWeights.volume_profile + (modifiers.low_volatility?.volume_profile_weight_boost ?? 0));
       }
 
       tacticalGatesMap = [
         { condName: "CatBoost AI Prediction", weightKey: "catboost_ai" as const },
         { condName: "Market Regime Filter", weightKey: "market_regime" as const },
-        { condName: "Trend Alignment & Strength (EMA/ADX)", weightKey: "trend_alignment" as const },
+        { condName: "Exponential Trend Alignment", weightKey: "trend_alignment" as const },
+        { condName: "ADX Trend Strength Filter", weightKey: "adx_strength" as const },
         { condName: "Relative Volume Confirmation", weightKey: "relative_volume" as const },
-        { condName: "Overextension & Level Anchors (VWAP/EMA)", weightKey: "overextension" as const },
+        { condName: "VWAP Deviation Anchor Check", weightKey: "overextension" as const },
+        { condName: "EMA 100 Overextension Protection", weightKey: "ema100_overextension" as const },
         { condName: "Wedge Pattern Filter", weightKey: "wedge_filter" as const },
         { condName: "Binance Order Flow Confirmation", weightKey: "order_flow" as const },
         { condName: "Volatility Compression (Squeeze) Filter", weightKey: "squeeze_filter" as const },
@@ -1877,14 +1984,17 @@ class TradingEngine {
       const discountFactor = config.gate_scoring?.softened_gate_discount_factor ?? 0.5;
 
       for (const gate of tacticalGatesMap) {
-        const cond = conditions.find(c => c.name === gate.condName);
-        const weight = activeWeights[gate.weightKey];
-        totalTacticalWeight += weight;
-        if (cond?.met) {
-          if (enableDiscounting && cond.softened === true) {
-            earnedTacticalWeight += weight * discountFactor;
-          } else {
-            earnedTacticalWeight += weight;
+        // Exclude bypassed/disabled and mandatory gates from weighted calculations
+        if (this.isGateActive(config, gate.condName) && this.isGateWeighted(config, gate.condName)) {
+          const cond = conditions.find(c => c.name === gate.condName);
+          const weight = activeWeights[gate.weightKey];
+          totalTacticalWeight += weight;
+          if (cond?.met) {
+            if (enableDiscounting && cond.softened === true) {
+              earnedTacticalWeight += weight * discountFactor;
+            } else {
+              earnedTacticalWeight += weight;
+            }
           }
         }
       }
@@ -1900,25 +2010,35 @@ class TradingEngine {
         .filter((c) => safetyGates.includes(c.name))
         .every((c) => c.met);
 
-      marketStructurePassed = conditions.find(c => c.name === "Market Structure Confirmation")?.met ?? false;
+      // Check "Market Structure Confirmation" dynamically based on whether it is active and mandatory
+      const isStructureMandatory = this.isGateMandatory(config, "Market Structure Confirmation");
+      const isStructureActive = this.isGateActive(config, "Market Structure Confirmation");
+      marketStructurePassed = isStructureActive && isStructureMandatory
+        ? (conditions.find(c => c.name === "Market Structure Confirmation")?.met ?? false)
+        : true;
 
       // Handle optional mandatory volume profile in ranging regime
       let isMtfVpPassedIfRequired = true;
       if (this.currentRegime === MarketRegime.RANGE_BOUND && config.general.require_volume_profile_in_ranging !== false) {
-        const vpGate = conditions.find(c => c.name === "Multi-Timeframe Volume Profiling (Horizontal Liquidity)");
-        if (vpGate && !vpGate.met) {
-          isMtfVpPassedIfRequired = false;
+        if (this.isGateActive(config, "Multi-Timeframe Volume Profiling (Horizontal Liquidity)") && this.isGateMandatory(config, "Multi-Timeframe Volume Profiling (Horizontal Liquidity)")) {
+          const vpGate = conditions.find(c => c.name === "Multi-Timeframe Volume Profiling (Horizontal Liquidity)");
+          if (vpGate && !vpGate.met) {
+            isMtfVpPassedIfRequired = false;
+          }
         }
       }
 
       allConditionsMet = allSafetyPassed && marketStructurePassed && tacticalConfidenceMet && isMtfVpPassedIfRequired;
 
       failedConditions = conditions.filter((c) => {
-        if (safetyGates.includes(c.name) || c.name === "Market Structure Confirmation") {
+        if (safetyGates.includes(c.name)) {
           return !c.met;
         }
+        if (c.name === "Market Structure Confirmation") {
+          return isStructureActive && isStructureMandatory && !c.met;
+        }
         if (this.currentRegime === MarketRegime.RANGE_BOUND && config.general.require_volume_profile_in_ranging !== false && c.name === "Multi-Timeframe Volume Profiling (Horizontal Liquidity)") {
-          return !c.met;
+          return this.isGateActive(config, c.name) && this.isGateMandatory(config, c.name) && !c.met;
         }
         return false;
       }).map((c) => c.name);
@@ -1928,10 +2048,11 @@ class TradingEngine {
       }
     } else {
       if (signalDirection !== "NEUTRAL") {
-        if (pLongMet || pShortMet || this.isGateSkipped(config, "CatBoost AI Prediction")) entryScore += 40;
-        if ((regimeValid && regimeAligned) || this.isGateSkipped(config, "Market Regime Filter")) entryScore += 20;
-        if ((trendAligned && adxMet) || this.isGateSkipped(config, "Trend Alignment & Strength (EMA/ADX)")) entryScore += 30;
-        if (relVolume > requiredRelVol || this.isGateSkipped(config, "Relative Volume Confirmation")) entryScore += 10;
+        if (pLongMet || pShortMet || !this.isGateActive(config, "CatBoost AI Prediction")) entryScore += 40;
+        if ((regimeValid && regimeAligned) || !this.isGateActive(config, "Market Regime Filter")) entryScore += 20;
+        if (trendAligned || !this.isGateActive(config, "Exponential Trend Alignment")) entryScore += 15;
+        if (adxMet || !this.isGateActive(config, "ADX Trend Strength Filter")) entryScore += 15;
+        if (relVolume > requiredRelVol || !this.isGateActive(config, "Relative Volume Confirmation")) entryScore += 10;
       }
       allConditionsMet = conditions.every((c) => c.met);
       failedConditions = conditions.filter((c) => !c.met).map((c) => c.name);
@@ -6001,10 +6122,18 @@ class TradingEngine {
     );
 
     conditions.push({
-      name: "Trend Alignment & Strength (EMA/ADX)",
-      met: trendAligned && adxMet,
-      current_value: `${currentTrendStr} | ADX: ${adxValue.toFixed(1)}`,
-      required: requiredStr,
+      name: "Exponential Trend Alignment",
+      met: trendAligned,
+      current_value: currentTrendStr,
+      required: requiredStr.split(" & ADX")[0],
+      softened: isTrendSoftened,
+    });
+
+    conditions.push({
+      name: "ADX Trend Strength Filter",
+      met: adxMet,
+      current_value: `ADX: ${adxValue.toFixed(1)}`,
+      required: `ADX >= ${hasExtremeRealtimePressure ? softenedAdxThreshold.toFixed(1) : standardAdxThreshold.toFixed(1)}`,
       softened: isTrendSoftened,
     });
 
@@ -6135,10 +6264,17 @@ class TradingEngine {
     }
 
     conditions.push({
-      name: "Overextension & Level Anchors (VWAP/EMA)",
-      met: vwapDevMet && ema100Met,
-      current_value: `VWAP: ${vwapDevMet ? "PASSING" : "OVEREXTENDED"} | EMA100: ${ema100ValStr}`,
-      required: "Price within VWAP standard deviation bands and not overextended relative to the 100 EMA baseline",
+      name: "VWAP Deviation Anchor Check",
+      met: vwapDevMet,
+      current_value: vwapDevMet ? "PASSING" : "OVEREXTENDED",
+      required: "Price within dynamic VWAP standard deviation bands",
+    });
+
+    conditions.push({
+      name: "EMA 100 Overextension Protection",
+      met: ema100Met,
+      current_value: ema100ValStr,
+      required: "Price not overextended relative to the 100 EMA baseline",
     });
 
     // C15: Market Structure & Entry Confirmation Check (Pullback, Retest, Reversal, High-Vol Confirmation)
@@ -6345,6 +6481,7 @@ class TradingEngine {
     let obMet = true;
     const obMinDepth = config.general.order_book_min_depth !== undefined ? config.general.order_book_min_depth : 4.0;
     const obMaxImbalance = config.general.order_book_max_imbalance !== undefined ? config.general.order_book_max_imbalance : 0.35;
+    const obMaxSpoofRisk = config.general.order_book_max_spoof_risk !== undefined ? config.general.order_book_max_spoof_risk : 70;
 
     const obTotalDepth = this.orderBookStats.bidDepthBTC + this.orderBookStats.askDepthBTC;
     const stability = this.getOrderBookStability(signalDirection);
@@ -6355,25 +6492,28 @@ class TradingEngine {
     const rawImbalancePct = this.orderBookStats.imbalanceRatio * 100;
 
     let obVal = `Bids: ${this.orderBookStats.bidDepthBTC.toFixed(1)} | Asks: ${this.orderBookStats.askDepthBTC.toFixed(1)} BTC | Imbalance: ${rawImbalancePct >= 0 ? "+" : ""}${rawImbalancePct.toFixed(1)}% (Adjusted: ${obImbalancePct >= 0 ? "+" : ""}${obImbalancePct.toFixed(1)}%, Stability: ${stability.stabilityIndex}%, Spoof Risk: ${stability.spoofRisk}%)`;
-    let obReq = `Top-10 book depth >= ${obMinDepth.toFixed(1)} BTC; Adjusted Imbalance >= -${(obMaxImbalance * 100).toFixed(0)}% for LONG, <= +${(obMaxImbalance * 100).toFixed(0)}% for SHORT`;
+    let obReq = `Top-10 book depth >= ${obMinDepth.toFixed(1)} BTC; Spoof Risk < ${obMaxSpoofRisk}%; Adjusted Imbalance >= -${(obMaxImbalance * 100).toFixed(0)}% for LONG, <= +${(obMaxImbalance * 100).toFixed(0)}% for SHORT`;
 
     if (obTotalDepth < obMinDepth) {
       obMet = false;
       obVal = `${obVal} - BLOCKED (Insufficient Book Liquidity: ${obTotalDepth.toFixed(1)} < ${obMinDepth.toFixed(1)} BTC)`;
+    } else if (stability.spoofRisk >= obMaxSpoofRisk) {
+      obMet = false;
+      obVal = `${obVal} - BLOCKED (High Spoof Risk: ${stability.spoofRisk}% >= Limit ${obMaxSpoofRisk}%)`;
     } else if (signalDirection === "LONG") {
       // Dynamic tightening of threshold under high spoof risk
-      const dynamicHurdle = stability.spoofRisk >= 70 ? (-obMaxImbalance * 0.5) : -obMaxImbalance;
+      const dynamicHurdle = -obMaxImbalance;
       obMet = evaluatedImbalance >= dynamicHurdle;
       if (!obMet) {
-        obVal = `${obVal} - BLOCKED (${stability.spoofRisk >= 70 ? "High Spoofing / Unstable Ask Wall" : "Heavy Ask Wall / Negative Imbalance"})`;
+        obVal = `${obVal} - BLOCKED (Heavy Ask Wall / Negative Imbalance)`;
       } else {
         obVal = `${obVal} - PASSED (${stability.spoofRisk >= 40 ? "Damped Bid Support" : "Strong Bid Support"})`;
       }
     } else if (signalDirection === "SHORT") {
-      const dynamicHurdle = stability.spoofRisk >= 70 ? (obMaxImbalance * 0.5) : obMaxImbalance;
+      const dynamicHurdle = obMaxImbalance;
       obMet = evaluatedImbalance <= dynamicHurdle;
       if (!obMet) {
-        obVal = `${obVal} - BLOCKED (${stability.spoofRisk >= 70 ? "High Spoofing / Unstable Bid Wall" : "Heavy Bid Floor / Positive Imbalance"})`;
+        obVal = `${obVal} - BLOCKED (Heavy Bid Floor / Positive Imbalance)`;
       } else {
         obVal = `${obVal} - PASSED (${stability.spoofRisk >= 40 ? "Damped Ask Wall" : "Strong Sell Pressure / Ask Dominance"})`;
       }
@@ -6409,7 +6549,7 @@ class TradingEngine {
 
     // Apply bypassed/skipped gates
     for (const c of conditions) {
-      if (this.isGateSkipped(config, c.name)) {
+      if (!this.isGateActive(config, c.name)) {
         c.met = true;
         c.current_value = `${c.current_value} (BYPASS)`;
       }
@@ -6420,23 +6560,30 @@ class TradingEngine {
     let confidenceThreshold = 70;
     let tacticalConfidenceMet = true;
 
-    const safetyGates = [
-      "Daily Trade Count Limit",
-      "Account Equity & API Connection Verification",
-      "Loss Streak Cooldown Protection",
-      "Optimal Session Timing Window Check (IST)",
-      "Regime Transition Cooldown",
-      "Minimum ATR Volatility Filter"
-    ];
-
     let isWeightedEnabled = config.gate_scoring?.enabled === true;
+
+    // Dynamically define safetyGates as active gates that are set to mandatory (strictly pass)
+    const safetyGates = isWeightedEnabled
+      ? conditions
+          .filter((c) => this.isGateActive(config, c.name) && this.isGateMandatory(config, c.name))
+          .map((c) => c.name)
+      : [
+          "Daily Trade Count Limit",
+          "Account Equity & API Connection Verification",
+          "Loss Streak Cooldown Protection",
+          "Optimal Session Timing Window Check (IST)",
+          "Regime Transition Cooldown",
+          "Minimum ATR Volatility Filter"
+        ];
 
     const baseWeights = {
       catboost_ai: config.gate_scoring?.weights?.catboost_ai ?? 25,
       market_regime: config.gate_scoring?.weights?.market_regime ?? 15,
-      trend_alignment: config.gate_scoring?.weights?.trend_alignment ?? 15,
+      trend_alignment: config.gate_scoring?.weights?.trend_alignment ?? 10,
+      adx_strength: config.gate_scoring?.weights?.adx_strength ?? 5,
       relative_volume: config.gate_scoring?.weights?.relative_volume ?? 10,
-      overextension: config.gate_scoring?.weights?.overextension ?? 10,
+      overextension: config.gate_scoring?.weights?.overextension ?? 5,
+      ema100_overextension: config.gate_scoring?.weights?.ema100_overextension ?? 5,
       wedge_filter: config.gate_scoring?.weights?.wedge_filter ?? 5,
       order_flow: config.gate_scoring?.weights?.order_flow ?? 10,
       squeeze_filter: config.gate_scoring?.weights?.squeeze_filter ?? 5,
@@ -6473,9 +6620,11 @@ class TradingEngine {
     const tacticalGatesMap = [
       { condName: "CatBoost AI Prediction", weightKey: "catboost_ai" as const },
       { condName: "Market Regime Filter", weightKey: "market_regime" as const },
-      { condName: "Trend Alignment & Strength (EMA/ADX)", weightKey: "trend_alignment" as const },
+      { condName: "Exponential Trend Alignment", weightKey: "trend_alignment" as const },
+      { condName: "ADX Trend Strength Filter", weightKey: "adx_strength" as const },
       { condName: "Relative Volume Confirmation", weightKey: "relative_volume" as const },
-      { condName: "Overextension & Level Anchors (VWAP/EMA)", weightKey: "overextension" as const },
+      { condName: "VWAP Deviation Anchor Check", weightKey: "overextension" as const },
+      { condName: "EMA 100 Overextension Protection", weightKey: "ema100_overextension" as const },
       { condName: "Wedge Pattern Filter", weightKey: "wedge_filter" as const },
       { condName: "Binance Order Flow Confirmation", weightKey: "order_flow" as const },
       { condName: "Volatility Compression (Squeeze) Filter", weightKey: "squeeze_filter" as const },
@@ -6490,14 +6639,17 @@ class TradingEngine {
     const discountFactor = config.gate_scoring?.softened_gate_discount_factor ?? 0.5;
 
     for (const gate of tacticalGatesMap) {
-      const cond = conditions.find(c => c.name === gate.condName);
-      const weight = activeWeights[gate.weightKey];
-      totalTacticalWeight += weight;
-      if (cond?.met) {
-        if (enableDiscounting && cond.softened === true) {
-          earnedTacticalWeight += weight * discountFactor;
-        } else {
-          earnedTacticalWeight += weight;
+      // Exclude bypassed/disabled and mandatory gates from weighted calculations
+      if (this.isGateActive(config, gate.condName) && this.isGateWeighted(config, gate.condName)) {
+        const cond = conditions.find(c => c.name === gate.condName);
+        const weight = activeWeights[gate.weightKey];
+        totalTacticalWeight += weight;
+        if (cond?.met) {
+          if (enableDiscounting && cond.softened === true) {
+            earnedTacticalWeight += weight * discountFactor;
+          } else {
+            earnedTacticalWeight += weight;
+          }
         }
       }
     }
@@ -6514,10 +6666,11 @@ class TradingEngine {
       entryScore = confidenceScore;
     } else {
       if (signalDirection !== "NEUTRAL") {
-        if (pLongMet || pShortMet || this.isGateSkipped(config, "CatBoost AI Prediction")) entryScore += 40;
-        if ((regimeValid && regimeAligned) || this.isGateSkipped(config, "Market Regime Filter")) entryScore += 20;
-        if ((trendAligned && adxMet) || this.isGateSkipped(config, "Trend Alignment & Strength (EMA/ADX)")) entryScore += 30;
-        if (relVolume > requiredRelVol || this.isGateSkipped(config, "Relative Volume Confirmation")) entryScore += 10;
+        if (pLongMet || pShortMet || !this.isGateActive(config, "CatBoost AI Prediction")) entryScore += 40;
+        if ((regimeValid && regimeAligned) || !this.isGateActive(config, "Market Regime Filter")) entryScore += 20;
+        if (trendAligned || !this.isGateActive(config, "Exponential Trend Alignment")) entryScore += 15;
+        if (adxMet || !this.isGateActive(config, "ADX Trend Strength Filter")) entryScore += 15;
+        if (relVolume > requiredRelVol || !this.isGateActive(config, "Relative Volume Confirmation")) entryScore += 10;
       }
     }
 
@@ -6525,14 +6678,21 @@ class TradingEngine {
       .filter((c) => safetyGates.includes(c.name))
       .every((c) => c.met);
 
-    let marketStructurePassed = conditions.find(c => c.name === "Market Structure Confirmation")?.met ?? false;
+    // Check "Market Structure Confirmation" dynamically based on whether it is active and mandatory
+    const isStructureMandatory = this.isGateMandatory(config, "Market Structure Confirmation");
+    const isStructureActive = this.isGateActive(config, "Market Structure Confirmation");
+    let marketStructurePassed = isStructureActive && isStructureMandatory
+      ? (conditions.find(c => c.name === "Market Structure Confirmation")?.met ?? false)
+      : true;
 
     // Handle optional mandatory volume profile in ranging regime
     let isMtfVpPassedIfRequired = true;
     if (this.currentRegime === MarketRegime.RANGE_BOUND && config.general.require_volume_profile_in_ranging !== false) {
-      const vpGate = conditions.find(c => c.name === "Multi-Timeframe Volume Profiling (Horizontal Liquidity)");
-      if (vpGate && !vpGate.met) {
-        isMtfVpPassedIfRequired = false;
+      if (this.isGateActive(config, "Multi-Timeframe Volume Profiling (Horizontal Liquidity)") && this.isGateMandatory(config, "Multi-Timeframe Volume Profiling (Horizontal Liquidity)")) {
+        const vpGate = conditions.find(c => c.name === "Multi-Timeframe Volume Profiling (Horizontal Liquidity)");
+        if (vpGate && !vpGate.met) {
+          isMtfVpPassedIfRequired = false;
+        }
       }
     }
 
@@ -6543,21 +6703,26 @@ class TradingEngine {
       allConditionsMet = conditions.every((c) => c.met);
     }
 
-    const failedConditions = conditions.filter((c) => {
-      if (isWeightedEnabled) {
-        if (safetyGates.includes(c.name) || c.name === "Market Structure Confirmation") {
+    let failedConditions: string[] = [];
+    if (isWeightedEnabled) {
+      failedConditions = conditions.filter((c) => {
+        if (safetyGates.includes(c.name)) {
           return !c.met;
+        }
+        if (c.name === "Market Structure Confirmation") {
+          return isStructureActive && isStructureMandatory && !c.met;
         }
         if (this.currentRegime === MarketRegime.RANGE_BOUND && config.general.require_volume_profile_in_ranging !== false && c.name === "Multi-Timeframe Volume Profiling (Horizontal Liquidity)") {
-          return !c.met;
+          return this.isGateActive(config, c.name) && this.isGateMandatory(config, c.name) && !c.met;
         }
         return false;
-      }
-      return !c.met;
-    }).map((c) => c.name);
+      }).map((c) => c.name);
 
-    if (isWeightedEnabled && !tacticalConfidenceMet) {
-      failedConditions.push(`Cumulative Tactical Confidence (${confidenceScore}% < ${confidenceThreshold}%)`);
+      if (!tacticalConfidenceMet) {
+        failedConditions.push(`Cumulative Tactical Confidence (${confidenceScore}% < ${confidenceThreshold}%)`);
+      }
+    } else {
+      failedConditions = conditions.filter((c) => !c.met).map((c) => c.name);
     }
 
     // Evaluate the strategy state from the single source of truth (Symmetry Protection)

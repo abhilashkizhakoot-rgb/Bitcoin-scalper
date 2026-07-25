@@ -105,6 +105,17 @@ const DEFAULT_CONFIG: StrategyConfig = {
     max_trades_per_day: 8,
     is_paper_trading: true,
     skipped_gates: [],
+    required_gates: [
+      "catboost", "regime", "trend", "volume", "limit", "adx", "equity", "credentials",
+      "cooldown", "timing", "vwap", "wedge", "ema100", "structure", "orderflow", "squeeze",
+      "orderbook", "volume_profile", "atr", "regime_cooldown"
+    ],
+    mandatory_gates: [
+      "limit", "equity", "credentials", "cooldown", "timing", "structure", "atr", "regime_cooldown"
+    ],
+    weighted_gates: [
+      "catboost", "regime", "trend", "volume", "vwap", "wedge", "orderflow", "squeeze", "orderbook", "volume_profile", "adx", "ema100"
+    ],
     relative_volume_threshold: 1.3,
     adx_threshold: 22.0,
     timing_windows: DEFAULT_TIMING_WINDOWS,
@@ -116,6 +127,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     orderflow_softening_percent: 10,
     order_book_min_depth: 4.0,
     order_book_max_imbalance: 0.35,
+    order_book_max_spoof_risk: 70,
     regime_change_cooldown_minutes: 15,
     regime_macro_slope_lookback: 5,
     regime_macro_slope_threshold: 0.0005,
@@ -240,9 +252,11 @@ const DEFAULT_CONFIG: StrategyConfig = {
     weights: {
       catboost_ai: 25,
       market_regime: 15,
-      trend_alignment: 15,
+      trend_alignment: 10,
+      adx_strength: 5,
       relative_volume: 10,
-      overextension: 10,
+      overextension: 5,
+      ema100_overextension: 5,
       wedge_filter: 5,
       order_flow: 10,
       squeeze_filter: 5,
@@ -904,6 +918,28 @@ class DatabaseManager {
         this.cache.config.general.skipped_gates = [];
         changed = true;
       }
+      if (!this.cache.config.general.required_gates) {
+        const skipped = this.cache.config.general.skipped_gates || [];
+        const allGates = [
+          "catboost", "regime", "trend", "volume", "limit", "adx", "equity", "credentials",
+          "cooldown", "timing", "vwap", "wedge", "ema100", "structure", "orderflow", "squeeze",
+          "orderbook", "volume_profile", "atr", "regime_cooldown"
+        ];
+        this.cache.config.general.required_gates = allGates.filter(g => !skipped.includes(g));
+        changed = true;
+      }
+      if (!this.cache.config.general.mandatory_gates) {
+        this.cache.config.general.mandatory_gates = [
+          "limit", "equity", "credentials", "cooldown", "timing", "structure", "atr", "regime_cooldown"
+        ];
+        changed = true;
+      }
+      if (!this.cache.config.general.weighted_gates) {
+        this.cache.config.general.weighted_gates = [
+          "catboost", "regime", "trend", "volume", "vwap", "wedge", "orderflow", "squeeze", "orderbook", "volume_profile", "adx", "ema100"
+        ];
+        changed = true;
+      }
       if (this.cache.config.general.relative_volume_threshold === undefined) {
         this.cache.config.general.relative_volume_threshold = 1.3;
         changed = true;
@@ -934,6 +970,10 @@ class DatabaseManager {
       }
       if (this.cache.config.general.order_book_max_imbalance === undefined) {
         this.cache.config.general.order_book_max_imbalance = 0.35;
+        changed = true;
+      }
+      if (this.cache.config.general.order_book_max_spoof_risk === undefined) {
+        this.cache.config.general.order_book_max_spoof_risk = 70;
         changed = true;
       }
       if (this.cache.config.general.regime_change_cooldown_minutes === undefined) {

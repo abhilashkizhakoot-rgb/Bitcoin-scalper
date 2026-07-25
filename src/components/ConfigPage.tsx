@@ -26,23 +26,26 @@ import {
 import { StrategyConfig, ConfigHistoryEntry, NewsSource } from "../types.js";
 
 const AVAILABLE_GATES = [
-  { id: "catboost", label: "CatBoost AI Prediction Threshold" },
-  { id: "regime", label: "Market Regime Lock" },
-  { id: "trend", label: "Exponential Trend Alignment" },
-  { id: "volume", label: "Relative Volume Confirmation" },
-  { id: "limit", label: "Daily Trade Count Limit" },
-  { id: "adx", label: "ADX Trend Strength Filter" },
-  { id: "equity", label: "Minimum Account Equity Check" },
-  { id: "credentials", label: "Exchange API Credentials Validation" },
-  { id: "cooldown", label: "Loss Streak Cooldown Protection" },
-  { id: "timing", label: "Optimal Session Timing Window Check (IST)" },
-  { id: "vwap", label: "VWAP Deviation Anchor Check" },
-  { id: "wedge", label: "Wedge Pattern Filter" },
-  { id: "ema100", label: "EMA 100 Overextension Protection" },
-  { id: "structure", label: "Market Structure Confirmation" },
-  { id: "orderflow", label: "Binance Order Flow Confirmation" },
-  { id: "squeeze", label: "Volatility Compression (Squeeze) Filter" },
-  { id: "orderbook", label: "Order Book Imbalance & Liquidity Depth Gate" },
+  { id: "catboost", label: "CatBoost AI Prediction Threshold", supportsWeight: true },
+  { id: "regime", label: "Market Regime Lock", supportsWeight: true },
+  { id: "trend", label: "Exponential Trend Alignment", supportsWeight: true },
+  { id: "volume", label: "Relative Volume Confirmation", supportsWeight: true },
+  { id: "limit", label: "Daily Trade Count Limit", supportsWeight: false },
+  { id: "adx", label: "ADX Trend Strength Filter", supportsWeight: true },
+  { id: "equity", label: "Minimum Account Equity Check", supportsWeight: false },
+  { id: "credentials", label: "Exchange API Credentials Validation", supportsWeight: false },
+  { id: "cooldown", label: "Loss Streak Cooldown Protection", supportsWeight: false },
+  { id: "timing", label: "Optimal Session Timing Window Check (IST)", supportsWeight: false },
+  { id: "vwap", label: "VWAP Deviation Anchor Check", supportsWeight: true },
+  { id: "wedge", label: "Wedge Pattern Filter", supportsWeight: true },
+  { id: "ema100", label: "EMA 100 Overextension Protection", supportsWeight: true },
+  { id: "structure", label: "Market Structure Confirmation", supportsWeight: false },
+  { id: "orderflow", label: "Binance Order Flow Confirmation", supportsWeight: true },
+  { id: "squeeze", label: "Volatility Compression (Squeeze) Filter", supportsWeight: true },
+  { id: "orderbook", label: "Order Book Imbalance & Liquidity Depth Gate", supportsWeight: true },
+  { id: "volume_profile", label: "Multi-Timeframe Volume Profiling (Horizontal Liquidity)", supportsWeight: true },
+  { id: "atr", label: "Minimum ATR Volatility Filter", supportsWeight: false },
+  { id: "regime_cooldown", label: "Regime Transition Cooldown", supportsWeight: false },
 ];
 
 interface ConfigPageProps {
@@ -120,13 +123,16 @@ export default function ConfigPage({
     weights: {
       catboost_ai: 25,
       market_regime: 15,
-      trend_alignment: 15,
+      trend_alignment: 10,
+      adx_strength: 5,
       relative_volume: 10,
-      overextension: 10,
+      overextension: 5,
+      ema100_overextension: 5,
       wedge_filter: 5,
       order_flow: 10,
       squeeze_filter: 5,
       order_book: 5,
+      ...((config.gate_scoring && config.gate_scoring.weights) || {}),
     },
     adaptive_modifiers: {
       trending: {
@@ -221,6 +227,12 @@ export default function ConfigPage({
         adx_threshold: 22.0,
         order_book_min_depth: 4.0,
         order_book_max_imbalance: 0.35,
+        order_book_max_spoof_risk: 70,
+        required_gates: [
+          "catboost", "regime", "trend", "volume", "limit", "adx", "equity", "credentials",
+          "cooldown", "timing", "vwap", "wedge", "ema100", "structure", "orderflow", "squeeze",
+          "orderbook", "volume_profile", "atr", "regime_cooldown"
+        ],
         regime_macro_slope_lookback: 5,
         regime_macro_slope_threshold: 0.0005,
         regime_ribbon_compression_threshold: 0.0015,
@@ -404,15 +416,40 @@ export default function ConfigPage({
     }
   };
 
-  const toggleGateBypass = (gateId: string) => {
-    const currentSkipped = generalConfig.skipped_gates || [];
-    let updated: string[];
-    if (currentSkipped.includes(gateId)) {
-      updated = currentSkipped.filter((g) => g !== gateId);
+  const setGateMode = (gateId: string, mode: "MANDATORY" | "WEIGHTED" | "BYPASSED") => {
+    const allAvailableIds = AVAILABLE_GATES.map((g) => g.id);
+    
+    // Calculate new mandatory gates list
+    let currentMandatory = generalConfig.mandatory_gates ? [...generalConfig.mandatory_gates] : [
+      "limit", "equity", "credentials", "cooldown", "timing", "structure", "atr", "regime_cooldown"
+    ];
+    if (mode === "MANDATORY") {
+      if (!currentMandatory.includes(gateId)) currentMandatory.push(gateId);
     } else {
-      updated = [...currentSkipped, gateId];
+      currentMandatory = currentMandatory.filter((id) => id !== gateId);
     }
-    setGeneralConfig({ ...generalConfig, skipped_gates: updated });
+
+    // Calculate new weighted gates list
+    let currentWeighted = generalConfig.weighted_gates ? [...generalConfig.weighted_gates] : [
+      "catboost", "regime", "trend", "volume", "vwap", "wedge", "orderflow", "squeeze", "orderbook", "volume_profile"
+    ];
+    if (mode === "WEIGHTED") {
+      if (!currentWeighted.includes(gateId)) currentWeighted.push(gateId);
+    } else {
+      currentWeighted = currentWeighted.filter((id) => id !== gateId);
+    }
+
+    // Synchronize with legacy lists for backward compatibility
+    const updatedRequired = [...currentMandatory, ...currentWeighted];
+    const updatedSkipped = allAvailableIds.filter((id) => !updatedRequired.includes(id));
+
+    setGeneralConfig({
+      ...generalConfig,
+      mandatory_gates: currentMandatory,
+      weighted_gates: currentWeighted,
+      required_gates: updatedRequired,
+      skipped_gates: updatedSkipped,
+    });
   };
 
   const handleSaveProfile = async () => {
@@ -894,6 +931,22 @@ export default function ConfigPage({
                   </p>
                 </div>
 
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Order Book Max Spoof Risk (%)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={generalConfig.order_book_max_spoof_risk !== undefined ? generalConfig.order_book_max_spoof_risk : 70}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, order_book_max_spoof_risk: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    id="config-order-book-max-spoof-risk"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Spoof risk limit (1-100%). If risk exceeds this threshold, the imbalance gate applies tightening to the imbalance threshold to neutralize fake order walls. (Standard: 70%).
+                  </p>
+                </div>
+
                 <div className="space-y-2 flex flex-col justify-end pb-1">
                   <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
                     <input
@@ -1042,41 +1095,82 @@ export default function ConfigPage({
               </div>
             </div>
 
-            {/* Section 5: Checkpoint Gates Bypass */}
+            {/* Section 5: Active Trading Evaluation Gates */}
             <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm">
               <div>
                 <h4 className="text-xs font-bold font-sans text-slate-700 uppercase flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-amber-500" />
-                  Checkpoint Gates Bypass (Skip Gates)
+                  <Sparkles className="w-4 h-4 text-indigo-500" />
+                  Active Trading Evaluation Gates (Required Gates)
                 </h4>
                 <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                  Bypass specific checklist gate checks. Bypassed gates will always evaluate as TRUE and will not block automated signal execution. Use with caution to disable non-critical filters during active test sessions.
+                  Select which validation gates must pass to permit trade execution. Ticked gates are active and enforced. Unticked gates are bypassed and will always evaluate as TRUE (BYPASS), allowing them to never block signal execution. Align safety and tactical gates to your active test session needs.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
                 {AVAILABLE_GATES.map((gate) => {
-                  const isBypassed = (generalConfig.skipped_gates || []).includes(gate.id);
+                  const isMandatory = (generalConfig.mandatory_gates || []).includes(gate.id);
+                  const isWeighted = gate.supportsWeight && (generalConfig.weighted_gates || []).includes(gate.id);
+                  const isBypassed = !isMandatory && !isWeighted;
+
                   return (
-                    <label
+                    <div
                       key={gate.id}
-                      className="flex items-start gap-3 p-2.5 rounded-lg border hover:bg-white transition-all cursor-pointer select-none bg-slate-50 border-transparent hover:border-slate-200/80"
+                      className="flex flex-col gap-2 p-3 rounded-lg border bg-white border-slate-200/70 shadow-sm transition-all"
                     >
-                      <input
-                        type="checkbox"
-                        checked={isBypassed}
-                        onChange={() => toggleGateBypass(gate.id)}
-                        className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4 shrink-0 cursor-pointer"
-                      />
-                      <div className="space-y-0.5">
-                        <span className="text-xs font-sans font-medium text-slate-700">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-sans font-semibold text-slate-700">
                           {gate.label}
                         </span>
-                        <p className="text-[10px] text-slate-400">
-                          {isBypassed ? "✓ Force Passing (Skipped)" : "Active evaluation gate"}
-                        </p>
+                        <span className={`text-[9px] font-sans font-bold px-1.5 py-0.5 rounded-full ${
+                          isMandatory
+                            ? "bg-rose-50 text-rose-600 border border-rose-100"
+                            : isWeighted
+                            ? "bg-indigo-50 text-indigo-600 border border-indigo-100"
+                            : "bg-slate-100 text-slate-500 border border-slate-200"
+                        }`}>
+                          {isMandatory ? "STRICT" : isWeighted ? "WEIGHTED" : "BYPASSED"}
+                        </span>
                       </div>
-                    </label>
+                      
+                      <div className={`grid ${gate.supportsWeight ? "grid-cols-3" : "grid-cols-2"} gap-1 bg-slate-50 p-0.5 rounded-lg border border-slate-100`}>
+                        <button
+                          type="button"
+                          onClick={() => setGateMode(gate.id, "MANDATORY")}
+                          className={`text-[10px] font-sans font-medium py-1 rounded transition-all cursor-pointer ${
+                            isMandatory
+                              ? "bg-rose-500 text-white shadow-sm font-semibold"
+                              : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                          }`}
+                        >
+                          Strict
+                        </button>
+                        {gate.supportsWeight && (
+                          <button
+                            type="button"
+                            onClick={() => setGateMode(gate.id, "WEIGHTED")}
+                            className={`text-[10px] font-sans font-medium py-1 rounded transition-all cursor-pointer ${
+                              isWeighted
+                                ? "bg-indigo-600 text-white shadow-sm font-semibold"
+                                : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                            }`}
+                          >
+                            Weighted
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setGateMode(gate.id, "BYPASSED")}
+                          className={`text-[10px] font-sans font-medium py-1 rounded transition-all cursor-pointer ${
+                            isBypassed
+                              ? "bg-slate-400 text-white shadow-sm font-semibold"
+                              : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                          }`}
+                        >
+                          Bypass
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
@@ -2866,9 +2960,9 @@ export default function ConfigPage({
                     <p className="text-[10px] text-slate-400 leading-relaxed">Weight of macro trend regime validation (e.g. Trend vs Ranging checks).</p>
                   </div>
 
-                  <div className="space-y-1.5">
+                   <div className="space-y-1.5">
                     <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
-                      <span>Trend Alignment (EMA/ADX)</span>
+                      <span>Exponential Trend Alignment</span>
                     </label>
                     <input
                       type="number"
@@ -2882,7 +2976,26 @@ export default function ConfigPage({
                       })}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
                     />
-                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of short-term EMA alignments and ADX momentum gates.</p>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of short-term multi-EMA alignments.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>ADX Trend Strength Filter</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.adx_strength !== undefined ? gateScoringConfig.weights.adx_strength : 5}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, adx_strength: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of ADX trend strength and velocity requirements.</p>
                   </div>
 
                   <div className="space-y-1.5">
@@ -2906,7 +3019,7 @@ export default function ConfigPage({
 
                   <div className="space-y-1.5">
                     <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
-                      <span>Overextension & Anchors</span>
+                      <span>VWAP Deviation Anchor Check</span>
                     </label>
                     <input
                       type="number"
@@ -2920,7 +3033,26 @@ export default function ConfigPage({
                       })}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
                     />
-                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of key anchor levels and VWAP proximity bands.</p>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of VWAP standard deviation band limits.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>EMA 100 Overextension Protection</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.ema100_overextension !== undefined ? gateScoringConfig.weights.ema100_overextension : 5}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, ema100_overextension: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of 100 EMA deviation limits to prevent chasing tops/bottoms.</p>
                   </div>
 
                   <div className="space-y-1.5">

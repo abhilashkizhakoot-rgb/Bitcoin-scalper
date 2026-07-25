@@ -169,6 +169,9 @@ export interface StrategyConfig {
     max_trades_per_day: number;
     is_paper_trading: boolean;
     skipped_gates?: string[];
+    required_gates?: string[];
+    mandatory_gates?: string[];
+    weighted_gates?: string[];
     relative_volume_threshold?: number;
     adx_threshold?: number;
     timing_windows?: TimingWindow[];
@@ -180,6 +183,7 @@ export interface StrategyConfig {
     orderflow_softening_percent?: number;
     order_book_min_depth?: number;
     order_book_max_imbalance?: number;
+    order_book_max_spoof_risk?: number;
     regime_change_cooldown_minutes?: number;
     regime_macro_slope_lookback?: number;
     regime_macro_slope_threshold?: number;
@@ -292,6 +296,8 @@ export interface StrategyConfig {
       squeeze_filter: number;
       order_book: number;
       volume_profile: number;
+      adx_strength?: number;
+      ema100_overextension?: number;
     };
     adaptive_modifiers?: {
       trending: {

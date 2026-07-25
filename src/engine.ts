@@ -1251,12 +1251,11 @@ class TradingEngine {
       const rangeLow = recentCandlesForRange.length > 0 ? Math.min(...recentCandlesForRange.map(c => c.low)) : struct.swingLow;
 
       const rangeWidth = rangeHigh - rangeLow;
-      const rangeSupportThreshold = rangeLow + Math.min(rangeWidth * 0.15, rangeLow * 0.0015);
-      const rangeResistanceThreshold = rangeHigh - Math.min(rangeWidth * 0.15, rangeHigh * 0.0015);
 
-      // Reversal signals
-      const isRangeLongReversal = (currentPrice <= rangeSupportThreshold) && (currentCandle.close > currentCandle.open);
-      const isRangeShortReversal = (currentPrice >= rangeResistanceThreshold) && (currentCandle.close < currentCandle.open);
+      // Restructured/optimized range reversal signal evaluation
+      const revSignals = this.evaluateRangeReversalSignals(lastIdx);
+      const isRangeLongReversal = revSignals.isLongReversal;
+      const isRangeShortReversal = revSignals.isShortReversal;
 
       // Breakout signals: Price breaks outside the 30-candle range with validated breakout candle
       const breakoutValidationLong = this.validateRangeBreakout("LONG", currentCandle, relVolume, recentCandlesForRange);
@@ -4377,6 +4376,161 @@ class TradingEngine {
     return result;
   }
 
+  private evaluateRangeReversalSignals(lastIdx: number): { 
+    isLongReversal: boolean; 
+    isShortReversal: boolean; 
+    longReason: string; 
+    shortReason: string;
+    rangeLow: number;
+    rangeHigh: number;
+  } {
+    const config = dbManager.getConfig();
+    const ms = config.market_structure || {};
+    
+    const currentPrice = this.currentPrice;
+    if (lastIdx < 0 || this.candles1m.length === 0) {
+      return { isLongReversal: false, isShortReversal: false, longReason: "", shortReason: "", rangeLow: currentPrice, rangeHigh: currentPrice };
+    }
+    
+    const currentCandle = this.candles1m[lastIdx];
+    
+    const rangeLookback = 30;
+    const startIdx = Math.max(0, lastIdx - rangeLookback);
+    const recentCandlesForRange = this.candles1m.slice(startIdx, lastIdx);
+    
+    const struct = this.getTrendMarketStructure();
+    const rangeHigh = recentCandlesForRange.length > 0 ? Math.max(...recentCandlesForRange.map(c => c.high)) : struct.swingHigh;
+    const rangeLow = recentCandlesForRange.length > 0 ? Math.min(...recentCandlesForRange.map(c => c.low)) : struct.swingLow;
+    
+    const rangeWidth = rangeHigh - rangeLow;
+    const rangeSupportThreshold = rangeLow + Math.min(rangeWidth * 0.15, rangeLow * 0.0015);
+    const rangeResistanceThreshold = rangeHigh - Math.min(rangeWidth * 0.15, rangeHigh * 0.0015);
+    
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentAtr = atr14[lastIdx] || 50;
+    
+    // --- 1. Recent Touch Check (Lookback Window) ---
+    const retestLookback = 5;
+    const evaluationSlice = this.candles1m.slice(Math.max(0, lastIdx - retestLookback + 1), lastIdx + 1);
+    
+    const hasTestedSupportRecently = evaluationSlice.some(c => c.low <= rangeSupportThreshold);
+    const hasTestedResistanceRecently = evaluationSlice.some(c => c.high >= rangeResistanceThreshold);
+    
+    // --- 2. Multiple Reversal & Entry Confirmations ---
+    
+    // CONFIRMATION A: Standard Candlestick Reversal Pattern
+    const rejectionCheckLong = this.isMultiCandleLongRejection(lastIdx, currentAtr);
+    const rejectionCheckShort = this.isMultiCandleShortRejection(lastIdx, currentAtr);
+    
+    const prevRejectionCheckLong = lastIdx >= 1 ? this.isMultiCandleLongRejection(lastIdx - 1, currentAtr) : { confirmed: false, type: "" };
+    const prevRejectionCheckShort = lastIdx >= 1 ? this.isMultiCandleShortRejection(lastIdx - 1, currentAtr) : { confirmed: false, type: "" };
+    
+    const isCandleReversalBullish = rejectionCheckLong.confirmed || prevRejectionCheckLong.confirmed;
+    const isCandleReversalBearish = rejectionCheckShort.confirmed || prevRejectionCheckShort.confirmed;
+    
+    const candlePatternTypeLong = rejectionCheckLong.confirmed ? rejectionCheckLong.type : prevRejectionCheckLong.type;
+    const candlePatternTypeShort = rejectionCheckShort.confirmed ? rejectionCheckShort.type : prevRejectionCheckShort.type;
+    
+    // CONFIRMATION B: Standard Green/Red Candle Close
+    const isCurrentCandleGreen = currentCandle.close > currentCandle.open;
+    const isCurrentCandleRed = currentCandle.close < currentCandle.open;
+    
+    const isImmediateGreenOnSupport = (currentCandle.close <= rangeSupportThreshold || currentPrice <= rangeSupportThreshold) && isCurrentCandleGreen;
+    const isImmediateRedOnResistance = (currentCandle.close >= rangeResistanceThreshold || currentPrice >= rangeResistanceThreshold) && isCurrentCandleRed;
+    
+    // CONFIRMATION C: Micro EMA Crossover / Momentum Bounce
+    const microFastPeriod = 5;
+    const microSlowPeriod = 15;
+    const closes = this.candles1m.map(c => c.close);
+    const fallbackFastSeries = this.calculateEMA(closes, microFastPeriod);
+    const fallbackSlowSeries = this.calculateEMA(closes, microSlowPeriod);
+    
+    let hasRecentMicroBullishCrossover = false;
+    let hasRecentMicroBearishCrossover = false;
+    
+    for (let i = 0; i < 3; i++) {
+      const currIdx = lastIdx - i;
+      const prevIdx = currIdx - 1;
+      if (prevIdx >= 0 && fallbackFastSeries[currIdx] !== undefined && fallbackSlowSeries[currIdx] !== undefined) {
+        if (fallbackFastSeries[currIdx] > fallbackSlowSeries[currIdx] && fallbackFastSeries[prevIdx] <= fallbackSlowSeries[prevIdx]) {
+          hasRecentMicroBullishCrossover = true;
+        }
+        if (fallbackFastSeries[currIdx] < fallbackSlowSeries[currIdx] && fallbackFastSeries[prevIdx] >= fallbackSlowSeries[prevIdx]) {
+          hasRecentMicroBearishCrossover = true;
+        }
+      }
+    }
+    
+    const isMicroEMAAlignedBullish = fallbackFastSeries[lastIdx] > fallbackSlowSeries[lastIdx];
+    const isMicroEMAAlignedBearish = fallbackFastSeries[lastIdx] < fallbackSlowSeries[lastIdx];
+    
+    // CONFIRMATION D: RSI Hook from oversold/overbought levels
+    const rsi14 = this.calculateRSI(closes, 14);
+    const currentRsi = rsi14[lastIdx] || 50;
+    
+    const recentRsiSlice = rsi14.slice(Math.max(0, lastIdx - 4), lastIdx + 1);
+    const wasRsiOversold = recentRsiSlice.some(r => r <= 35);
+    const wasRsiOverbought = recentRsiSlice.some(r => r >= 65);
+    
+    const isRsiHookedBullish = wasRsiOversold && currentRsi > recentRsiSlice[0] && isCurrentCandleGreen;
+    const isRsiHookedBearish = wasRsiOverbought && currentRsi < recentRsiSlice[0] && isCurrentCandleRed;
+    
+    // --- 3. Evaluate Long Reversal ---
+    let isLongReversal = false;
+    let longReason = "";
+    
+    const maxLongPriceThreshold = rangeLow + rangeWidth * 0.40;
+    const isPriceWithinLongZone = currentPrice <= maxLongPriceThreshold;
+    
+    if (hasTestedSupportRecently && isPriceWithinLongZone) {
+      if (isCandleReversalBullish) {
+        isLongReversal = true;
+        longReason = `Confirmed via [${candlePatternTypeLong}] following recent support touch of $${rangeLow.toFixed(2)}`;
+      } else if (hasRecentMicroBullishCrossover && isMicroEMAAlignedBullish) {
+        isLongReversal = true;
+        longReason = `Confirmed via Micro EMA Crossover (${microFastPeriod}/${microSlowPeriod} EMA) following recent support touch of $${rangeLow.toFixed(2)}`;
+      } else if (isRsiHookedBullish) {
+        isLongReversal = true;
+        longReason = `Confirmed via RSI Hook (${currentRsi.toFixed(1)}) from oversold following recent support touch of $${rangeLow.toFixed(2)}`;
+      } else if (isImmediateGreenOnSupport) {
+        isLongReversal = true;
+        longReason = `Confirmed via Bullish close at/below support threshold ($${rangeSupportThreshold.toFixed(2)})`;
+      }
+    }
+    
+    // --- 4. Evaluate Short Reversal ---
+    let isShortReversal = false;
+    let shortReason = "";
+    
+    const minShortPriceThreshold = rangeHigh - rangeWidth * 0.40;
+    const isPriceWithinShortZone = currentPrice >= minShortPriceThreshold;
+    
+    if (hasTestedResistanceRecently && isPriceWithinShortZone) {
+      if (isCandleReversalBearish) {
+        isShortReversal = true;
+        shortReason = `Confirmed via [${candlePatternTypeShort}] following recent resistance touch of $${rangeHigh.toFixed(2)}`;
+      } else if (hasRecentMicroBearishCrossover && isMicroEMAAlignedBearish) {
+        isShortReversal = true;
+        shortReason = `Confirmed via Micro EMA Crossover (${microFastPeriod}/${microSlowPeriod} EMA) following recent resistance touch of $${rangeHigh.toFixed(2)}`;
+      } else if (isRsiHookedBearish) {
+        isShortReversal = true;
+        shortReason = `Confirmed via RSI Hook (${currentRsi.toFixed(1)}) from overbought following recent resistance touch of $${rangeHigh.toFixed(2)}`;
+      } else if (isImmediateRedOnResistance) {
+        isShortReversal = true;
+        shortReason = `Confirmed via Bearish close at/above resistance threshold ($${rangeResistanceThreshold.toFixed(2)})`;
+      }
+    }
+    
+    return {
+      isLongReversal,
+      isShortReversal,
+      longReason,
+      shortReason,
+      rangeLow,
+      rangeHigh
+    };
+  }
+
   private isMultiCandleLongRejection(lastIdx: number, currentAtr: number): { confirmed: boolean; type: string } {
     if (lastIdx < 0) return { confirmed: false, type: "" };
     const currentCandle = this.candles1m[lastIdx];
@@ -4836,11 +4990,11 @@ class TradingEngine {
       const rangeLow = recentCandlesForRange.length > 0 ? Math.min(...recentCandlesForRange.map(c => c.low)) : struct.swingLow;
 
       const rangeWidth = rangeHigh - rangeLow;
-      const rangeSupportThreshold = rangeLow + Math.min(rangeWidth * 0.15, rangeLow * 0.0015);
-      const rangeResistanceThreshold = rangeHigh - Math.min(rangeWidth * 0.15, rangeHigh * 0.0015);
 
-      const isRangeLongReversal = (currentPrice <= rangeSupportThreshold) && (currentCandle.close > currentCandle.open);
-      const isRangeShortReversal = (currentPrice >= rangeResistanceThreshold) && (currentCandle.close < currentCandle.open);
+      // Restructured/optimized range reversal signal evaluation
+      const revSignals = this.evaluateRangeReversalSignals(lastIdx);
+      const isRangeLongReversal = revSignals.isLongReversal;
+      const isRangeShortReversal = revSignals.isShortReversal;
 
       // Compute relative volume to check breakout strength
       const volumes = this.candles1m.map((c) => c.volume);
@@ -4979,7 +5133,7 @@ class TradingEngine {
           }
           return {
             confirmed: true,
-            message: `Ranging Bullish Reversal Confirmed. Price ($${currentPrice.toFixed(2)}) is bouncing off major range support ($${rangeLow.toFixed(2)}). ${microTrendDetails}`,
+            message: `Ranging Bullish Reversal Confirmed: ${revSignals.longReason}. Price ($${currentPrice.toFixed(2)}) is bouncing off major range support ($${rangeLow.toFixed(2)}). ${microTrendDetails}`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -5049,7 +5203,7 @@ class TradingEngine {
           }
           return {
             confirmed: true,
-            message: `Ranging Bearish Reversal Confirmed. Price ($${currentPrice.toFixed(2)}) is rejecting major range resistance ($${rangeHigh.toFixed(2)}). ${microTrendDetails}`,
+            message: `Ranging Bearish Reversal Confirmed: ${revSignals.shortReason}. Price ($${currentPrice.toFixed(2)}) is rejecting major range resistance ($${rangeHigh.toFixed(2)}). ${microTrendDetails}`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -5954,12 +6108,11 @@ class TradingEngine {
       const rangeLow = recentCandlesForRange.length > 0 ? Math.min(...recentCandlesForRange.map(c => c.low)) : struct.swingLow;
 
       const rangeWidth = rangeHigh - rangeLow;
-      const rangeSupportThreshold = rangeLow + Math.min(rangeWidth * 0.15, rangeLow * 0.0015);
-      const rangeResistanceThreshold = rangeHigh - Math.min(rangeWidth * 0.15, rangeHigh * 0.0015);
 
-      // Reversal signals
-      const isRangeLongReversal = (currentClose <= rangeSupportThreshold) && (currentCandle.close > currentCandle.open);
-      const isRangeShortReversal = (currentClose >= rangeResistanceThreshold) && (currentCandle.close < currentCandle.open);
+      // Restructured/optimized range reversal signal evaluation
+      const revSignals = this.evaluateRangeReversalSignals(lastIdx);
+      const isRangeLongReversal = revSignals.isLongReversal;
+      const isRangeShortReversal = revSignals.isShortReversal;
 
       // Breakout signals: Price breaks outside the 30-candle range with validated breakout candle
       const breakoutValidationLong = this.validateRangeBreakout("LONG", currentCandle, relVolume, recentCandlesForRange);

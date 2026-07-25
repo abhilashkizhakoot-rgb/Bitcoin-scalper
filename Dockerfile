@@ -44,6 +44,7 @@ EXPOSE 3000
 ENV PORT=3000
 ENV NODE_ENV=production
 ENV DATA_DIR=/app/data
+ENV GEMINI_API_KEY=""
 
 # Command to start the application
 CMD ["node", "dist/server.cjs"]

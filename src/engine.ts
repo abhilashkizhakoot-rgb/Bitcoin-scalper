@@ -3803,17 +3803,24 @@ class TradingEngine {
         // 2. Bounce Confirmation (close is at least bounce fraction above slow EMA)
         const isBounceConfirmed = currentPrice >= sCurrent + bounceAtrFraction * currentAtr;
         
-        // 3. Fallback Crossover Invalidation Check (any recent post-breakout close drops below fallback slow EMA by more than invalidation ATR fraction)
-        const isFallbackCrossoverInvalidated = recentPostBreakoutCandles.some(c => {
-          const idx = this.candles1m.indexOf(c);
-          if (idx !== -1) {
-            const sVal = fallbackSlowSeries[idx];
-            return sVal !== undefined && c.close < sVal - invalidationAtrFraction * currentAtr;
+        // 3. Check for a recent crossover (fast EMA crossed above slow EMA within the last 3 candles)
+        let hasRecentCrossover = false;
+        for (let i = 0; i < 3; i++) {
+          const currIdx = lastIdx - i;
+          const prevIdx = currIdx - 1;
+          if (prevIdx >= 0 && fallbackFastSeries[currIdx] !== undefined && fallbackSlowSeries[currIdx] !== undefined) {
+            if (fallbackFastSeries[currIdx] > fallbackSlowSeries[currIdx] && fallbackFastSeries[prevIdx] <= fallbackSlowSeries[prevIdx]) {
+              hasRecentCrossover = true;
+              break;
+            }
           }
-          return false;
-        }) || currentPrice < sCurrent - invalidationAtrFraction * currentAtr;
+        }
 
-        if (isAlignedBullish && isBounceConfirmed && !isFallbackCrossoverInvalidated) {
+        // 4. Fallback Crossover Invalidation Check (only evaluates current price to allow retracement flexibility)
+        const isFallbackCrossoverInvalidated = currentPrice < sCurrent - invalidationAtrFraction * currentAtr;
+
+        // Crossover is valid if fast is above slow, price is bouncing or we had a recent crossover, and the current price is not below the invalidation threshold.
+        if (isAlignedBullish && (isBounceConfirmed || hasRecentCrossover) && !isFallbackCrossoverInvalidated) {
           isFallbackCrossoverBullish = true;
         }
       }
@@ -4077,17 +4084,24 @@ class TradingEngine {
         // 2. Bounce Confirmation (close is at least bounce fraction below slow EMA)
         const isBounceConfirmed = currentPrice <= sCurrent - bounceAtrFraction * currentAtr;
         
-        // 3. Fallback Crossover Invalidation Check (any recent post-breakout close climbs above fallback slow EMA by more than invalidation ATR fraction)
-        const isFallbackCrossoverInvalidated = recentPostBreakoutCandles.some(c => {
-          const idx = this.candles1m.indexOf(c);
-          if (idx !== -1) {
-            const sVal = fallbackSlowSeries[idx];
-            return sVal !== undefined && c.close > sVal + invalidationAtrFraction * currentAtr;
+        // 3. Check for a recent crossover (fast EMA crossed below slow EMA within the last 3 candles)
+        let hasRecentCrossover = false;
+        for (let i = 0; i < 3; i++) {
+          const currIdx = lastIdx - i;
+          const prevIdx = currIdx - 1;
+          if (prevIdx >= 0 && fallbackFastSeries[currIdx] !== undefined && fallbackSlowSeries[currIdx] !== undefined) {
+            if (fallbackFastSeries[currIdx] < fallbackSlowSeries[currIdx] && fallbackFastSeries[prevIdx] >= fallbackSlowSeries[prevIdx]) {
+              hasRecentCrossover = true;
+              break;
+            }
           }
-          return false;
-        }) || currentPrice > sCurrent + invalidationAtrFraction * currentAtr;
+        }
 
-        if (isAlignedBearish && isBounceConfirmed && !isFallbackCrossoverInvalidated) {
+        // 4. Fallback Crossover Invalidation Check (only evaluates current price to allow retracement flexibility)
+        const isFallbackCrossoverInvalidated = currentPrice > sCurrent + invalidationAtrFraction * currentAtr;
+
+        // Crossover is valid if fast is below slow, price is bouncing or we had a recent crossover, and the current price is not above the invalidation threshold.
+        if (isAlignedBearish && (isBounceConfirmed || hasRecentCrossover) && !isFallbackCrossoverInvalidated) {
           isFallbackCrossoverBearish = true;
         }
       }

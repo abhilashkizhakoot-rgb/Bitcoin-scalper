@@ -1984,8 +1984,8 @@ class TradingEngine {
       const discountFactor = config.gate_scoring?.softened_gate_discount_factor ?? 0.5;
 
       for (const gate of tacticalGatesMap) {
-        // Exclude bypassed/disabled and mandatory gates from weighted calculations
-        if (this.isGateActive(config, gate.condName) && this.isGateWeighted(config, gate.condName)) {
+        // Contribute weight for any active gate (both strict/mandatory and weighted)
+        if (this.isGateActive(config, gate.condName)) {
           const cond = conditions.find(c => c.name === gate.condName);
           const weight = activeWeights[gate.weightKey];
           totalTacticalWeight += weight;
@@ -6639,8 +6639,8 @@ class TradingEngine {
     const discountFactor = config.gate_scoring?.softened_gate_discount_factor ?? 0.5;
 
     for (const gate of tacticalGatesMap) {
-      // Exclude bypassed/disabled and mandatory gates from weighted calculations
-      if (this.isGateActive(config, gate.condName) && this.isGateWeighted(config, gate.condName)) {
+      // Contribute weight for any active gate (both strict/mandatory and weighted)
+      if (this.isGateActive(config, gate.condName)) {
         const cond = conditions.find(c => c.name === gate.condName);
         const weight = activeWeights[gate.weightKey];
         totalTacticalWeight += weight;

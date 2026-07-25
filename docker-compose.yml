@@ -12,6 +12,7 @@ services:
     environment:
       - NODE_ENV=production
       - DATA_DIR=/app/data
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     volumes:
       - ist_trading_data:/app/data
 

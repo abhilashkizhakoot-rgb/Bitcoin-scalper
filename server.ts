@@ -11,6 +11,7 @@ import { createServer as createViteServer } from "vite";
 import { dbManager } from "./src/db_sim.js";
 import { tradingEngine } from "./src/engine.js";
 import { ConnectionStatus } from "./src/types.js";
+import { GoogleGenAI, Type } from "@google/genai";
 
 function getRequestBaseUrl(req: express.Request): string {
   const url = getRawRequestBaseUrl(req);
@@ -466,6 +467,226 @@ async function startServer() {
 
   app.get("/api/analytics/regime-performance", (req, res) => {
     res.json(dbManager.getPerformanceByRegime());
+  });
+
+  // ----------------------------------------------------
+  // REST API: AI Insights (Gemini)
+  // ----------------------------------------------------
+
+  let aiClient: GoogleGenAI | null = null;
+  function getGeminiClient() {
+    if (!aiClient) {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error("GEMINI_API_KEY environment variable is required. Please set it in Settings > Secrets.");
+      }
+      aiClient = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          }
+        }
+      });
+    }
+    return aiClient;
+  }
+
+  const CACHE_FILE_PATH = path.join(process.env.DATA_DIR || process.cwd(), "gemini_insights_cache.json");
+
+  function getCachedInsights() {
+    try {
+      if (fs.existsSync(CACHE_FILE_PATH)) {
+        const content = fs.readFileSync(CACHE_FILE_PATH, "utf-8");
+        return JSON.parse(content);
+      }
+    } catch (e) {
+      console.error("Error reading insights cache:", e);
+    }
+    return null;
+  }
+
+  function saveCachedInsights(data: any) {
+    try {
+      fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(data, null, 2), "utf-8");
+    } catch (e) {
+      console.error("Error writing insights cache:", e);
+    }
+  }
+
+  app.get("/api/gemini/insights", (req, res) => {
+    const cached = getCachedInsights();
+    res.json({ cached: !!cached, insights: cached });
+  });
+
+  app.post("/api/gemini/insights", async (req, res) => {
+    try {
+      let ai;
+      try {
+        ai = getGeminiClient();
+      } catch (err: any) {
+        return res.status(400).json({
+          success: false,
+          error: err.message || "Gemini API key is not configured.",
+        });
+      }
+
+      const trades = dbManager.getTrades() || [];
+      const config = dbManager.getConfig();
+
+      // Read trade_log file if it exists
+      let tradeLogContent = "";
+      try {
+        const DATA_DIR = process.env.DATA_DIR || process.cwd();
+        const filePath = path.join(DATA_DIR, "trade_log");
+        if (fs.existsSync(filePath)) {
+          const stats = fs.statSync(filePath);
+          const fd = fs.openSync(filePath, "r");
+          const bufferSize = Math.min(stats.size, 8000);
+          const buffer = Buffer.alloc(bufferSize);
+          fs.readSync(fd, buffer, 0, bufferSize, stats.size - bufferSize);
+          fs.closeSync(fd);
+          tradeLogContent = buffer.toString("utf-8");
+        }
+      } catch (e) {
+        console.warn("Could not read trade_log for Gemini context:", e);
+      }
+
+      // Format trades for prompt to keep tokens low but descriptive
+      const tradeSummaryList = trades.slice(0, 15).map(t => ({
+        id: t.id,
+        direction: t.direction,
+        entry: t.entry_price,
+        exit: t.exit_price,
+        pnl: t.pnl_usdt,
+        pnl_pct: t.pnl_pct,
+        win: t.is_win,
+        reason: t.exit_reason,
+        regime: t.regime_at_entry,
+        duration: t.hold_duration_seconds ? `${Math.floor(t.hold_duration_seconds / 60)}m` : "unknown",
+        signalScore: t.entry_signal_score,
+        catboost: t.catboost_probability,
+      }));
+
+      const systemInstruction = `You are an elite high-frequency quantitative crypto trading analyst specialized in Bitcoin Futures scalping. 
+You analyze structured trade logs and trading engine parameters to provide action-oriented, professional, mathematical recommendations.
+You must return your analysis as structured JSON conforming strictly to the requested schema. 
+Never suggest automatic settings changes; provide purely strategic advisory insights with realistic confidence scores (0-100) based on data density.`;
+
+      const prompt = `Analyze the historical trade logs and the bot's current strategy configurations.
+
+CURRENT STRATEGY CONFIGURATION (SNAPSHOT):
+- Risk per trade %: ${config?.risk_management?.risk_per_trade_pct || "0.5"}% (Max: ${config?.risk_management?.max_risk_per_trade_pct || "1.0"}%)
+- Leverage: ${config?.risk_management?.leverage || "20"}x
+- Stop Loss ATR Multiplier: ${config?.risk_management?.stop_loss_atr_multiplier || "2.2"}
+- Take Profit Ratio: ${config?.risk_management?.take_profit_ratio || "2.5"}
+- Trailing Stop Loss: ${config?.risk_management?.trailing_stop_loss_enabled ? "Enabled" : "Disabled"} (ATR distance: ${config?.risk_management?.trailing_stop_loss_distance_atr || "1.8"})
+- Required Checkpoint Gates: ${JSON.stringify(config?.general?.required_gates || [])}
+
+RECENT TRADES (LAST 15):
+${JSON.stringify(tradeSummaryList, null, 2)}
+
+RAW TRADE LOG SNIPPET (EXIT DETAILS):
+${tradeLogContent || "No detailed logs found in trade_log file."}
+
+Based on this real trading data, generate your analysis including:
+1. Overall trading performance summary.
+2. Common reasons for winning and losing trades (e.g. exit reasons, indicators, regime mismatch).
+3. Risk management improvements (e.g. adjust leverage, consecutive loss limits, risk per trade).
+4. Suggested strategy and parameter optimizations (e.g. Stop Loss ATR multiplier, Take Profit ratio, or EMA/ADX boundaries).
+5. Market conditions where this scalping bot excels and where it experiences maximum drawdowns.
+
+Provide a confidence score (0-100) for each recommendation based on how strongly the trade logs support the pattern.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.6-flash",
+        contents: prompt,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              overallSummary: {
+                type: Type.STRING,
+                description: "Overall trading performance summary of the bot's execution based on the logs."
+              },
+              winLossAnalysis: {
+                type: Type.STRING,
+                description: "Detailed analysis of common reasons for winning and losing trades."
+              },
+              marketConditions: {
+                type: Type.OBJECT,
+                properties: {
+                  performsBest: {
+                    type: Type.STRING,
+                    description: "Market conditions where the strategy performs best (e.g. strong uptrend, ranging, high vol)."
+                  },
+                  performsWorst: {
+                    type: Type.STRING,
+                    description: "Market conditions where the strategy performs worst."
+                  }
+                },
+                required: ["performsBest", "performsWorst"]
+              },
+              recommendations: {
+                type: Type.ARRAY,
+                description: "Specific, actionable risk management and strategy/parameter optimizations.",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    category: {
+                      type: Type.STRING,
+                      description: "Category of the recommendation, e.g. 'Risk Management', 'Parameter Optimization', 'Strategy Optimization'"
+                    },
+                    title: {
+                      type: Type.STRING,
+                      description: "Short, high-level descriptive title of the recommendation"
+                    },
+                    suggestion: {
+                      type: Type.STRING,
+                      description: "Detailed actionable recommendation text"
+                    },
+                    suggestedParams: {
+                      type: Type.STRING,
+                      description: "Specific parameters suggested to adjust (e.g., 'Set stop_loss_atr_multiplier to 2.5, take_profit_ratio to 3.0')"
+                    },
+                    confidenceScore: {
+                      type: Type.INTEGER,
+                      description: "Confidence score for this recommendation (integer from 0 to 100)"
+                    },
+                    reasoning: {
+                      type: Type.STRING,
+                      description: "Detailed reasoning for this suggestion backed by the trade data"
+                    }
+                  },
+                  required: ["category", "title", "suggestion", "suggestedParams", "confidenceScore", "reasoning"]
+                }
+              }
+            },
+            required: ["overallSummary", "winLossAnalysis", "marketConditions", "recommendations"]
+          }
+        }
+      });
+
+      const responseText = response.text;
+      if (!responseText) {
+        throw new Error("Empty response received from Gemini.");
+      }
+
+      const parsedInsights = JSON.parse(responseText.trim());
+      parsedInsights.generatedAt = new Date().toISOString();
+
+      saveCachedInsights(parsedInsights);
+
+      res.json({ success: true, insights: parsedInsights });
+    } catch (err: any) {
+      console.error("Gemini insights generation failed:", err);
+      res.status(500).json({
+        success: false,
+        error: `Failed to generate insights: ${err.message || String(err)}`,
+      });
+    }
   });
 
   // ----------------------------------------------------

@@ -3825,13 +3825,16 @@ class TradingEngine {
         }
       }
 
-      const isRejectionOrFallbackCrossoverConfirmed = isLongRejectionConfirmed || isFallbackCrossoverBullish;
-      const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isRejectionOrFallbackCrossoverConfirmed && hasRetracedToEMA && !isSetup2Invalidated;
+      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isLongRejectionConfirmed && hasRetracedToEMA;
+      const hasRetracedToEmaSinceBreakout = postBreakoutCandles.some(c => c.low <= emaRetraceThresholdFirst || c.low <= emaRetraceThresholdSecond);
+      const isFallbackEmaPushbackValid = isFallbackCrossoverBullish && hasRetracedToEmaSinceBreakout;
+
+      const isEmaPushbackValid = (isRegularEmaPushbackValid || isFallbackEmaPushbackValid) && !isSetup2Invalidated;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
-          const matchedEmaVal = touchesFirstEma ? firstEmaVal : secondEmaVal;
-          const confirmType = isLongRejectionConfirmed 
+          const matchedEmaVal = touchesFirstEma ? firstEmaVal : (touchesSecondEma ? secondEmaVal : firstEmaVal);
+          const confirmType = (isLongRejectionConfirmed && (touchesFirstEma || touchesSecondEma))
             ? `via [${longRejectionType}]` 
             : `via Fallback Micro EMA Momentum Bounce (${fallbackFastPeriod}/${fallbackSlowPeriod} EMA, +${bounceAtrFraction.toFixed(2)}xATR)`;
           emaPushbackMessage = `${emaZoneLabel} Pushback confirmed ${confirmType}${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected/bounced off dynamic EMA support at $${matchedEmaVal.toFixed(2)} (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
@@ -3843,7 +3846,7 @@ class TradingEngine {
       } else {
         if (isSetup2Invalidated) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Blocked: Price broke below dynamic EMA invalidation floor $${emaInvalidationFloor.toFixed(2)}.` };
-        } else if (hasRetracedToEMA) {
+        } else if (hasRetracedToEmaSinceBreakout) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle or fallback micro EMA crossover/momentum bounce (${fallbackFastPeriod}/${fallbackSlowPeriod} EMA, +${bounceAtrFraction.toFixed(2)}xATR).` };
         } else {
           const thresholdVal = Math.max(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
@@ -4106,13 +4109,16 @@ class TradingEngine {
         }
       }
 
-      const isRejectionOrFallbackCrossoverConfirmed = isShortRejectionConfirmed || isFallbackCrossoverBearish;
-      const isEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isRejectionOrFallbackCrossoverConfirmed && hasRetracedToEMA && !isSetup2Invalidated;
+      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isShortRejectionConfirmed && hasRetracedToEMA;
+      const hasRetracedToEmaSinceBreakout = postBreakoutCandles.some(c => c.high >= emaRetraceThresholdFirst || c.high >= emaRetraceThresholdSecond);
+      const isFallbackEmaPushbackValid = isFallbackCrossoverBearish && hasRetracedToEmaSinceBreakout;
+
+      const isEmaPushbackValid = (isRegularEmaPushbackValid || isFallbackEmaPushbackValid) && !isSetup2Invalidated;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
-          const matchedEmaVal = touchesFirstEma ? firstEmaVal : secondEmaVal;
-          const confirmType = isShortRejectionConfirmed 
+          const matchedEmaVal = touchesFirstEma ? firstEmaVal : (touchesSecondEma ? secondEmaVal : firstEmaVal);
+          const confirmType = (isShortRejectionConfirmed && (touchesFirstEma || touchesSecondEma))
             ? `via [${shortRejectionType}]` 
             : `via Fallback Micro EMA Momentum Bounce (${fallbackFastPeriod}/${fallbackSlowPeriod} EMA, -${bounceAtrFraction.toFixed(2)}xATR)`;
           emaPushbackMessage = `${emaZoneLabel} Pushback confirmed ${confirmType}${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected/bounced off dynamic EMA resistance at $${matchedEmaVal.toFixed(2)} (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
@@ -4124,7 +4130,7 @@ class TradingEngine {
       } else {
         if (isSetup2Invalidated) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Blocked: Price broke above dynamic EMA invalidation ceiling $${emaInvalidationCeiling.toFixed(2)}.` };
-        } else if (hasRetracedToEMA) {
+        } else if (hasRetracedToEmaSinceBreakout) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle or fallback micro EMA crossover/momentum bounce (${fallbackFastPeriod}/${fallbackSlowPeriod} EMA, -${bounceAtrFraction.toFixed(2)}xATR).` };
         } else {
           const thresholdVal = Math.min(emaRetraceThresholdFirst, emaRetraceThresholdSecond);

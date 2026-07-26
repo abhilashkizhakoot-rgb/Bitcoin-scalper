@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { apiFetch } from "../utils/api.ts";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -165,9 +165,11 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Initialize prices when currentPrice changes (only if fields are empty)
+  // Initialize prices ONCE when currentPrice first becomes available
+  const hasInitializedPricesRef = useRef(false);
   useEffect(() => {
-    if (currentPrice) {
+    if (currentPrice && !hasInitializedPricesRef.current) {
+      hasInitializedPricesRef.current = true;
       if (!slPriceStr) {
         setSlPriceStr(
           (direction === "LONG" ? currentPrice - 500 : currentPrice + 500).toFixed(2)

@@ -268,7 +268,7 @@ export default function Dashboard({
       active = false;
       clearInterval(interval);
     };
-  }, [status.current_price]);
+  }, []);
 
   // Determine sentiment score status color
   const getSentimentColor = (score: number) => {

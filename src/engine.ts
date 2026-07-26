@@ -3577,6 +3577,11 @@ class TradingEngine {
       };
     };
 
+    const hasHighHFPressure = adxValue >= (ms.hf_momentum_adx_threshold + 2) || 
+      (direction === "LONG" 
+        ? (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long) 
+        : (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short));
+
     // --- FEATURE 3: Multi-Timeframe (5m) Trend Structure Alignment ---
     const candles5m = this.aggregateCandles(this.candles1m, 5);
     const closes5m = candles5m.map(c => c.close);
@@ -3589,7 +3594,6 @@ class TradingEngine {
         const ema5_5m_val = ema5_5m[last5mIdx];
         const ema15_5m_val = ema15_5m[last5mIdx];
         const isMtfLong = ema5_5m_val > ema15_5m_val;
-        const hasHighHFPressure = adxValue >= (ms.hf_momentum_adx_threshold + 2) || (direction === "LONG" ? (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long) : (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short));
         if (direction === "LONG" && !isMtfLong && !hasHighHFPressure) {
           const mtfMsg = `Conflicting Trend: Multi-timeframe (5m) trend is bearish (5m EMA 5: $${ema5_5m_val.toFixed(2)} <= EMA 15: $${ema15_5m_val.toFixed(2)}).`;
           condDict["Multi-Timeframe Trend Alignment"] = { status: "FAIL", reason: mtfMsg };
@@ -3619,9 +3623,12 @@ class TradingEngine {
     }
 
     if (direction === "LONG") {
-      const isEmaAlignedLong = adxValue >= ms.weak_trend_adx_threshold
-        ? (ema20Val > ema50Val)
-        : (ema20Val > ema50Val && currentPrice > ema100Val);
+      const isEmaLagBypassed = hasHighHFPressure || adxValue >= ms.hf_momentum_adx_threshold;
+      const isEmaAlignedLong = isEmaLagBypassed
+        ? true
+        : (adxValue >= ms.weak_trend_adx_threshold
+            ? (ema20Val > ema50Val)
+            : (ema20Val > ema50Val && currentPrice > ema100Val));
       if (!isEmaAlignedLong) {
         const alignMsg = adxValue >= ms.weak_trend_adx_threshold
           ? `Blocked: Fast Bullish EMA structure not aligned (Requires EMA 20 > EMA 50, ADX is strong: ${adxValue.toFixed(1)}).`
@@ -3631,7 +3638,9 @@ class TradingEngine {
       }
       condDict["EMA Structure Alignment"] = {
         status: "PASS",
-        reason: adxValue >= ms.weak_trend_adx_threshold ? "EMA 20 > EMA 50 aligned" : "EMA 20 > EMA 50 & Price > EMA 100 aligned"
+        reason: isEmaLagBypassed
+          ? "Bypassed EMA lag due to high momentum / HF taker pressure"
+          : (adxValue >= ms.weak_trend_adx_threshold ? "EMA 20 > EMA 50 aligned" : "EMA 20 > EMA 50 & Price > EMA 100 aligned")
       };
 
       // Symmetrically, the broken level is the previous Higher High (prev_HH) in a confirmed uptrend
@@ -3833,10 +3842,13 @@ class TradingEngine {
       const firstEmaSeries = this.calculateEMA(closes, firstEmaPeriod);
       const secondEmaSeries = this.calculateEMA(closes, secondEmaPeriod);
 
+      const fastEmaUpperTol = (adxValue >= ms.weak_trend_adx_threshold || hasHighHFPressure) ? 0.35 * currentAtr : 0.25 * currentAtr;
+      const fastEmaLowerTol = (adxValue >= ms.weak_trend_adx_threshold || hasHighHFPressure) ? 0.20 * currentAtr : 0.15 * currentAtr;
+
       const touchesFirstEma = recentPostBreakoutCandles.some(c => {
         const cIdx = this.candles1m.indexOf(c);
         const emaVal = (cIdx !== -1 && firstEmaSeries[cIdx] !== undefined) ? firstEmaSeries[cIdx] : firstEmaVal;
-        return c.low <= emaVal + 0.25 * currentAtr && c.high >= emaVal - 0.15 * currentAtr;
+        return c.low <= emaVal + fastEmaUpperTol && c.high >= emaVal - fastEmaLowerTol;
       });
       const touchesSecondEma = recentPostBreakoutCandles.some(c => {
         const cIdx = this.candles1m.indexOf(c);
@@ -3921,9 +3933,12 @@ class TradingEngine {
       }
     } else {
       // SHORT
-      const isEmaAlignedShort = adxValue >= ms.weak_trend_adx_threshold
-        ? (ema20Val < ema50Val)
-        : (ema20Val < ema50Val && currentPrice < ema100Val);
+      const isEmaLagBypassed = hasHighHFPressure || adxValue >= ms.hf_momentum_adx_threshold;
+      const isEmaAlignedShort = isEmaLagBypassed
+        ? true
+        : (adxValue >= ms.weak_trend_adx_threshold
+            ? (ema20Val < ema50Val)
+            : (ema20Val < ema50Val && currentPrice < ema100Val));
       if (!isEmaAlignedShort) {
         const alignMsg = adxValue >= ms.weak_trend_adx_threshold
           ? `Blocked: Fast Bearish EMA structure not aligned (Requires EMA 20 < EMA 50, ADX is strong: ${adxValue.toFixed(1)}).`
@@ -3933,7 +3948,9 @@ class TradingEngine {
       }
       condDict["EMA Structure Alignment"] = {
         status: "PASS",
-        reason: adxValue >= ms.weak_trend_adx_threshold ? "EMA 20 < EMA 50 aligned" : "EMA 20 < EMA 50 & Price < EMA 100 aligned"
+        reason: isEmaLagBypassed
+          ? "Bypassed EMA lag due to high momentum / HF taker pressure"
+          : (adxValue >= ms.weak_trend_adx_threshold ? "EMA 20 < EMA 50 aligned" : "EMA 20 < EMA 50 & Price < EMA 100 aligned")
       };
 
       // The broken level is the previous Lower Low (prev_LL) in a confirmed downtrend
@@ -4136,10 +4153,13 @@ class TradingEngine {
       const firstEmaSeries = this.calculateEMA(closes, firstEmaPeriod);
       const secondEmaSeries = this.calculateEMA(closes, secondEmaPeriod);
 
+      const fastEmaUpperTol = (adxValue >= ms.weak_trend_adx_threshold || hasHighHFPressure) ? 0.35 * currentAtr : 0.25 * currentAtr;
+      const fastEmaLowerTol = (adxValue >= ms.weak_trend_adx_threshold || hasHighHFPressure) ? 0.20 * currentAtr : 0.15 * currentAtr;
+
       const touchesFirstEma = recentPostBreakoutCandles.some(c => {
         const cIdx = this.candles1m.indexOf(c);
         const emaVal = (cIdx !== -1 && firstEmaSeries[cIdx] !== undefined) ? firstEmaSeries[cIdx] : firstEmaVal;
-        return c.high >= emaVal - 0.25 * currentAtr && c.low <= emaVal + 0.15 * currentAtr;
+        return c.high >= emaVal - fastEmaUpperTol && c.low <= emaVal + fastEmaLowerTol;
       });
       const touchesSecondEma = recentPostBreakoutCandles.some(c => {
         const cIdx = this.candles1m.indexOf(c);
@@ -4555,7 +4575,7 @@ class TradingEngine {
     let isLongReversal = false;
     let longReason = "";
     
-    const maxLongPriceThreshold = rangeLow + rangeWidth * 0.40;
+    const maxLongPriceThreshold = rangeLow + Math.max(rangeWidth * 0.40, 0.30 * currentAtr);
     const rangeLongMinFloor = rangeLow - 0.75 * currentAtr;
     const isNotCrashingBreakdown = currentPrice >= rangeLongMinFloor || currentCandle.close >= rangeLow;
     const isPriceWithinLongZone = currentPrice <= maxLongPriceThreshold && isNotCrashingBreakdown;
@@ -4580,7 +4600,7 @@ class TradingEngine {
     let isShortReversal = false;
     let shortReason = "";
     
-    const minShortPriceThreshold = rangeHigh - rangeWidth * 0.40;
+    const minShortPriceThreshold = rangeHigh - Math.max(rangeWidth * 0.40, 0.30 * currentAtr);
     const rangeShortMaxCeiling = rangeHigh + 0.75 * currentAtr;
     const isNotExplodingBreakout = currentPrice <= rangeShortMaxCeiling || currentCandle.close <= rangeHigh;
     const isPriceWithinShortZone = currentPrice >= minShortPriceThreshold && isNotExplodingBreakout;
@@ -4623,9 +4643,10 @@ class TradingEngine {
 
     // Single Candle Patterns
     const isPinBar = range > 0 && lowerWick >= 0.5 * range && upperWick <= 0.25 * range;
+    const isMajorWickRejection = range > 0 && lowerWick >= 0.65 * range;
     const hasStrongClose = range > 0 && (currentCandle.close - currentCandle.low) / range >= 0.70;
     const isMomentumCandle = isBullish && body >= 0.7 * currentAtr;
-    const isIndecision = range > 0 && (body / range < 0.15) && !isPinBar;
+    const isIndecision = range > 0 && (body / range < 0.15) && !isPinBar && !isMajorWickRejection;
 
     // Two-Candle Patterns
     const isBullishEngulfing = prevCandle && 
@@ -4714,6 +4735,7 @@ class TradingEngine {
     }
 
     if (isPinBar) return { confirmed: !isIndecision, type: "Bullish Pin Bar" };
+    if (isMajorWickRejection) return { confirmed: true, type: "65%+ Wick-to-Range Lower Rejection" };
     if (isBullishEngulfing) return { confirmed: !isIndecision, type: "Bullish Engulfing Pattern" };
     if (hasMultiWickRejection) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
     if (isTweezerBottom) return { confirmed: !isIndecision, type: "Tweezer Bottom Reversal Pattern" };
@@ -4738,9 +4760,10 @@ class TradingEngine {
 
     // Single Candle Patterns
     const isPinBar = range > 0 && upperWick >= 0.5 * range && lowerWick <= 0.25 * range;
+    const isMajorWickRejection = range > 0 && upperWick >= 0.65 * range;
     const hasStrongClose = range > 0 && (currentCandle.high - currentCandle.close) / range >= 0.70;
     const isMomentumCandle = isBearish && body >= 0.7 * currentAtr;
-    const isIndecision = range > 0 && (body / range < 0.15) && !isPinBar;
+    const isIndecision = range > 0 && (body / range < 0.15) && !isPinBar && !isMajorWickRejection;
 
     // Two-Candle Patterns
     const isBearishEngulfing = prevCandle && 
@@ -4829,6 +4852,7 @@ class TradingEngine {
     }
 
     if (isPinBar) return { confirmed: !isIndecision, type: "Bearish Pin Bar" };
+    if (isMajorWickRejection) return { confirmed: true, type: "65%+ Wick-to-Range Upper Rejection" };
     if (isBearishEngulfing) return { confirmed: !isIndecision, type: "Bearish Engulfing Pattern" };
     if (hasMultiWickRejection) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
     if (isTweezerTop) return { confirmed: !isIndecision, type: "Tweezer Top Reversal Pattern" };

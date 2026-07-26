@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { apiFetch } from "../utils/api.ts";
 import {
   Settings,
@@ -112,7 +112,7 @@ export default function ConfigPage({
   };
 
   // Sub-tab State Mirroring
-  const [lastSyncedConfig, setLastSyncedConfig] = useState(config);
+  const prevConfigRef = useRef(config);
   const [generalConfig, setGeneralConfig] = useState(config.general);
   const [mlConfig, setMlConfig] = useState(config.ml_settings);
   const [sentimentConfig, setSentimentConfig] = useState(config.sentiment_settings);
@@ -188,31 +188,15 @@ export default function ConfigPage({
   });
 
   useEffect(() => {
-    if (JSON.stringify(generalConfig) === JSON.stringify(lastSyncedConfig.general)) {
-      setGeneralConfig(config.general);
+    if (prevConfigRef.current !== config) {
+      prevConfigRef.current = config;
+      if (config.general) setGeneralConfig(config.general);
+      if (config.ml_settings) setMlConfig(config.ml_settings);
+      if (config.sentiment_settings) setSentimentConfig(config.sentiment_settings);
+      if (config.risk_management) setRiskConfig(config.risk_management);
+      if (config.market_structure) setMsConfig(config.market_structure);
+      if (config.gate_scoring) setGateScoringConfig(config.gate_scoring);
     }
-    if (JSON.stringify(mlConfig) === JSON.stringify(lastSyncedConfig.ml_settings)) {
-      setMlConfig(config.ml_settings);
-    }
-    if (JSON.stringify(sentimentConfig) === JSON.stringify(lastSyncedConfig.sentiment_settings)) {
-      setSentimentConfig(config.sentiment_settings);
-    }
-    if (JSON.stringify(riskConfig) === JSON.stringify(lastSyncedConfig.risk_management)) {
-      setRiskConfig(config.risk_management);
-    }
-    if (config.market_structure) {
-      const lastMs = lastSyncedConfig.market_structure || {};
-      if (JSON.stringify(msConfig) === JSON.stringify(lastMs)) {
-        setMsConfig(config.market_structure);
-      }
-    }
-    if (config.gate_scoring) {
-      const lastGs = lastSyncedConfig.gate_scoring || {};
-      if (JSON.stringify(gateScoringConfig) === JSON.stringify(lastGs)) {
-        setGateScoringConfig(config.gate_scoring);
-      }
-    }
-    setLastSyncedConfig(config);
   }, [config]);
 
   const sanitizeCategoryData = (category: string, data: any) => {

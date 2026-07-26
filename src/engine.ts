@@ -3693,12 +3693,12 @@ class TradingEngine {
 
       // --- FEATURE 4: Dynamic Invalidation & Stop-Loss Zones ---
       const structuralHL = struct.current_HL ? struct.current_HL.price : 0;
-      const reclaimThreshold = Math.max(breakoutLevel - invalidationMultiplier * currentAtr, structuralHL - 0.1 * currentAtr);
+      const reclaimThreshold = Math.min(breakoutLevel, Math.max(breakoutLevel - invalidationMultiplier * currentAtr, structuralHL - 0.1 * currentAtr));
       const hasReclaimed = postBreakoutCandles.some(c => c.close < reclaimThreshold);
       const isSetup1Invalidated = hasReclaimed || currentPrice < reclaimThreshold;
 
       // Deep invalidation floor for EMA retracements
-      const emaInvalidationFloor = Math.max(secondEmaVal - 0.5 * currentAtr, structuralHL - 0.2 * currentAtr);
+      const emaInvalidationFloor = Math.min(secondEmaVal, Math.max(secondEmaVal - 0.5 * currentAtr, structuralHL - 0.2 * currentAtr));
       const hasEmaInvalidated = postBreakoutCandles.some(c => c.close < emaInvalidationFloor);
       const isSetup2Invalidated = hasEmaInvalidated || currentPrice < emaInvalidationFloor;
 
@@ -3785,22 +3785,30 @@ class TradingEngine {
       const pullbackLimit = breakoutLevel + effectivePullbackMult * currentAtr;
       
       // To prevent buying the top/late chasing after price has moved away,
-      // we check if the actual retest/pullback touch occurred within the last 3 candles
-      // (which matches our 1-candle, 2-candle, and 3-candle rejection pattern window).
-      const recentPostBreakoutCandles = postBreakoutCandles.slice(-3);
+      // we check if the actual retest/pullback touch occurred within the last 4 candles
+      // (expanded to 4 candles to support 3-candle rejection pattern windows such as Morning Star).
+      const recentPostBreakoutCandles = postBreakoutCandles.slice(-4);
       const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.low <= pullbackLimit);
       
+      // Parabolic Breakout Continuation: Allow high-ADX shallow consolidation entries on candle 2+
+      const strongTrendAdx = ms.trend_alignment_adx_threshold || 28;
+      const isHighAdxConsolidation = adxValue >= strongTrendAdx && postBreakoutCandles.length >= 1;
+      const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close >= reclaimThreshold);
+
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
       if (isSetup1Invalidated) {
         condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: `Blocked: Price broke below breakout reclaim level $${reclaimThreshold.toFixed(2)}.` };
-      } else if (hasPulledBackToZone) {
+      } else if (hasPulledBackToZone || isShallowConsolidationHolding) {
         const isRejection = isLongRejectionConfirmed;
         const isContinuation = currentCandle.close > currentCandle.open && (currentCandle.close >= breakoutLevel || isLongRejectionConfirmed);
-        if (isRejection && isContinuation) {
+        if ((isRejection && isContinuation) || (isShallowConsolidationHolding && isContinuation)) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
-            pullbackRetestMessage = `Pullback & Retest setup confirmed via [${longRejectionType}]${mtfMessage}: Price pulled back to broken HH level ($${breakoutLevel.toFixed(2)}) on declining volume and rejected it as support with bullish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], Retrace limit: +${effectivePullbackMult.toFixed(1)} * ATR).`;
+            const setupLabel = isShallowConsolidationHolding && !hasPulledBackToZone
+              ? `High-ADX Parabolic Continuation (${adxValue.toFixed(1)} ADX): Shallow consolidation held above $${breakoutLevel.toFixed(2)}`
+              : `Pullback & Retest setup confirmed via [${longRejectionType}]`;
+            pullbackRetestMessage = `${setupLabel}${mtfMessage}: Price ${isShallowConsolidationHolding && !hasPulledBackToZone ? 'consolidated tightly above' : 'pulled back to'} broken HH level ($${breakoutLevel.toFixed(2)}) on healthy volume and resumed trend (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
             condDict["Pullback & Retest Setup (Setup 1)"] = { status: "PASS", reason: pullbackRetestMessage };
           } else {
             pullbackRetestMessage = "Blocked Retest: Pullback volume is abnormally high, indicating excessive distribution/selling pressure.";
@@ -3977,12 +3985,12 @@ class TradingEngine {
 
       // --- FEATURE 4: Dynamic Invalidation & Stop-Loss Zones ---
       const structuralLH = struct.current_LH ? struct.current_LH.price : Infinity;
-      const reclaimThreshold = Math.min(breakoutLevel + invalidationMultiplier * currentAtr, structuralLH + 0.1 * currentAtr);
+      const reclaimThreshold = Math.max(breakoutLevel, Math.min(breakoutLevel + invalidationMultiplier * currentAtr, structuralLH + 0.1 * currentAtr));
       const hasReclaimed = postBreakoutCandles.some(c => c.close > reclaimThreshold);
       const isSetup1Invalidated = hasReclaimed || currentPrice > reclaimThreshold;
 
       // Deep invalidation ceiling for EMA retracements
-      const emaInvalidationCeiling = Math.min(secondEmaVal + 0.5 * currentAtr, structuralLH + 0.2 * currentAtr);
+      const emaInvalidationCeiling = Math.max(secondEmaVal, Math.min(secondEmaVal + 0.5 * currentAtr, structuralLH + 0.2 * currentAtr));
       const hasEmaInvalidated = postBreakoutCandles.some(c => c.close > emaInvalidationCeiling);
       const isSetup2Invalidated = hasEmaInvalidated || currentPrice > emaInvalidationCeiling;
 
@@ -4069,22 +4077,30 @@ class TradingEngine {
       const pullbackLimit = breakoutLevel - effectivePullbackMult * currentAtr;
       
       // To prevent shorting the bottom/late chasing after price has moved away,
-      // we check if the actual retest/pullback touch occurred within the last 3 candles
-      // (which matches our 1-candle, 2-candle, and 3-candle rejection pattern window).
-      const recentPostBreakoutCandles = postBreakoutCandles.slice(-3);
+      // we check if the actual retest/pullback touch occurred within the last 4 candles
+      // (expanded to 4 candles to support 3-candle rejection pattern windows such as Evening Star).
+      const recentPostBreakoutCandles = postBreakoutCandles.slice(-4);
       const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.high >= pullbackLimit);
       
+      // Parabolic Breakdown Continuation: Allow high-ADX shallow consolidation entries on candle 2+
+      const strongTrendAdx = ms.trend_alignment_adx_threshold || 28;
+      const isHighAdxConsolidation = adxValue >= strongTrendAdx && postBreakoutCandles.length >= 1;
+      const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close <= reclaimThreshold);
+
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
       if (isSetup1Invalidated) {
         condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: `Blocked: Price broke above breakout reclaim level $${reclaimThreshold.toFixed(2)}.` };
-      } else if (hasPulledBackToZone) {
+      } else if (hasPulledBackToZone || isShallowConsolidationHolding) {
         const isRejection = isShortRejectionConfirmed;
         const isContinuation = currentCandle.close < currentCandle.open && (currentCandle.close <= breakoutLevel || isShortRejectionConfirmed);
-        if (isRejection && isContinuation) {
+        if ((isRejection && isContinuation) || (isShallowConsolidationHolding && isContinuation)) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
-            pullbackRetestMessage = `Pullback & Retest setup confirmed via [${shortRejectionType}]${mtfMessage}: Price pulled back to broken LL level ($${breakoutLevel.toFixed(2)}) on declining volume and rejected it as resistance with bearish confirmation (ADX: ${adxValue.toFixed(1)} [${adxLabel}], Retrace limit: -${effectivePullbackMult.toFixed(1)} * ATR).`;
+            const setupLabel = isShallowConsolidationHolding && !hasPulledBackToZone
+              ? `High-ADX Parabolic Continuation (${adxValue.toFixed(1)} ADX): Shallow consolidation held below $${breakoutLevel.toFixed(2)}`
+              : `Pullback & Retest setup confirmed via [${shortRejectionType}]`;
+            pullbackRetestMessage = `${setupLabel}${mtfMessage}: Price ${isShallowConsolidationHolding && !hasPulledBackToZone ? 'consolidated tightly below' : 'pulled back to'} broken LL level ($${breakoutLevel.toFixed(2)}) on healthy volume and resumed trend (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
             condDict["Pullback & Retest Setup (Setup 1)"] = { status: "PASS", reason: pullbackRetestMessage };
           } else {
             pullbackRetestMessage = "Blocked Retest: Pullback volume is abnormally high, indicating excessive accumulation/buying pressure.";
@@ -4440,11 +4456,12 @@ class TradingEngine {
     const rangeLow = recentCandlesForRange.length > 0 ? Math.min(...recentCandlesForRange.map(c => c.low)) : struct.swingLow;
     
     const rangeWidth = rangeHigh - rangeLow;
-    const rangeSupportThreshold = rangeLow + Math.min(rangeWidth * 0.15, rangeLow * 0.0015);
-    const rangeResistanceThreshold = rangeHigh - Math.min(rangeWidth * 0.15, rangeHigh * 0.0015);
-    
     const atr14 = this.calculateATR(this.candles1m, 14);
     const currentAtr = atr14[lastIdx] || 50;
+
+    // Support/Resistance threshold uses fraction of range width and relative ATR (removing rigid 0.15% price cap)
+    const rangeSupportThreshold = rangeLow + Math.min(rangeWidth * 0.15, Math.max(rangeWidth * 0.08, 0.5 * currentAtr));
+    const rangeResistanceThreshold = rangeHigh - Math.min(rangeWidth * 0.15, Math.max(rangeWidth * 0.08, 0.5 * currentAtr));
     
     // --- 1. Recent Touch Check (Lookback Window) ---
     const retestLookback = 5;
@@ -4831,6 +4848,7 @@ class TradingEngine {
           swingLow: struct.swingLow,
           ema_check_active: true,
           ema_pair_evaluated: `${fastPeriod} / ${slowPeriod} EMA`,
+          ema_tested: `Dynamic ${fastPeriod} / ${slowPeriod} EMA Band`,
           sub_conditions: [
             {
               name: "Strategy Mode",
@@ -4954,6 +4972,7 @@ class TradingEngine {
           swingLow: struct.swingLow,
           ema_check_active: true,
           ema_pair_evaluated: `${fastPeriod} / ${slowPeriod} EMA`,
+          ema_tested: `Dynamic ${fastPeriod} EMA ($${emaFastVal.toFixed(2)})`,
           sub_conditions
         };
 
@@ -5004,6 +5023,7 @@ class TradingEngine {
           swingLow: struct.swingLow,
           ema_check_active: true,
           ema_pair_evaluated: `${fastPeriod} / ${slowPeriod} EMA`,
+          ema_tested: `Dynamic ${fastPeriod} EMA ($${emaFastVal.toFixed(2)})`,
           sub_conditions
         };
       }
@@ -5077,7 +5097,7 @@ class TradingEngine {
         const postBreakoutCandles = this.candles1m.slice(rangeLongBreakoutIdx + 1);
         const pullbackThreshold = boRangeHigh + 0.5 * currentAtrForPullback;
         
-        const recentPostBreakoutCandles = postBreakoutCandles.slice(-3);
+        const recentPostBreakoutCandles = postBreakoutCandles.slice(-4);
         const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.low <= pullbackThreshold);
         
         // Check for bullish rejection on the current candle
@@ -5114,7 +5134,7 @@ class TradingEngine {
         const postBreakoutCandles = this.candles1m.slice(rangeShortBreakoutIdx + 1);
         const pullbackThreshold = boRangeLow - 0.5 * currentAtrForPullback;
         
-        const recentPostBreakoutCandles = postBreakoutCandles.slice(-3);
+        const recentPostBreakoutCandles = postBreakoutCandles.slice(-4);
         const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.high >= pullbackThreshold);
         
         // Check for bearish rejection on current candle

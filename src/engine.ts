@@ -3829,9 +3829,20 @@ class TradingEngine {
       // preventing late triggers when price is far away from the EMA zone.
       const hasRetracedToEMA = recentPostBreakoutCandles.some(c => c.low <= emaRetraceThresholdFirst || c.low <= emaRetraceThresholdSecond);
       
-      // Touch or rejection proximity to dynamic EMA zone within the last 3 candles (to support multi-candle patterns where the confirmation candle closes higher)
-      const touchesFirstEma = recentPostBreakoutCandles.some(c => c.low <= firstEmaVal + 0.25 * currentAtr && c.high >= firstEmaVal - 0.15 * currentAtr);
-      const touchesSecondEma = recentPostBreakoutCandles.some(c => c.low <= secondEmaVal + 0.25 * currentAtr && c.high >= secondEmaVal - 0.15 * currentAtr);
+      // Touch or rejection proximity to dynamic EMA zone within recent candles (using candle-specific EMA value)
+      const firstEmaSeries = this.calculateEMA(closes, firstEmaPeriod);
+      const secondEmaSeries = this.calculateEMA(closes, secondEmaPeriod);
+
+      const touchesFirstEma = recentPostBreakoutCandles.some(c => {
+        const cIdx = this.candles1m.indexOf(c);
+        const emaVal = (cIdx !== -1 && firstEmaSeries[cIdx] !== undefined) ? firstEmaSeries[cIdx] : firstEmaVal;
+        return c.low <= emaVal + 0.25 * currentAtr && c.high >= emaVal - 0.15 * currentAtr;
+      });
+      const touchesSecondEma = recentPostBreakoutCandles.some(c => {
+        const cIdx = this.candles1m.indexOf(c);
+        const emaVal = (cIdx !== -1 && secondEmaSeries[cIdx] !== undefined) ? secondEmaSeries[cIdx] : secondEmaVal;
+        return c.low <= emaVal + 0.25 * currentAtr && c.high >= emaVal - 0.15 * currentAtr;
+      });
       
       // Calculate Fallback Micro EMA Momentum Confirmation with ATR fraction filters (Setup 2 fallback)
       const bounceAtrFraction = ms.fallback_crossover_bounce_atr_fraction !== undefined ? ms.fallback_crossover_bounce_atr_fraction : 0.15;
@@ -4121,9 +4132,20 @@ class TradingEngine {
       // preventing late triggers when price is far away from the EMA zone.
       const hasRetracedToEMA = recentPostBreakoutCandles.some(c => c.high >= emaRetraceThresholdFirst || c.high >= emaRetraceThresholdSecond);
       
-      // Touch or rejection proximity to dynamic EMA zone within the last 3 candles (to support multi-candle patterns where the confirmation candle closes lower)
-      const touchesFirstEma = recentPostBreakoutCandles.some(c => c.high >= firstEmaVal - 0.25 * currentAtr && c.low <= firstEmaVal + 0.15 * currentAtr);
-      const touchesSecondEma = recentPostBreakoutCandles.some(c => c.high >= secondEmaVal - 0.25 * currentAtr && c.low <= secondEmaVal + 0.15 * currentAtr);
+      // Touch or rejection proximity to dynamic EMA zone within recent candles (using candle-specific EMA value)
+      const firstEmaSeries = this.calculateEMA(closes, firstEmaPeriod);
+      const secondEmaSeries = this.calculateEMA(closes, secondEmaPeriod);
+
+      const touchesFirstEma = recentPostBreakoutCandles.some(c => {
+        const cIdx = this.candles1m.indexOf(c);
+        const emaVal = (cIdx !== -1 && firstEmaSeries[cIdx] !== undefined) ? firstEmaSeries[cIdx] : firstEmaVal;
+        return c.high >= emaVal - 0.25 * currentAtr && c.low <= emaVal + 0.15 * currentAtr;
+      });
+      const touchesSecondEma = recentPostBreakoutCandles.some(c => {
+        const cIdx = this.candles1m.indexOf(c);
+        const emaVal = (cIdx !== -1 && secondEmaSeries[cIdx] !== undefined) ? secondEmaSeries[cIdx] : secondEmaVal;
+        return c.high >= emaVal - 0.25 * currentAtr && c.low <= emaVal + 0.15 * currentAtr;
+      });
       
       // Calculate Fallback Micro EMA Momentum Confirmation with ATR fraction filters (Setup 2 fallback)
       const bounceAtrFraction = ms.fallback_crossover_bounce_atr_fraction !== undefined ? ms.fallback_crossover_bounce_atr_fraction : 0.15;
@@ -4534,7 +4556,9 @@ class TradingEngine {
     let longReason = "";
     
     const maxLongPriceThreshold = rangeLow + rangeWidth * 0.40;
-    const isPriceWithinLongZone = currentPrice <= maxLongPriceThreshold;
+    const rangeLongMinFloor = rangeLow - 0.75 * currentAtr;
+    const isNotCrashingBreakdown = currentPrice >= rangeLongMinFloor || currentCandle.close >= rangeLow;
+    const isPriceWithinLongZone = currentPrice <= maxLongPriceThreshold && isNotCrashingBreakdown;
     
     if (hasTestedSupportRecently && isPriceWithinLongZone) {
       if (isCandleReversalBullish) {
@@ -4557,7 +4581,9 @@ class TradingEngine {
     let shortReason = "";
     
     const minShortPriceThreshold = rangeHigh - rangeWidth * 0.40;
-    const isPriceWithinShortZone = currentPrice >= minShortPriceThreshold;
+    const rangeShortMaxCeiling = rangeHigh + 0.75 * currentAtr;
+    const isNotExplodingBreakout = currentPrice <= rangeShortMaxCeiling || currentCandle.close <= rangeHigh;
+    const isPriceWithinShortZone = currentPrice >= minShortPriceThreshold && isNotExplodingBreakout;
     
     if (hasTestedResistanceRecently && isPriceWithinShortZone) {
       if (isCandleReversalBearish) {

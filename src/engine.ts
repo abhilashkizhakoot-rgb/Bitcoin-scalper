@@ -35,6 +35,7 @@ export interface MarketStructureConfirmationResult {
   swingLow: number;
   ema_check_active?: boolean;
   ema_pair_evaluated?: string;
+  ema_tested?: string;
   sub_conditions?: MarketStructureSubCondition[];
 }
 
@@ -43,6 +44,7 @@ export interface TrendBreakoutSetupResult {
   message: string;
   ema_check_active?: boolean;
   ema_pair_evaluated?: string;
+  ema_tested?: string;
   sub_conditions?: MarketStructureSubCondition[];
 }
 
@@ -1318,6 +1320,7 @@ class TradingEngine {
       softened?: boolean;
       ema_check_active?: boolean;
       ema_pair_evaluated?: string;
+      ema_tested?: string;
       sub_conditions?: MarketStructureSubCondition[];
     }[] = [];
 
@@ -1663,6 +1666,7 @@ class TradingEngine {
       priority: "CRITICAL",
       ema_check_active: structCheck.ema_check_active,
       ema_pair_evaluated: structCheck.ema_pair_evaluated,
+      ema_tested: structCheck.ema_tested,
       sub_conditions: structCheck.sub_conditions,
     });
 
@@ -3475,6 +3479,8 @@ class TradingEngine {
     let classifiedDepth: "Shallow" | "Medium" | "Deep" = "Medium";
     let firstEmaVal = ema50ValComputed;
     let secondEmaVal = ema100ValComputed;
+    let firstEmaPeriod = 50;
+    let secondEmaPeriod = 100;
     let emaZoneLabel = "50/100 EMA";
 
     let pullbackMultiplier = 0.45;
@@ -3485,6 +3491,8 @@ class TradingEngine {
       classifiedDepth = "Shallow";
       firstEmaVal = ema20ValComputed;
       secondEmaVal = ema50ValComputed;
+      firstEmaPeriod = 20;
+      secondEmaPeriod = 50;
       emaZoneLabel = "20/50 EMA";
       pullbackMultiplier = 0.7;
       emaRetraceMultiplier = 0.45;
@@ -3493,6 +3501,8 @@ class TradingEngine {
       classifiedDepth = "Deep";
       firstEmaVal = ema100ValComputed;
       secondEmaVal = ema200ValComputed;
+      firstEmaPeriod = 100;
+      secondEmaPeriod = 200;
       emaZoneLabel = "100/200 EMA";
       pullbackMultiplier = 0.25;
       emaRetraceMultiplier = 0.18;
@@ -3515,6 +3525,32 @@ class TradingEngine {
     };
 
     const getReturnObj = (confirmed: boolean, message: string) => {
+      let specificEmaTested = "";
+      if (firstEmaVal > 0 && secondEmaVal > 0) {
+        let testedPeriod = firstEmaPeriod;
+        let testedVal = firstEmaVal;
+
+        if (direction === "LONG") {
+          if (currentPrice <= (firstEmaVal + secondEmaVal) / 2) {
+            testedPeriod = secondEmaPeriod;
+            testedVal = secondEmaVal;
+          }
+        } else if (direction === "SHORT") {
+          if (currentPrice >= (firstEmaVal + secondEmaVal) / 2) {
+            testedPeriod = secondEmaPeriod;
+            testedVal = secondEmaVal;
+          }
+        } else {
+          if (Math.abs(currentPrice - secondEmaVal) < Math.abs(currentPrice - firstEmaVal)) {
+            testedPeriod = secondEmaPeriod;
+            testedVal = secondEmaVal;
+          }
+        }
+        specificEmaTested = `Dynamic ${testedPeriod} EMA ($${testedVal.toFixed(2)})`;
+      } else if (emaZoneLabel) {
+        specificEmaTested = `Dynamic ${emaZoneLabel} Band`;
+      }
+
       const sub_conditions = Object.entries(condDict).map(([name, val]) => ({
         name,
         status: val.status,
@@ -3523,7 +3559,7 @@ class TradingEngine {
 
       this.log(`[Checkpoint Radar Debug - Market Confirmation]`);
       this.log(`  Direction: ${direction} | Regime: ${this.currentRegime} | ADX: ${adxValue.toFixed(1)} (${adxLabel})`);
-      this.log(`  Evaluating Retracement on EMA Pair: ${emaZoneLabel} (Pullback Depth Class: ${classifiedDepth}, Points: ${depthPoints})`);
+      this.log(`  Evaluating Retracement on EMA Pair: ${emaZoneLabel} (Testing: ${specificEmaTested}, Pullback Depth Class: ${classifiedDepth}, Points: ${depthPoints})`);
       this.log(`  Conditions Evaluation:`);
       for (const cond of sub_conditions) {
         const icon = cond.status === "PASS" ? "✅" : cond.status === "FAIL" ? "❌" : "➖";
@@ -3536,6 +3572,7 @@ class TradingEngine {
         message,
         ema_check_active: true,
         ema_pair_evaluated: emaZoneLabel,
+        ema_tested: specificEmaTested,
         sub_conditions,
       };
     };
@@ -5306,6 +5343,7 @@ class TradingEngine {
       swingLow: struct.swingLow,
       ema_check_active: trendResult ? trendResult.ema_check_active : undefined,
       ema_pair_evaluated: trendResult ? trendResult.ema_pair_evaluated : undefined,
+      ema_tested: trendResult ? trendResult.ema_tested : undefined,
       sub_conditions: trendResult ? trendResult.sub_conditions : undefined
     };
   }
@@ -6192,6 +6230,7 @@ class TradingEngine {
       softened?: boolean;
       ema_check_active?: boolean;
       ema_pair_evaluated?: string;
+      ema_tested?: string;
       sub_conditions?: MarketStructureSubCondition[];
     }[] = [];
 
@@ -6503,6 +6542,7 @@ class TradingEngine {
       required: "Pullback HL (LONG) / LH (SHORT), Breakout Retest, or Range Reversal based on Regime",
       ema_check_active: structCheck.ema_check_active,
       ema_pair_evaluated: structCheck.ema_pair_evaluated,
+      ema_tested: structCheck.ema_tested,
       sub_conditions: structCheck.sub_conditions,
     });
 

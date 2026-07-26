@@ -35,6 +35,7 @@ interface Checkpoint {
   softened?: boolean;
   ema_check_active?: boolean;
   ema_pair_evaluated?: string;
+  ema_tested?: string;
   sub_conditions?: {
     name: string;
     status: "PASS" | "FAIL" | "SKIP";
@@ -715,7 +716,11 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
                   <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-3 flex flex-col justify-between">
                     <span className="text-[10px] font-mono text-slate-400 uppercase leading-none block mb-1">Target Retrace Level</span>
                     <p className="text-xs font-sans font-bold text-slate-700 truncate mt-1">
-                      {msCond.ema_pair_evaluated ? `Dynamic ${msCond.ema_pair_evaluated} Band` : "N/A (Breakout Setup Active)"}
+                      {msCond.ema_tested 
+                        ? msCond.ema_tested 
+                        : msCond.ema_pair_evaluated 
+                          ? `Dynamic ${msCond.ema_pair_evaluated} Band` 
+                          : "N/A (Breakout Setup Active)"}
                     </p>
                   </div>
 

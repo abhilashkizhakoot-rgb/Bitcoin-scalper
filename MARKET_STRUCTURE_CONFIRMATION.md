@@ -1,14 +1,14 @@
 # Market Structure Confirmation (MSC) Engine Documentation
 
-The **Market Structure Confirmation (MSC) Engine** is an institutional-grade, multi-regime trade validation and confirmation framework built directly into the core trading processor (`src/engine.ts`). Instead of executing trades based on simple lagging indicators or fixed percentage thresholds, the MSC engine models real-time order flow and price action across multiple timeframes. It utilizes adaptive fractal pivots, dynamic point-based pullback depth modeling, micro-trend alignments, objective candle rejection metrics, and linear regression-based EMA 200 slope filters to confirm high-probability trade setups and filter out high-risk chops.
+The **Market Structure Confirmation (MSC) Engine** is an institutional-grade, multi-regime trade validation and confirmation framework built directly into the core trading processor (`src/engine.ts`). Designed specifically for high-frequency 1-minute Bitcoin (BTC) scalping, the MSC engine replaces simple lagging indicators with real-time order flow dynamics, multi-timeframe candle aggregations, adaptive fractal pivot tracking, dynamic point-based pullback depth modeling, micro-trend alignment, objective multi-pattern candle rejection verification, and linear-regression EMA 200 slope filters.
 
-This document describes the mathematical formulas, scoring criteria, multi-regime pathways, and logical structures of the MSC engine as implemented in the system.
+This document details the complete mathematical formulas, scoring criteria, multi-regime pathways, and logical decision structures of the MSC engine as implemented in the codebase.
 
 ---
 
-## Architecture Overview
+## Architecture & Sequential Flow
 
-The MSC engine processes entry signals through a multi-stage sequential validation pipeline:
+The MSC engine processes incoming 1-minute market updates through a multi-stage sequential pipeline:
 
 ```
                       [1m Real-Time Price Feed]
@@ -23,7 +23,7 @@ The MSC engine processes entry signals through a multi-stage sequential validati
                              │                             │
                              ▼                             ▼
                         Micro-Trend                Adaptive Point-Based
-                      1m EMA Alignment             Pullback Classification
+                     1m EMA & Reversal            Pullback Classification
                              │                             │
                              ▼                             ▼
                        Reversal/Breakout             Verify Breakout
@@ -53,91 +53,91 @@ The MSC engine processes entry signals through a multi-stage sequential validati
 
 ## 1. Multi-Regime Validation Gating
 
-The engine branches into distinct confirmation pathways depending on the active **Market Regime**:
+Trade validation branches into specialized pathways based on the active **Market Regime**:
 
 ### A. Low Volatility Regime (`MarketRegime.LOW_VOLATILITY`)
-* **Behavior**: Deactivates all trading immediately. 
-* **Reasoning**: Eliminates execution inside tight ranges where bid-ask spreads and transaction slippage erode profits.
+* **Behavior**: Halts all signal confirmations and trade executions immediately.
+* **Purpose**: Prevents whipsaws and fee erosion during tight consolidation phases where bid-ask spreads and slippage dominate price action.
 
 ### B. Range Bound Regime (`MarketRegime.RANGE_BOUND`)
-When the market is range-bound, the engine tracks price boundaries on a 1m chart and confirms reversals or breakouts:
-1. **Range Boundaries**: Scans a lookback window of 30 candles on the 1m chart to find the highest price ($R_{\text{high}}$) and the lowest price ($R_{\text{low}}$).
-2. **Range Width**: 
+When market structure is sideways, the engine evaluates support and resistance bounds on 1-minute candles:
+1. **Boundary Extraction**: Scans a lookback window of 30 candles on the 1m chart to locate the high ($R_{\text{high}}$) and low ($R_{\text{low}}$).
+2. **Range Width**:
    $$W_{\text{range}} = R_{\text{high}} - R_{\text{low}}$$
-3. **Dynamic Support & Resistance Gates**:
-   $$S_{\text{threshold}} = R_{\text{low}} + \min(W_{\text{range}} \times 0.15, R_{\text{low}} \times 0.0015)$$
-   $$R_{\text{threshold}} = R_{\text{high}} - \min(W_{\text{range}} \times 0.15, R_{\text{high}} \times 0.0015)$$
-4. **Reversal Triggers**:
-   * **LONG Reversal**: Current price $\le S_{\text{threshold}}$ AND the current 1m candle is bullish ($\text{Close} > \text{Open}$).
-   * **SHORT Reversal**: Current price $\ge R_{\text{threshold}}$ AND the current 1m candle is bearish ($\text{Close} < \text{Open}$).
-5. **Breakout / Breakdown Triggers**:
-   * **LONG Breakout**: Current price $> R_{\text{high}}$ on High Relative Volume ($V_{\text{rel}} > 1.2$).
-   * **SHORT Breakdown**: Current price $< R_{\text{low}}$ on High Relative Volume ($V_{\text{rel}} > 1.2$).
-   * *Relative Volume Calculation*: Ratio of the current candle's volume to the 20-period Simple Moving Average (SMA) of volume:
+3. **Adaptive Zone Thresholds**:
+   To ensure valid reversal zones remain active even during ultra-narrow 1m ranges, the zone width is clamped with an ATR floor:
+   $$\text{ZoneWidth} = \max(W_{\text{range}} \times 0.40, 0.30 \times \text{ATR}_{14})$$
+   $$S_{\text{threshold}} = R_{\text{low}} + \text{ZoneWidth}$$
+   $$R_{\text{threshold}} = R_{\text{high}} - \text{ZoneWidth}$$
+4. **Range Safeguards**:
+   * **Floor Safeguard (LONG)**: Current price must remain above $R_{\text{low}} - 0.75 \times \text{ATR}_{14}$ to ensure the asset is not crashing in an unconfirmed breakdown.
+   * **Ceiling Safeguard (SHORT)**: Current price must remain below $R_{\text{high}} + 0.75 \times \text{ATR}_{14}$ to ensure the asset is not exploding in an unconfirmed breakout.
+5. **Reversal Signals**:
+   * **LONG Reversal**: Price $\le S_{\text{threshold}}$ AND current 1m candle is bullish ($\text{Close} > \text{Open}$).
+   * **SHORT Reversal**: Price $\ge R_{\text{threshold}}$ AND current 1m candle is bearish ($\text{Close} < \text{Open}$).
+6. **Breakout / Breakdown Signals**:
+   * **LONG Breakout**: Price $> R_{\text{high}}$ with Relative Volume $V_{\text{rel}} \ge 1.2$.
+   * **SHORT Breakdown**: Price $< R_{\text{low}}$ with Relative Volume $V_{\text{rel}} \ge 1.2$.
+   * *Relative Volume Definition*:
      $$V_{\text{rel}} = \frac{\text{Volume}_{\text{current}}}{\text{SMA}_{20}(\text{Volume})}$$
-6. **Micro-Trend Filter**: Long and short signals within ranges must align with 1m micro-trends calculated using fast ($p_{\text{fast}} = 5$) and slow ($p_{\text{slow}} = 15$) EMAs:
-   * **LONG Reversal/Breakout**: Blocked unless the micro-trend is bullish ($\text{EMA}_5 > \text{EMA}_{15}$) OR the current price crosses above the slow EMA ($\text{Price} \ge \text{EMA}_{15}$).
-   * **SHORT Reversal/Breakdown**: Blocked unless the micro-trend is bearish ($\text{EMA}_5 < \text{EMA}_{15}$) OR the current price crosses below the slow EMA ($\text{Price} \le \text{EMA}_{15}$).
+7. **Micro-Trend & Reversal Alignment**:
+   Signal validation checks fast ($p_{\text{fast}} = 5$) and slow ($p_{\text{slow}} = 15$) 1m EMAs:
+   * **LONG Signals**: Allowed if Micro-Trend is bullish ($\text{EMA}_5 > \text{EMA}_{15}$), OR price crosses above EMA ($\text{Price} \ge \text{EMA}_{15}$ or $\text{Price} \ge \text{EMA}_5$), OR a confirmed Range Reversal bounce is active.
+   * **SHORT Signals**: Allowed if Micro-Trend is bearish ($\text{EMA}_5 < \text{EMA}_{15}$), OR price crosses below EMA ($\text{Price} \le \text{EMA}_{15}$ or $\text{Price} \le \text{EMA}_5$), OR a confirmed Range Reversal bounce is active.
 
-### C. Trending/Breakout Regime
-When a strong trend is active, the engine activates the comprehensive **Trend Breakout Validation System** described below.
+### C. Trending / Breakout Regime
+In trending market conditions, the engine triggers the **Trend Breakout Validation System** detailed below.
 
 ---
 
-## 2. Pivot Detection & Adaptive Fractal Sizing
+## 2. Fractal Pivot Engine & Adaptive Lookback Sizing
 
-At the base of the trending system is the **Fractal Pivot Engine** (`getTrendMarketStructure`). It scans the $1\text{m}$ candle series to extract peaks (Swing Highs) and troughs (Swing Lows).
+The **Fractal Pivot Engine** (`getTrendMarketStructure`) extracts structural highs and lows from 1m candles.
 
-### Adaptive Lookback Sizing
-The lookup window size ($W_{\text{lookback}}$) adapts dynamically based on the current **Market Regime** to optimize sensitivity:
-* **Strong Uptrend / Strong Downtrend**: $W_{\text{lookback}} = 9$ candles (heavy smoothing to filter out minor pullbacks).
-* **High Volatility**: $W_{\text{lookback}} = 7$ candles (balanced sensitivity).
-* **Default / Range-bound / Other**: $W_{\text{lookback}} = 5$ candles (ultra-responsive to capture quick pivot shifts).
+### Adaptive Lookback Window
+The fractal lookback window ($W_{\text{lookback}}$) adjusts dynamically to market volatility to prevent false pivot detection:
+* **Strong Uptrend / Strong Downtrend**: $W_{\text{lookback}} = 9$ candles (filters out minor 1m noise).
+* **High Volatility**: $W_{\text{lookback}} = 7$ candles (balanced responsiveness).
+* **Default / Range-Bound**: $W_{\text{lookback}} = 5$ candles (ultra-sensitive for rapid pivot detection).
 
 A candle at index $i$ is confirmed as a **Swing High** if:
 $$\text{High}_i > \text{High}_{i \pm j} \quad \forall \ j \in \left[1, \lfloor W_{\text{lookback}}/2 \rfloor\right]$$
-
 And a **Swing Low** if:
 $$\text{Low}_i < \text{Low}_{i \pm j} \quad \forall \ j \in \left[1, \lfloor W_{\text{lookback}}/2 \rfloor\right]$$
 
-### Trend Structure Identification
-The engine classifies consecutive pivots to define the structural trend:
-* **Bullish Structure (Uptrend)**: Confirmed when $\text{current\_HH} > \text{prev\_HH}$ AND $\text{current\_HL} > \text{prev\_HL}$ (Higher Highs and Higher Lows).
-* **Bearish Structure (Downtrend)**: Confirmed when $\text{current\_LL} < \text{prev\_LL}$ AND $\text{current\_LH} < \text{prev\_LH}$ (Lower Lows and Lower Highs).
+### Structural Classification
+* **Bullish Structure (Uptrend)**: Confirmed when $\text{HH}_{\text{current}} > \text{HH}_{\text{prev}}$ AND $\text{HL}_{\text{current}} > \text{HL}_{\text{prev}}$.
+* **Bearish Structure (Downtrend)**: Confirmed when $\text{LL}_{\text{current}} < \text{LL}_{\text{prev}}$ AND $\text{LH}_{\text{current}} < \text{LH}_{\text{prev}}$.
 
 ---
 
 ## 3. Dynamic Point-Based Pullback Classification
 
-When a trend is confirmed, the engine does not expect a uniform retracement. Instead, it scores current momentum, slope, spread, and volatility to dynamically classify the expected **Pullback Depth** into three tiers: **Shallow**, **Medium**, or **Deep**.
+When a trend is confirmed, the engine dynamically calculates a **Pullback Depth Score** based on trend strength, slope, acceleration, spread, stretch, and ATR volatility:
 
-This scoring system calculates a **Depth Points** score:
+$$\text{Score} = \text{ADX\_Score} + \text{Slope\_Score} + \text{Accel\_Score} + \text{Spread\_Score} - \text{Stretch\_Penalty} - \text{Vol\_Penalty}$$
 
-$$\text{Score} = \text{ADX\_Influence} + \text{Slope\_Influence} + \text{Acceleration\_Influence} + \text{Spread\_Influence} - \text{Stretch\_Risk} - \text{Volatility\_Surcharges}$$
-
-### Depth Score Rules:
+### Depth Scoring Rules
 1. **ADX Trend Intensity**:
-   * $\text{ADX} \ge 35$: $+2$ points (extremely strong trend; shallow pullback highly probable).
-   * $\text{ADX} \ge 25$: $+1$ point (healthy trend; supports shallow-to-medium pullback).
-2. **EMA 20 Slope (over last 5 candles)**:
-   * Strong Slope ($\text{Slope} > 0.04\%$ for LONG or $< -0.04\%$ for SHORT): $+2$ points.
-   * Moderate Slope ($\text{Slope} > 0.015\%$ for LONG or $< -0.015\%$ for SHORT): $+1$ point.
+   * $\text{ADX} \ge 35$: $+2$ points (extremely strong trend; shallow pullback expected).
+   * $\text{ADX} \ge 25$: $+1$ point (healthy trend).
+2. **EMA 20 Slope (last 5 candles)**:
+   * Strong Slope ($> 0.04\%$ for LONG or $< -0.04\%$ for SHORT): $+2$ points.
+   * Moderate Slope ($> 0.015\%$ for LONG or $< -0.015\%$ for SHORT): $+1$ point.
 3. **Trend Acceleration** (change in slope over prior 5 candles):
-   * Accelerating in trade direction ($\text{Acceleration} > 0.005\%$ for LONG or $< -0.005\%$ for SHORT): $+1$ point.
-4. **Trend Momentum (EMA 20/50 Spread)**:
-   * Wide separation ($\text{Spread} \ge 0.4\%$): $+1$ point.
-   * Tight consolidation ($\text{Spread} < 0.15\%$): $-1$ point (forces a deeper retrace expectation).
-5. **Over-extension Stretch (Distance to EMA 200)**:
-   * Highly extended ($\text{Distance} > 2.5\%$): $-2$ points (elevated mean-reversion risk; deep pullback required).
-   * Moderately extended ($\text{Distance} > 1.2\%$): $-1$ point.
-6. **Relative Volatility (14-period ATR relative to price)**:
-   * High Volatility ($\text{ATR} > 0.5\%$ of current price): $-1$ point (highly volatile assets require deeper breathing room).
+   * Acceleration in trade direction ($> 0.005\%$ for LONG or $< -0.005\%$ for SHORT): $+1$ point.
+4. **Trend Momentum (EMA 20 / EMA 50 Spread)**:
+   * Wide Separation ($\text{Spread} \ge 0.4\%$): $+1$ point.
+   * Tight Compression ($\text{Spread} < 0.15\%$): $-1$ point.
+5. **Over-Extension Stretch (Distance to EMA 200)**:
+   * Highly Extended ($> 2.5\%$): $-2$ points (mean-reversion risk).
+   * Moderately Extended ($> 1.2\%$): $-1$ point.
+6. **Relative Volatility ($\text{ATR}_{14}$ / Price)**:
+   * High Volatility ($> 0.5\%$): $-1$ point.
 
-### Dynamic Zones Assignment:
+### Depth Classification & Multipliers
 
-Based on the accumulated score, the engine assigns the expected pullback zone and associated multipliers (multiplied by the current 14-period Average True Range, $\text{ATR}_{14}$):
-
-| Depth Score | Classified Depth | Active EMA Support Zone | Pullback Multiplier Limit ($M_{\text{pullback}}$) | EMA Retrace Multiplier Limit ($M_{\text{ema}}$) | Invalidation Multiplier ($M_{\text{invalidation}}$) |
+| Depth Score | Classification | Support EMAs | Pullback Limit ($M_{\text{pullback}}$) | EMA Retrace Limit ($M_{\text{ema}}$) | Invalidation Limit ($M_{\text{invalidation}}$) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **$\ge 3$** | **Shallow** | **20 / 50 EMA** | $0.70 \times \text{ATR}$ | $0.45 \times \text{ATR}$ | $0.40 \times \text{ATR}$ |
 | **$0$ to $2$** | **Medium** | **50 / 100 EMA** | $0.45 \times \text{ATR}$ | $0.30 \times \text{ATR}$ | $0.25 \times \text{ATR}$ |
@@ -145,160 +145,155 @@ Based on the accumulated score, the engine assigns the expected pullback zone an
 
 ---
 
-## 4. Breakout Strength & Immediate Entry Gating
+## 4. Breakout Validation & High-Frequency Immediate Entry
 
-Before monitoring the retracement, the engine verifies the breakout itself to filter out false breakouts and "wick sweeps."
+Before tracking retracements, the engine validates breakout candles to prevent fakeouts:
 
 ### Breakout Definition
-* **LONG Breakout**: Current close crosses above the previous Higher High ($\text{prev\_HH}$).
-* **SHORT Breakout**: Current close crosses below the previous Lower Low ($\text{prev\_LL}$).
+* **LONG Breakout**: Current candle closes above previous Higher High ($\text{prev\_HH}$).
+* **SHORT Breakout**: Current candle closes below previous Lower Low ($\text{prev\_LL}$).
 
-### Breakout Candle Body Close verification
-The candle that breaks and closes beyond the breakout level must have a high body-to-range ratio:
-$$\text{Body-to-Range Ratio} = \frac{\left|\text{Close} - \text{Open}\right|}{\text{High} - \text{Low}} \ge \text{min\_breakout\_body\_ratio} \quad (\text{Default: } 0.22)$$
-If the body is less than $22\%$ of the total range, the breakout is flagged as a "wick sweep" or false breakout, and the setup is **immediately blocked**.
+### Body-to-Range Quality Ratio
+$$\text{BodyRatio} = \frac{\left|\text{Close} - \text{Open}\right|}{\text{High} - \text{Low}} \ge 0.22$$
+If $\text{BodyRatio} < 0.22$, the candle is classified as a low-conviction wick sweep, and the breakout setup is **immediately rejected**.
 
-### Lower Low / Higher High Breakout Immediate Entry Check
-Normally, when a breakout is confirmed, the engine forbids immediate entries on the breakout candle itself to prevent buying top or selling bottom, forcing a wait for a pullback. However, under **Extreme Real-Time Momentum & High-Frequency Pressure**, the engine checks for an **Immediate Breakout Entry** (checking the breakout directly instead of waiting for a retracement):
-
-* **Immediate Breakout Condition**: Enabled if `allow_immediate_breakout` is true, AND high-frequency pressure is active.
-* **High-Frequency Pressure Detection**: Validated if:
-  1. The 14-period ADX $\ge$ `hf_momentum_adx_threshold` (Default: `30`), OR
-  2. Order Book Imbalance or Taker Buy/Sell ratios exceed extreme scalping thresholds:
-     * **LONG**: $\text{Taker Buy Ratio} \ge 0.58$ OR $\text{Imbalance Ratio} \ge 0.30$
-     * **SHORT**: $\text{Taker Buy Ratio} \le 0.42$ OR $\text{Imbalance Ratio} \le -0.30$
-
-If these parameters are met on the breakout candle, the engine triggers an **immediate market entry**, capturing the momentum instantly without waiting for a retest.
+### High-Frequency Pressure Immediate Entry
+Normally, breakouts require a retest. However, during extreme momentum and order flow pressure, the engine triggers an **Immediate Breakout Entry**:
+1. `allow_immediate_breakout` configuration is enabled.
+2. **High-Frequency Pressure** is active:
+   * $\text{ADX}_{14} \ge 32$, OR
+   * Order Flow / Book Imbalance exceeds scalping bounds:
+     * **LONG**: $\text{Taker Buy Ratio} \ge 0.58$ OR $\text{Imbalance Ratio} \ge 0.30$.
+     * **SHORT**: $\text{Taker Buy Ratio} \le 0.42$ OR $\text{Imbalance Ratio} \le -0.30$.
 
 ---
 
 ## 5. Multi-Timeframe (5m) Trend Alignment
 
-To trade in harmony with high-timeframe order flow, the engine aggregates $1\text{m}$ data into $5\text{m}$ candles:
-* **LONG entries**: Blocked if $5\text{m}$ EMA 5 is below $5\text{m}$ EMA 15.
-* **SHORT entries**: Blocked if $5\text{m}$ EMA 5 is above $5\text{m}$ EMA 15.
+1m candles are evaluated against aggregated 5m trends:
+* **LONG Signals**: Blocked if 5m EMA 5 is below 5m EMA 15.
+* **SHORT Signals**: Blocked if 5m EMA 5 is above 5m EMA 15.
 
-### High-Frequency Pressure Bypass
-This filter is bypassed under **Extreme Real-Time Pressure**:
-* If $\text{ADX} \ge \text{hf\_momentum\_adx\_threshold} + 2$ (Default: $32$), or
-* Order Flow Taker Buy Ratio or Order Book Imbalance exceeds the extreme scalping limits described in Section 4.
+### High-Frequency Bypass
+To prevent missing high-velocity scalps, 5m trend alignment is bypassed when **High-Frequency Pressure** is verified ($\text{ADX} \ge 32$ or order book imbalance thresholds met).
 
 ---
 
 ## 6. Setup Invalidation & Chasing Limits
 
-Once a valid breakout occurs, the engine tracks the setup candles and applies strict protective limits before entry triggers:
-
-### A. Dynamic Invalidation Floor & Ceiling
-If the price breaks past structural support or the dynamic breathing zone, the setup is invalidated to prevent catching a falling knife:
-* **LONG Reclaim Threshold**: 
-  $$\text{Reclaim Floor} = \max(\text{Breakout\_Level} - M_{\text{invalidation}} \times \text{ATR}, \text{Structural\_HL} - 0.1 \times \text{ATR})$$
-  *If the price closes below this floor, the setup is invalidated.*
-* **SHORT Reclaim Threshold**: 
-  $$\text{Reclaim Ceiling} = \min(\text{Breakout\_Level} + M_{\text{invalidation}} \times \text{ATR}, \text{Structural\_LH} + 0.1 \times \text{ATR})$$
-  *If the price closes above this ceiling, the setup is invalidated.*
+### A. Dynamic Invalidation Thresholds
+If price breaks deeper than structural support or the dynamic breathing buffer, the setup is invalidated:
+* **LONG Invalidation Floor**:
+  $$\text{Floor} = \max(\text{BreakoutLevel} - M_{\text{invalidation}} \times \text{ATR}, \text{Structural\_HL} - 0.10 \times \text{ATR})$$
+  *Invalidated if candle closes below Floor.*
+* **SHORT Invalidation Ceiling**:
+  $$\text{Ceiling} = \min(\text{BreakoutLevel} + M_{\text{invalidation}} \times \text{ATR}, \text{Structural\_LH} + 0.10 \times \text{ATR})$$
+  *Invalidated if candle closes above Ceiling.*
 
 ### B. Chasing Lookback Limits
-To prevent late entries on a run-away price, the engine counts the number of candles elapsed since the breakout ($C_{\text{elapsed}}$) and blocks entries if it exceeds a dynamic threshold based on ADX:
-* **ADX $< 20$ (Weak Trend)**: $C_{\text{max}} = 15$ candles.
-* **ADX $\ge 40$ (Extreme Trend)**: $C_{\text{max}} = 45$ candles.
-* **Default (Normal Trend)**: $C_{\text{max}} = 30$ candles.
-
-*If $C_{\text{elapsed}} > C_{\text{max}}$, the entry is blocked as "chasing".*
+Prevents entering stale breakouts after extended price runs ($C_{\text{elapsed}}$ candles since breakout):
+* **$\text{ADX} < 20$ (Weak Trend)**: Max $15$ candles.
+* **$\text{ADX} \ge 40$ (Extreme Trend)**: Max $45$ candles.
+* **Default**: Max $30$ candles.
 
 ---
 
-## 7. Entry Setups & Objective Rejection Patterns
+## 7. Entry Setups, Backward Indexing, & Rejection Patterns
 
-If an immediate breakout entry is not triggered and the setup remains valid, the price must pull back into one of two entry gates:
+If an immediate breakout entry is not triggered, the setup requires retracement into an entry gate:
 
 ### Setup A: Pullback & Retest
-The price pulls back directly to the broken structural level ($\text{prev\_HH}$ or $\text{prev\_LL}$).
-1. **Pullback Depth Check**: The low of the post-breakout candles must reach the pullback limit:
-   * **LONG Pullback Limit**: $\text{Low} \le \text{Breakout\_Level} + M_{\text{pullback}} \times \text{ATR}$
-   * **SHORT Pullback Limit**: $\text{High} \ge \text{Breakout\_Level} - M_{\text{pullback}} \times \text{ATR}$
-2. **Volume-Validated Pullback**: The average volume during the pullback phase ($V_{\text{pullback}}$) must be declining relative to the breakout volume ($V_{\text{breakout}}$) and the 20-period average volume ($V_{\text{avg20}}$). High-volume pullbacks flag aggressive distribution/accumulation risk and are blocked:
-   * *Blocked if*: $V_{\text{pullback}} > \max(V_{\text{breakout}} \times 1.8, V_{\text{avg20}} \times 2.2)$
-3. **Candle Rejection Confirmation**: A candle rejection pattern must occur at the level.
+Price retraces directly to the broken structural level ($\text{prev\_HH}$ or $\text{prev\_LL}$).
+* **LONG Retest Limit**: $\text{Low} \le \text{BreakoutLevel} + M_{\text{pullback}} \times \text{ATR}$
+* **SHORT Retest Limit**: $\text{High} \ge \text{BreakoutLevel} - M_{\text{pullback}} \times \text{ATR}$
 
 ### Setup B: Adaptive EMA Pushback Zone
-The price retraces into the dynamically selected EMA support/resistance band (e.g. 20/50 EMA for Shallow pullbacks).
-1. **EMA Depth Check**: At least one post-breakout candle must retrace into the EMA zone:
-   * **LONG Retrace**: $\text{Low} \le \text{First\_EMA\_Val} + M_{\text{ema}} \times \text{ATR}$ or $\text{Low} \le \text{Second\_EMA\_Val} + M_{\text{ema}} \times \text{ATR}$
-   * **SHORT Retrace**: $\text{High} \ge \text{First\_EMA\_Val} - M_{\text{ema}} \times \text{ATR}$ or $\text{High} \ge \text{Second\_EMA\_Val} - M_{\text{ema}} \times \text{ATR}$
-2. **Touch Proximity**: The entering candle must touch or come very close to the selected EMA lines:
-   * **LONG Touch**: $\text{Low} \le \text{EMA\_Val} + 0.25 \times \text{ATR}$ AND $\text{High} \ge \text{EMA\_Val} - 0.15 \times \text{ATR}$
-   * **SHORT Touch**: $\text{High} \ge \text{EMA\_Val} - 0.25 \times \text{ATR}$ AND $\text{Low} \le \text{EMA\_Val} + 0.15 \times \text{ATR}$
-3. **Candle Rejection Confirmation**: A confirming candle rejection pattern must print inside this EMA band.
+Price retraces into the designated support/resistance EMA band (e.g., 20/50 EMA for Shallow pullbacks).
+* **Proximity Check**: Candle low/high comes within $0.25 \times \text{ATR}$ of the EMA band.
 
 ---
 
-### Objective Rejection Evaluation System
-The current candle must satisfy strict geometric wick-and-body checks to confirm support/resistance rejections:
+### Volume-Validated Pullback Logic
+To ensure volume evaluation reflects the current active sequence, the engine searches **backwards** from the current candle index to locate the precise breakout candle index (`breakoutIdx`):
+
+$$\text{BaseVolumeThreshold} = \max\left(V_{\text{breakout}} \times R_{\text{breakout}}, \text{SMA}_{20}(\text{Volume}) \times M_{\text{dryup}}\right)$$
+
+Where $R_{\text{breakout}} = 0.85$ and $M_{\text{dryup}} = 1.5$.
+
+#### Adaptive Scalping Volume Tolerance
+Under active High-Frequency Pressure, high 1m transaction density is expected. The volume threshold scales adaptively:
+$$\text{VolumeThreshold} = \begin{cases} 1.25 \times \text{BaseVolumeThreshold} & \text{if High-Frequency Pressure Active} \\ \text{BaseVolumeThreshold} & \text{otherwise} \end{cases}$$
+
+If average pullback volume ($V_{\text{pullback}}$) or single candle volume exceeds $\text{VolumeThreshold}$, the pullback is flagged as abnormal distribution/accumulation risk and **blocked**.
+
+---
+
+### Objective Candle Rejection Patterns
+To confirm support or resistance holding, the current 1m candle must satisfy at least one objective geometric pattern:
 
 1. **Classic Pin Bar**:
-   * *Bullish (LONG)*: Lower wick $\ge 50\%$ of the total range AND upper wick $\le 25\%$ of the range.
-   * *Bearish (SHORT)*: Upper wick $\ge 50\%$ of the total range AND lower wick $\le 25\%$ of the range.
-2. **Strong Close**:
-   * *Bullish (LONG)*: Close is in the upper $30\%$ of the total range: $(\text{Close} - \text{Low}) / \text{Range} \ge 0.70$.
-   * *Bearish (SHORT)*: Close is in the lower $30\%$ of the total range: $(\text{High} - \text{Close}) / \text{Range} \ge 0.70$.
-3. **Engulfing Pattern**:
-   * *Bullish (LONG)*: Current candle is bullish, previous was bearish, and the current body completely engulfs the previous body.
-   * *Bearish (SHORT)*: Current candle is bearish, previous was bullish, and the current body completely engulfs the previous body.
-4. **Momentum Candle**:
-   * Candle body size $\ge 70\%$ of the current 14-period ATR, closing strongly in the trade direction.
-5. **Multi-Candle Wick Rejection**:
-   * Consecutive candles showing wicks $\ge 35\%$ of their ranges, with lows (or highs) printing within $15\%$ of ATR of each other (confirming double bottoms/tops).
-6. **Indecision Filter**:
-   * If the candle body size is $< 15\%$ of the total range and does not qualify as a Pin Bar, it is classified as **Indecision** and explicitly **prevented** from triggering an entry.
+   * *LONG*: Lower wick $\ge 50\%$ of range AND upper wick $\le 25\%$ of range.
+   * *SHORT*: Upper wick $\ge 50\%$ of range AND lower wick $\le 25\%$ of range.
+2. **Major Wick Rejection ($65\%+$ Wick-to-Range)**:
+   * *LONG*: Lower wick $\ge 65\%$ of total candle range.
+   * *SHORT*: Upper wick $\ge 65\%$ of total candle range.
+3. **Strong Close**:
+   * *LONG*: $(\text{Close} - \text{Low}) / \text{Range} \ge 0.70$.
+   * *SHORT*: $(\text{High} - \text{Close}) / \text{Range} \ge 0.70$.
+4. **Engulfing Pattern**:
+   * Bullish/Bearish candle body completely engulfs previous candle body.
+5. **Momentum Candle**:
+   * Candle body $\ge 70\%$ of current 14-period ATR closing strongly in trade direction.
+6. **Multi-Candle Wick Rejection**:
+   * Consecutive candles with wicks $\ge 35\%$ of range whose extremes lie within $0.15 \times \text{ATR}$.
+7. **Indecision Filter**:
+   * If candle body $< 15\%$ of total range AND fails Pin Bar and Major Wick Rejection checks, it is classified as **Indecision** and explicitly **blocked** from triggering entries.
 
 ---
 
-## 8. EMA 200 Proximity & Angle Filter
+## 8. Linear Regression EMA 200 Slope & Proximity Filter
 
-The final layer of defense is the **EMA 200 overhead blocker**. Trading directly into a flat or counter-sloping high-period moving average often results in immediate rejection.
+The final layer prevents trading directly into opposing higher-period moving averages:
 
-### Linear Regression Angle Analysis
-The engine calculates a stable, lag-reduced slope of the last $20$ values of the EMA 200 using linear regression:
+### Linear Regression Angle Formula
+Calculates the 20-period slope of EMA 200:
 $$\text{Slope} = \frac{N\sum(xy) - \sum x\sum y}{N\sum(x^2) - (\sum x)^2}$$
-This slope is normalized against the ATR to make it asset-agnostic:
-$$\text{Normalized Slope} = \frac{\text{Slope}}{\text{ATR}} \times 100$$
+$$\text{Normalized Slope} = \frac{\text{Slope}}{\text{ATR}_{14}} \times 100$$
 $$\text{Angle} = \arctan\left(\frac{\text{Normalized Slope}}{10}\right) \times \frac{180}{\pi}$$
 
-### Protective Filters:
-1. **Trend Alignment Blocker**:
-   * **LONG** trades are **blocked** if the EMA 200 angle is $< -12^\circ$ (strongly downward sloping, overhead hazard).
-   * **SHORT** trades are **blocked** if the EMA 200 angle is $> 12^\circ$ (strongly upward sloping, heavy dynamic support).
-2. **Adaptive Proximity Barrier**:
-   Entering a trade too close to the EMA 200 is blocked. The proximity barrier is computed as:
-   $$\text{Barrier} = M_{\text{proximity}} \times \text{ATR}$$
-   * **Flat / Ranging EMA 200** ($\left|\text{Angle}\right| \le 15^\circ$): $M_{\text{proximity}} = 2.0$ (forces a wide safety zone to prevent magnetic chop crossings).
-   * **Normal Trending EMA 200**: $M_{\text{proximity}} = 1.5$.
-   * **Strongly Aligned EMA 200** ($\text{Angle} \ge 30^\circ$ for LONG or $\le -30^\circ$ for SHORT): $M_{\text{proximity}} = 0.5$ (allows very close entries as the moving average acts as a strong springboard).
-   * *Scalping Momentum Bypass*: If $\text{ADX} \ge 30$ or extreme order-book pressure is active, this proximity blocker is bypassed completely.
+### Filtering Rules
+1. **Slope Direction Blocker**:
+   * **LONG Signals**: Blocked if EMA 200 angle $< -12^\circ$ (downward resistance wall).
+   * **SHORT Signals**: Blocked if EMA 200 angle $> 12^\circ$ (upward support floor).
+2. **Proximity Barrier**:
+   * Entry distance to EMA 200 must exceed $M_{\text{proximity}} \times \text{ATR}_{14}$:
+     * Flat EMA 200 ($|\text{Angle}| \le 15^\circ$): $M_{\text{proximity}} = 2.0$ (wide buffer to prevent range chop).
+     * Normal Trending EMA 200: $M_{\text{proximity}} = 1.5$.
+     * Strongly Aligned EMA 200 ($\ge 30^\circ$ for LONG, $\le -30^\circ$ for SHORT): $M_{\text{proximity}} = 0.5$ (tight proximity allowed as EMA acts as trend support).
+   * *Scalping Bypass*: Bypassed if $\text{ADX} \ge 30$ or extreme high-frequency order flow is active.
 
 ---
 
-## Summary of Rule Execution
-
-For a trade to be triggered, the setup must pass every check:
+## Summary Decision Matrix
 
 ```
 [Is Regime Low Volatility?] ──────► Yes ──► BLOCK (Chop Avoidance)
             │ No
 [Regime Transition Cooldown?] ────► Yes ──► BLOCK (Transition Stabilization)
             │ No
-[Is Multi-Timeframe Aligned?] ───► No  ──► BLOCK (Unless Extreme Momentum)
+[Is Multi-Timeframe Aligned?] ───► No  ──► BLOCK (Unless Extreme HF Pressure)
             │ Yes
-[Breakout Body Ratio >= 22%?] ───► No  ──► BLOCK (False Breakout Protection)
+[Breakout Body Ratio >= 22%?] ───► No  ──► BLOCK (Wick Sweep Protection)
             │ Yes
 [Is High HF Pressure Active?] ───► Yes ──► [TRIGGER IMMEDIATE ENTRY]
             │ No
-[Retraced to level / EMA zone?] ─► No  ──► WAIT (No entry trigger yet)
+[Retraced to level / EMA zone?] ─► No  ──► WAIT (Awaiting Retracement)
             │ Yes
-[Objective Rejection Confirmed?] ─► No  ──► WAIT (Indecision candle filtered)
+[Objective Rejection Confirmed?] ─► No  ──► WAIT (Indecision Filter Active)
             │ Yes
-[Is EMA 200 overhead blocking?] ─► Yes ──► BLOCK (Avoid immediate overhead wall)
+[Volume within Thresholds?] ─────► No  ──► BLOCK (Distribution/Accumulation Risk)
+            │ Yes
+[Is EMA 200 overhead blocking?] ─► Yes ──► BLOCK (Overhead Resistance/Support Wall)
             │ No
       [EXECUTE TRADE]
 ```

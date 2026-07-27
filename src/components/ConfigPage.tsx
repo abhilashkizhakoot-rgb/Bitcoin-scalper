@@ -22,6 +22,7 @@ import {
   Layers,
   Download,
   Upload,
+  CheckCircle,
 } from "lucide-react";
 import { StrategyConfig, ConfigHistoryEntry, NewsSource } from "../types.js";
 
@@ -188,7 +189,9 @@ export default function ConfigPage({
   });
 
   useEffect(() => {
-    if (prevConfigRef.current !== config) {
+    const configStr = JSON.stringify(config);
+    const prevStr = JSON.stringify(prevConfigRef.current);
+    if (prevStr !== configStr) {
       prevConfigRef.current = config;
       if (config.general) setGeneralConfig(config.general);
       if (config.ml_settings) setMlConfig(config.ml_settings);
@@ -301,16 +304,27 @@ export default function ConfigPage({
       }
     }
 
+    // Cast top-level string values that represent numbers
+    for (const key of Object.keys(cleaned)) {
+      const val = cleaned[key];
+      if (typeof val === "string") {
+        const trimmed = val.trim();
+        if (trimmed !== "" && trimmed !== "-" && trimmed !== "." && trimmed !== "-.") {
+          const num = Number(trimmed);
+          if (!isNaN(num) && isFinite(num)) {
+            cleaned[key] = num;
+          }
+        }
+      }
+    }
+
     if (category === "sentiment_settings") {
       if (cleaned.weights) {
         const cleanedWeights = { ...cleaned.weights };
         for (const k of Object.keys(cleanedWeights)) {
           const val = cleanedWeights[k];
-          if (val === "" || val === undefined || val === null || isNaN(Number(val))) {
-            cleanedWeights[k] = 20;
-          } else {
-            cleanedWeights[k] = Number(val);
-          }
+          const num = Number(val);
+          cleanedWeights[k] = !isNaN(num) && isFinite(num) ? num : 20;
         }
         cleaned.weights = cleanedWeights;
       }
@@ -318,11 +332,8 @@ export default function ConfigPage({
         const cleanedIntervals = { ...cleaned.refresh_rates_min };
         for (const k of Object.keys(cleanedIntervals)) {
           const val = cleanedIntervals[k];
-          if (val === "" || val === undefined || val === null || isNaN(Number(val))) {
-            cleanedIntervals[k] = 5;
-          } else {
-            cleanedIntervals[k] = Number(val);
-          }
+          const num = Number(val);
+          cleanedIntervals[k] = !isNaN(num) && isFinite(num) ? num : 5;
         }
         cleaned.refresh_rates_min = cleanedIntervals;
       }
@@ -367,6 +378,16 @@ export default function ConfigPage({
         body: JSON.stringify(sanitizedData),
       });
       if (res.ok) {
+        const updatedConfig = await res.json();
+        if (updatedConfig) {
+          prevConfigRef.current = updatedConfig;
+          if (updatedConfig.general) setGeneralConfig(updatedConfig.general);
+          if (updatedConfig.ml_settings) setMlConfig(updatedConfig.ml_settings);
+          if (updatedConfig.sentiment_settings) setSentimentConfig(updatedConfig.sentiment_settings);
+          if (updatedConfig.risk_management) setRiskConfig(updatedConfig.risk_management);
+          if (updatedConfig.market_structure) setMsConfig(updatedConfig.market_structure);
+          if (updatedConfig.gate_scoring) setGateScoringConfig(updatedConfig.gate_scoring);
+        }
         onRefresh();
         alert(`Success: ${category.toUpperCase()} parameters successfully committed to DB.`);
       }
@@ -390,6 +411,12 @@ export default function ConfigPage({
         body: JSON.stringify(sanitizedRisk),
       });
       if (resGeneral.ok && resRisk.ok) {
+        const updatedConfig = await resRisk.json();
+        if (updatedConfig) {
+          prevConfigRef.current = updatedConfig;
+          if (updatedConfig.general) setGeneralConfig(updatedConfig.general);
+          if (updatedConfig.risk_management) setRiskConfig(updatedConfig.risk_management);
+        }
         onRefresh();
         alert("Success: General & Risk Management parameters successfully committed to DB.");
       } else {
@@ -397,6 +424,45 @@ export default function ConfigPage({
       }
     } catch (e) {
       alert("Failed to commit settings, check server connection.");
+    }
+  };
+
+  const handleSaveAllCategories = async () => {
+    try {
+      const sanitizedGeneral = sanitizeCategoryData("general", generalConfig);
+      const sanitizedRisk = sanitizeCategoryData("risk_management", riskConfig);
+      const sanitizedMl = sanitizeCategoryData("ml_settings", mlConfig);
+      const sanitizedSentiment = sanitizeCategoryData("sentiment_settings", sentimentConfig);
+      const sanitizedMs = sanitizeCategoryData("market_structure", msConfig);
+      const sanitizedGate = sanitizeCategoryData("gate_scoring", gateScoringConfig);
+
+      const [resG, resR, resM, resS, resMS, resGS] = await Promise.all([
+        apiFetch(`/api/config/general`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sanitizedGeneral) }),
+        apiFetch(`/api/config/risk_management`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sanitizedRisk) }),
+        apiFetch(`/api/config/ml_settings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sanitizedMl) }),
+        apiFetch(`/api/config/sentiment_settings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sanitizedSentiment) }),
+        apiFetch(`/api/config/market_structure`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sanitizedMs) }),
+        apiFetch(`/api/config/gate_scoring`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sanitizedGate) }),
+      ]);
+
+      if (resG.ok && resR.ok && resM.ok && resS.ok && resMS.ok && resGS.ok) {
+        const latestConfig = await resGS.json();
+        if (latestConfig) {
+          prevConfigRef.current = latestConfig;
+          if (latestConfig.general) setGeneralConfig(latestConfig.general);
+          if (latestConfig.ml_settings) setMlConfig(latestConfig.ml_settings);
+          if (latestConfig.sentiment_settings) setSentimentConfig(latestConfig.sentiment_settings);
+          if (latestConfig.risk_management) setRiskConfig(latestConfig.risk_management);
+          if (latestConfig.market_structure) setMsConfig(latestConfig.market_structure);
+          if (latestConfig.gate_scoring) setGateScoringConfig(latestConfig.gate_scoring);
+        }
+        onRefresh();
+        alert("Success: ALL strategy parameters committed and hot-deployed!");
+      } else {
+        alert("Warning: One or more categories failed to save. Please check inputs.");
+      }
+    } catch (e) {
+      alert("Failed to commit strategy settings. Please check server connection.");
     }
   };
 
@@ -439,10 +505,11 @@ export default function ConfigPage({
   const handleSaveProfile = async () => {
     if (!newProfileName.trim()) return;
     try {
+      const activeConfig = getActiveConfigObject();
       const res = await apiFetch("/api/config/profiles/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newProfileName, config }),
+        body: JSON.stringify({ name: newProfileName, config: activeConfig }),
       });
       if (res.ok) {
         setNewProfileName("");
@@ -673,6 +740,16 @@ export default function ConfigPage({
           <History className="w-4 h-4" />
           Rollback Audit History
         </button>
+
+        <div className="mt-auto pt-6 border-t border-slate-100">
+          <button
+            onClick={handleSaveAllCategories}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-sans font-bold shadow-md hover:shadow-indigo-500/20 transition-all cursor-pointer"
+          >
+            <CheckCircle className="w-4 h-4" />
+            Commit All Strategy Parameters
+          </button>
+        </div>
       </div>
 
       {/* Main Form Fields Container */}

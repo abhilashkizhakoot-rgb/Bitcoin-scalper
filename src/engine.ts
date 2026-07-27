@@ -3647,12 +3647,22 @@ class TradingEngine {
       const breakoutLevel = struct.prev_HH ? struct.prev_HH.price : (struct.current_HH ? struct.current_HH.price : struct.swingHigh);
       const searchStartTimestamp = struct.prev_HH ? struct.prev_HH.time : 0;
 
-      // Find the candle index where breakout occurred (closing above breakout level)
+      // Find the candle index where breakout occurred (closing above breakout level for the current sequence)
       let breakoutIdx = -1;
-      for (let i = 0; i <= lastIdx; i++) {
+      for (let i = lastIdx; i >= 0; i--) {
         if (this.candles1m[i].time >= searchStartTimestamp && this.candles1m[i].close > breakoutLevel) {
-          breakoutIdx = i;
-          break;
+          if (i === 0 || this.candles1m[i - 1].close <= breakoutLevel || i <= lastIdx - 30) {
+            breakoutIdx = i;
+            break;
+          }
+        }
+      }
+      if (breakoutIdx === -1) {
+        for (let i = lastIdx; i >= 0; i--) {
+          if (this.candles1m[i].time >= searchStartTimestamp && this.candles1m[i].close > breakoutLevel) {
+            breakoutIdx = i;
+            break;
+          }
         }
       }
 
@@ -3756,8 +3766,9 @@ class TradingEngine {
         const avgPullbackVol = pullbackCandlesPriorToCurrent.reduce((sum, c) => sum + c.volume, 0) / pullbackCandlesPriorToCurrent.length;
         
         // We use Math.max instead of Math.min so that standard/low breakout spikes do not force an impossibly low threshold,
-        // and we allow a healthy multiplier of the 20-period average volume.
-        const volumeThreshold = Math.max(boCandle.volume * boRatio, avgVol20 * dryupMult);
+        // and we allow a healthy multiplier of the 20-period average volume with adaptive scalping tolerance under HF pressure.
+        const baseVolumeThreshold = Math.max(boCandle.volume * boRatio, avgVol20 * dryupMult);
+        const volumeThreshold = hasHighHFPressure ? baseVolumeThreshold * 1.25 : baseVolumeThreshold;
         if (avgPullbackVol > volumeThreshold) {
           isVolumeHealthyForPullback = false;
           pullbackVolDetails = `Avg pullback vol (${avgPullbackVol.toFixed(0)}) > Threshold (${volumeThreshold.toFixed(0)}) [Max of BO Vol * ${boRatio} (${(boCandle.volume * boRatio).toFixed(0)}) or 20-period avg * ${dryupMult} (${(avgVol20 * dryupMult).toFixed(0)})]`;
@@ -3957,12 +3968,22 @@ class TradingEngine {
       const breakoutLevel = struct.prev_LL ? struct.prev_LL.price : (struct.current_LL ? struct.current_LL.price : struct.swingLow);
       const searchStartTimestamp = struct.prev_LL ? struct.prev_LL.time : 0;
 
-      // Find the candle index where breakout occurred (closing below breakout level)
+      // Find the candle index where breakout occurred (closing below breakout level for the current sequence)
       let breakoutIdx = -1;
-      for (let i = 0; i <= lastIdx; i++) {
+      for (let i = lastIdx; i >= 0; i--) {
         if (this.candles1m[i].time >= searchStartTimestamp && this.candles1m[i].close < breakoutLevel) {
-          breakoutIdx = i;
-          break;
+          if (i === 0 || this.candles1m[i - 1].close >= breakoutLevel || i <= lastIdx - 30) {
+            breakoutIdx = i;
+            break;
+          }
+        }
+      }
+      if (breakoutIdx === -1) {
+        for (let i = lastIdx; i >= 0; i--) {
+          if (this.candles1m[i].time >= searchStartTimestamp && this.candles1m[i].close < breakoutLevel) {
+            breakoutIdx = i;
+            break;
+          }
         }
       }
 
@@ -4067,8 +4088,9 @@ class TradingEngine {
         const avgPullbackVol = pullbackCandlesPriorToCurrent.reduce((sum, c) => sum + c.volume, 0) / pullbackCandlesPriorToCurrent.length;
         
         // We use Math.max instead of Math.min so that standard/low breakout spikes do not force an impossibly low threshold,
-        // and we allow a healthy multiplier of the 20-period average volume.
-        const volumeThreshold = Math.max(boCandle.volume * boRatio, avgVol20 * dryupMult);
+        // and we allow a healthy multiplier of the 20-period average volume with adaptive scalping tolerance under HF pressure.
+        const baseVolumeThreshold = Math.max(boCandle.volume * boRatio, avgVol20 * dryupMult);
+        const volumeThreshold = hasHighHFPressure ? baseVolumeThreshold * 1.25 : baseVolumeThreshold;
         if (avgPullbackVol > volumeThreshold) {
           isVolumeHealthyForPullback = false;
           pullbackVolDetails = `Avg pullback vol (${avgPullbackVol.toFixed(0)}) > Threshold (${volumeThreshold.toFixed(0)}) [Max of BO Vol * ${boRatio} (${(boCandle.volume * boRatio).toFixed(0)}) or 20-period avg * ${dryupMult} (${(avgVol20 * dryupMult).toFixed(0)})]`;
@@ -5218,12 +5240,12 @@ class TradingEngine {
         const isMicroTrendBearish = emaFastVal < emaSlowVal;
 
         if (signalDirection === "LONG") {
-          // LONG reversal/breakout requires bullish micro-trend or price crossing above slower EMA to confirm shift
-          microTrendAligned = isMicroTrendBullish || (currentPrice >= emaSlowVal);
+          // LONG reversal/breakout requires bullish micro-trend, price crossing above fast/slow EMA, or a confirmed range reversal bounce
+          microTrendAligned = isMicroTrendBullish || (currentPrice >= emaSlowVal) || (currentPrice >= emaFastVal) || isRangeLongReversal;
           microTrendDetails = `(Micro-Trend [EMA ${microFastPeriod}/${microSlowPeriod}]: Fast $${emaFastVal.toFixed(2)} vs Slow $${emaSlowVal.toFixed(2)} - ${isMicroTrendBullish ? "BULLISH" : "BEARISH"}${microTrendAligned ? " [ALIGNED]" : " [BLOCKED]"})`;
         } else if (signalDirection === "SHORT") {
-          // SHORT reversal/breakdown requires bearish micro-trend or price crossing below slower EMA to confirm shift
-          microTrendAligned = isMicroTrendBearish || (currentPrice <= emaSlowVal);
+          // SHORT reversal/breakdown requires bearish micro-trend, price crossing below fast/slow EMA, or a confirmed range reversal bounce
+          microTrendAligned = isMicroTrendBearish || (currentPrice <= emaSlowVal) || (currentPrice <= emaFastVal) || isRangeShortReversal;
           microTrendDetails = `(Micro-Trend [EMA ${microFastPeriod}/${microSlowPeriod}]: Fast $${emaFastVal.toFixed(2)} vs Slow $${emaSlowVal.toFixed(2)} - ${isMicroTrendBearish ? "BEARISH" : "BULLISH"}${microTrendAligned ? " [ALIGNED]" : " [BLOCKED]"})`;
         }
       }

@@ -397,20 +397,86 @@ class TradingEngine {
     return n;
   }
 
+  private getRegimeAdaptiveGateStatus(config: StrategyConfig, gateId: string): "MANDATORY" | "WEIGHTED" | "BYPASSED" | null {
+    if (!config.general.regime_adaptive_gates_enabled) return null;
+
+    const currentRegime = this.currentRegime;
+
+    // Check custom overrides if configured for this regime
+    const customRegimeOverride = config.general.regime_gate_overrides?.[currentRegime];
+    if (customRegimeOverride) {
+      if (customRegimeOverride.mandatory_gates?.includes(gateId)) return "MANDATORY";
+      if (customRegimeOverride.weighted_gates?.includes(gateId)) return "WEIGHTED";
+      if (customRegimeOverride.bypassed_gates?.includes(gateId)) return "BYPASSED";
+    }
+
+    // Built-in Strategy Presets
+    const preset = config.general.regime_adaptive_preset || "BALANCED_ADAPTIVE";
+
+    if (preset === "DEFENSIVE_STRICT") {
+      if (currentRegime === MarketRegime.RANGE_BOUND || currentRegime === MarketRegime.LOW_VOLATILITY || currentRegime === MarketRegime.HIGH_VOLATILITY) {
+        if (["trend", "adx", "orderflow", "orderbook", "volume_profile", "structure", "vwap", "squeeze"].includes(gateId)) {
+          return "MANDATORY";
+        }
+      }
+    } else if (preset === "AGGRESSIVE_TREND") {
+      if (currentRegime === MarketRegime.STRONG_UPTREND || currentRegime === MarketRegime.STRONG_DOWNTREND) {
+        if (["trend", "adx", "catboost", "volume", "orderflow"].includes(gateId)) {
+          return "WEIGHTED";
+        }
+      } else if (currentRegime === MarketRegime.RANGE_BOUND) {
+        if (["structure", "volume_profile", "orderbook", "vwap"].includes(gateId)) {
+          return "MANDATORY";
+        }
+      }
+    } else {
+      // BALANCED_ADAPTIVE (Default)
+      if (currentRegime === MarketRegime.RANGE_BOUND || currentRegime === MarketRegime.LOW_VOLATILITY) {
+        if (["trend", "adx", "volume_profile", "orderflow", "orderbook", "structure"].includes(gateId)) {
+          return "MANDATORY";
+        }
+      }
+      if (currentRegime === MarketRegime.HIGH_VOLATILITY) {
+        if (["squeeze", "atr", "catboost", "orderflow"].includes(gateId)) {
+          return "MANDATORY";
+        }
+      }
+      if (currentRegime === MarketRegime.STRONG_UPTREND || currentRegime === MarketRegime.STRONG_DOWNTREND) {
+        if (["catboost", "volume", "vwap", "orderflow"].includes(gateId)) {
+          return "WEIGHTED";
+        }
+      }
+    }
+
+    return null;
+  }
+
   private isGateMandatory(config: StrategyConfig, name: string): boolean {
     const gateId = this.getGateIdByName(name);
+    const adaptiveStatus = this.getRegimeAdaptiveGateStatus(config, gateId);
+    if (adaptiveStatus === "MANDATORY") return true;
+    if (adaptiveStatus === "WEIGHTED" || adaptiveStatus === "BYPASSED") return false;
+
     const mandatory = config.general.mandatory_gates || [];
     return mandatory.includes(gateId);
   }
 
   private isGateWeighted(config: StrategyConfig, name: string): boolean {
     const gateId = this.getGateIdByName(name);
+    const adaptiveStatus = this.getRegimeAdaptiveGateStatus(config, gateId);
+    if (adaptiveStatus === "WEIGHTED") return true;
+    if (adaptiveStatus === "MANDATORY" || adaptiveStatus === "BYPASSED") return false;
+
     const weighted = config.general.weighted_gates || [];
     return weighted.includes(gateId);
   }
 
   private isGateActive(config: StrategyConfig, name: string): boolean {
     const gateId = this.getGateIdByName(name);
+    const adaptiveStatus = this.getRegimeAdaptiveGateStatus(config, gateId);
+    if (adaptiveStatus === "MANDATORY" || adaptiveStatus === "WEIGHTED") return true;
+    if (adaptiveStatus === "BYPASSED") return false;
+
     if (config.general.mandatory_gates || config.general.weighted_gates) {
       const mandatory = config.general.mandatory_gates || [];
       const weighted = config.general.weighted_gates || [];

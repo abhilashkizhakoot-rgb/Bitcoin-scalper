@@ -189,6 +189,13 @@ export interface StrategyConfig {
     regime_macro_slope_threshold?: number;
     regime_ribbon_compression_threshold?: number;
     require_volume_profile_in_ranging?: boolean;
+    regime_adaptive_gates_enabled?: boolean;
+    regime_adaptive_preset?: "BALANCED_ADAPTIVE" | "DEFENSIVE_STRICT" | "AGGRESSIVE_TREND" | "CUSTOM";
+    regime_gate_overrides?: Record<string, {
+      mandatory_gates?: string[];
+      weighted_gates?: string[];
+      bypassed_gates?: string[];
+    }>;
   };
   ml_settings: {
     entry_threshold_long: number; // e.g. 0.80

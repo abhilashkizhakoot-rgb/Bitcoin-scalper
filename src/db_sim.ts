@@ -133,6 +133,9 @@ const DEFAULT_CONFIG: StrategyConfig = {
     regime_macro_slope_threshold: 0.0005,
     regime_ribbon_compression_threshold: 0.0015,
     require_volume_profile_in_ranging: true,
+    regime_adaptive_gates_enabled: true,
+    regime_adaptive_preset: "BALANCED_ADAPTIVE",
+    regime_gate_overrides: {},
   },
   ml_settings: {
     entry_threshold_long: 0.80,
@@ -994,6 +997,18 @@ class DatabaseManager {
       }
       if (this.cache.config.general.require_volume_profile_in_ranging === undefined) {
         this.cache.config.general.require_volume_profile_in_ranging = true;
+        changed = true;
+      }
+      if (this.cache.config.general.regime_adaptive_gates_enabled === undefined) {
+        this.cache.config.general.regime_adaptive_gates_enabled = true;
+        changed = true;
+      }
+      if (!this.cache.config.general.regime_adaptive_preset) {
+        this.cache.config.general.regime_adaptive_preset = "BALANCED_ADAPTIVE";
+        changed = true;
+      }
+      if (!this.cache.config.general.regime_gate_overrides) {
+        this.cache.config.general.regime_gate_overrides = {};
         changed = true;
       }
     }

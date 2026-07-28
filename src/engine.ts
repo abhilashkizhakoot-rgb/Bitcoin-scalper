@@ -442,6 +442,9 @@ class TradingEngine {
         }
       }
       if (currentRegime === MarketRegime.STRONG_UPTREND || currentRegime === MarketRegime.STRONG_DOWNTREND) {
+        if (["ema100", "orderbook"].includes(gateId)) {
+          return "MANDATORY";
+        }
         if (["catboost", "volume", "vwap", "orderflow"].includes(gateId)) {
           return "WEIGHTED";
         }

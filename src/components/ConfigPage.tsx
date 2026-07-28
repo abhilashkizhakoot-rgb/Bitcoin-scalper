@@ -115,6 +115,7 @@ export default function ConfigPage({
   // Sub-tab State Mirroring
   const prevConfigRef = useRef(config);
   const [generalConfig, setGeneralConfig] = useState(config.general);
+  const [selectedRegimeTab, setSelectedRegimeTab] = useState<"STRONG_UPTREND" | "STRONG_DOWNTREND" | "RANGE_BOUND" | "HIGH_VOLATILITY" | "LOW_VOLATILITY">("STRONG_UPTREND");
   const [mlConfig, setMlConfig] = useState(config.ml_settings);
   const [sentimentConfig, setSentimentConfig] = useState(config.sentiment_settings);
   const [riskConfig, setRiskConfig] = useState(config.risk_management);
@@ -1253,14 +1254,14 @@ export default function ConfigPage({
                           <span className="text-[9px] bg-emerald-200/60 text-emerald-900 px-1.5 py-0.2 rounded">Uptrend / Downtrend</span>
                         </div>
                         <p className="text-emerald-700/90 leading-tight">
-                          Gates evaluate as <strong>WEIGHTED</strong>. High velocity entries permitted without waiting for 100% strict convergence.
+                          EMA 100 & Order Book gates evaluate as <strong>STRICT</strong> to protect against overextension. Tactical gates evaluate as <strong>WEIGHTED</strong>.
                         </p>
                       </div>
 
                       <div className="p-2 rounded bg-amber-50/80 border border-amber-100 space-y-1">
                         <div className="font-bold text-amber-800 flex items-center justify-between">
                           <span>Range / Weak Regimes</span>
-                          <span className="text-[9px] bg-amber-200/60 text-amber-900 px-1.5 py-0.2 rounded">Range / Weak Trend</span>
+                          <span className="text-[9px] bg-amber-200/60 text-amber-900 px-1.5 py-0.2 rounded">Range / Low Volatility</span>
                         </div>
                         <p className="text-amber-700/90 leading-tight">
                           Trend, ADX, Order Flow, Order Book & Volume Profile gates automatically upgrade to <strong>STRICT</strong> to eliminate fakeouts.
@@ -1269,12 +1270,155 @@ export default function ConfigPage({
 
                       <div className="p-2 rounded bg-rose-50/80 border border-rose-100 space-y-1">
                         <div className="font-bold text-rose-800 flex items-center justify-between">
-                          <span>High / Low Volatility</span>
+                          <span>High Volatility</span>
                           <span className="text-[9px] bg-rose-200/60 text-rose-900 px-1.5 py-0.2 rounded">Spikes & Chop</span>
                         </div>
                         <p className="text-rose-700/90 leading-tight">
                           Squeeze, ATR, CatBoost AI, and Risk gates auto-upgrade to <strong>STRICT</strong> to prevent bad slippage and wicks.
                         </p>
+                      </div>
+                    </div>
+
+                    {/* Per-Regime Gate Custom Override Matrix */}
+                    <div className="mt-4 pt-3 border-t border-indigo-100 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <span className="text-xs font-bold text-slate-800 uppercase font-sans">
+                            Per-Regime Custom Gate Overrides
+                          </span>
+                          <p className="text-[10px] text-slate-500">
+                            Configure individual gate enforcement modes (Strict / Weighted / Bypassed) for each specific Market Regime & Trend.
+                          </p>
+                        </div>
+                        <span className="text-[10px] text-indigo-700 font-mono bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 font-semibold self-start sm:self-auto">
+                          Active Regime Tab: {selectedRegimeTab}
+                        </span>
+                      </div>
+
+                      {/* Regime Tabs */}
+                      <div className="flex flex-wrap gap-1.5 bg-slate-100/80 p-1 rounded-lg border border-slate-200 text-[11px]">
+                        {[
+                          { id: "STRONG_UPTREND", label: "Strong Uptrend", color: "text-emerald-700" },
+                          { id: "STRONG_DOWNTREND", label: "Strong Downtrend", color: "text-rose-700" },
+                          { id: "RANGE_BOUND", label: "Range-Bound Chop", color: "text-amber-700" },
+                          { id: "HIGH_VOLATILITY", label: "High Volatility", color: "text-purple-700" },
+                          { id: "LOW_VOLATILITY", label: "Low Volatility", color: "text-slate-700" },
+                        ].map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setSelectedRegimeTab(tab.id as any)}
+                            className={`px-2.5 py-1 rounded-md font-semibold font-sans transition-all ${
+                              selectedRegimeTab === tab.id
+                                ? "bg-white text-slate-900 shadow-xs border border-slate-200"
+                                : "text-slate-500 hover:text-slate-800 hover:bg-slate-200/50"
+                            }`}
+                          >
+                            <span className={selectedRegimeTab === tab.id ? tab.color : ""}>{tab.label}</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Gate Override Matrix Table */}
+                      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-2xs">
+                        <div className="divide-y divide-slate-100 text-[11px]">
+                          {AVAILABLE_GATES.map((gate) => {
+                            const regimeOverrides = generalConfig.regime_gate_overrides?.[selectedRegimeTab] || {};
+                            const isMandatory = regimeOverrides.mandatory_gates?.includes(gate.id);
+                            const isWeighted = regimeOverrides.weighted_gates?.includes(gate.id);
+                            const isBypassed = regimeOverrides.bypassed_gates?.includes(gate.id);
+                            const currentMode = isMandatory ? "MANDATORY" : isWeighted ? "WEIGHTED" : isBypassed ? "BYPASSED" : "DEFAULT";
+
+                            const handleModeChange = (mode: "DEFAULT" | "MANDATORY" | "WEIGHTED" | "BYPASSED") => {
+                              const overrides = { ...(generalConfig.regime_gate_overrides || {}) };
+                              const regimeObj = { ...(overrides[selectedRegimeTab] || {}) };
+
+                              let mandatory = (regimeObj.mandatory_gates || []).filter(id => id !== gate.id);
+                              let weighted = (regimeObj.weighted_gates || []).filter(id => id !== gate.id);
+                              let bypassed = (regimeObj.bypassed_gates || []).filter(id => id !== gate.id);
+
+                              if (mode === "MANDATORY") mandatory.push(gate.id);
+                              else if (mode === "WEIGHTED") weighted.push(gate.id);
+                              else if (mode === "BYPASSED") bypassed.push(gate.id);
+
+                              overrides[selectedRegimeTab] = {
+                                mandatory_gates: mandatory,
+                                weighted_gates: weighted,
+                                bypassed_gates: bypassed,
+                              };
+
+                              setGeneralConfig({
+                                ...generalConfig,
+                                regime_gate_overrides: overrides,
+                              });
+                            };
+
+                            return (
+                              <div key={gate.id} className="p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-slate-50/80 transition-colors">
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-semibold text-slate-800">{gate.label}</span>
+                                    {gate.id === "ema100" && (
+                                      <span className="text-[9px] font-bold bg-indigo-100 text-indigo-800 px-1.5 py-0.2 rounded border border-indigo-200">
+                                        Overextension Protection
+                                      </span>
+                                    )}
+                                    <span className="text-[9px] font-mono text-slate-400">({gate.id})</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[10px] shrink-0 self-start sm:self-auto">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleModeChange("DEFAULT")}
+                                    className={`px-2 py-0.5 rounded font-bold transition-all ${
+                                      currentMode === "DEFAULT"
+                                        ? "bg-slate-700 text-white shadow-xs"
+                                        : "text-slate-600 hover:text-slate-900"
+                                    }`}
+                                  >
+                                    Default
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleModeChange("MANDATORY")}
+                                    className={`px-2 py-0.5 rounded font-bold transition-all ${
+                                      currentMode === "MANDATORY"
+                                        ? "bg-rose-600 text-white shadow-xs"
+                                        : "text-slate-600 hover:text-rose-700"
+                                    }`}
+                                  >
+                                    STRICT
+                                  </button>
+                                  {gate.supportsWeight && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleModeChange("WEIGHTED")}
+                                      className={`px-2 py-0.5 rounded font-bold transition-all ${
+                                        currentMode === "WEIGHTED"
+                                          ? "bg-indigo-600 text-white shadow-xs"
+                                          : "text-slate-600 hover:text-indigo-700"
+                                      }`}
+                                    >
+                                      Weighted
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleModeChange("BYPASSED")}
+                                    className={`px-2 py-0.5 rounded font-bold transition-all ${
+                                      currentMode === "BYPASSED"
+                                        ? "bg-amber-600 text-white shadow-xs"
+                                        : "text-slate-600 hover:text-amber-700"
+                                    }`}
+                                  >
+                                    Bypassed
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   </div>

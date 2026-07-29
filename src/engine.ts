@@ -1304,7 +1304,27 @@ class TradingEngine {
       } else if (isRangeShortBreakdown) {
         signalDirection = "SHORT";
       } else {
-        signalDirection = "NEUTRAL";
+        // --- 20 EMA / 50 EMA / VWAP Pullback & Bounce Detection in RANGE_BOUND ---
+        const recentCandlesRange = this.candles1m.slice(-8);
+        const isNearEma20 = recentCandlesRange.some(c => c.low <= ema20Val * 1.0035 && c.high >= ema20Val * 0.9965);
+        const isNearEma50 = recentCandlesRange.some(c => c.low <= ema50Val * 1.0035 && c.high >= ema50Val * 0.9965);
+        const isNearVwap = recentCandlesRange.some(c => c.low <= vwapVal * 1.0035 && c.high >= vwapVal * 0.9965);
+        const isEmaBounceInRange = isNearEma20 || isNearEma50 || isNearVwap;
+
+        if (isEmaBounceInRange) {
+          const isBullishEmaBounce = (currentPrice >= ema20Val * 0.997 || ema9[lastIdx] >= ema20Val) && (probabilityLong >= 0.48 || currentRsi >= 44 || this.orderFlowStats.takerBuyRatio >= 0.48);
+          const isBearishEmaBounce = (currentPrice <= ema20Val * 1.003 || ema9[lastIdx] <= ema20Val) && (probabilityShort >= 0.48 || currentRsi <= 56 || this.orderFlowStats.takerBuyRatio <= 0.52);
+
+          if (isBullishEmaBounce && probabilityLong >= probabilityShort) {
+            signalDirection = "LONG";
+          } else if (isBearishEmaBounce && probabilityShort > probabilityLong) {
+            signalDirection = "SHORT";
+          } else {
+            signalDirection = "NEUTRAL";
+          }
+        } else {
+          signalDirection = "NEUTRAL";
+        }
       }
     } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
       signalDirection = "NEUTRAL";
@@ -6297,7 +6317,27 @@ class TradingEngine {
       } else if (isRangeShortBreakdown) {
         signalDirection = "SHORT";
       } else {
-        signalDirection = "NEUTRAL";
+        // --- 20 EMA / 50 EMA / VWAP Pullback & Bounce Detection in RANGE_BOUND ---
+        const recentCandlesRange = this.candles1m.slice(-8);
+        const isNearEma20 = recentCandlesRange.some(c => c.low <= ema20Val * 1.0035 && c.high >= ema20Val * 0.9965);
+        const isNearEma50 = recentCandlesRange.some(c => c.low <= ema50Val * 1.0035 && c.high >= ema50Val * 0.9965);
+        const isNearVwap = recentCandlesRange.some(c => c.low <= vwapVal * 1.0035 && c.high >= vwapVal * 0.9965);
+        const isEmaBounceInRange = isNearEma20 || isNearEma50 || isNearVwap;
+
+        if (isEmaBounceInRange) {
+          const isBullishEmaBounce = (currentClose >= ema20Val * 0.997 || ema9[lastIdx] >= ema20Val) && (probabilityLong >= 0.48 || currentRsi >= 44 || this.orderFlowStats.takerBuyRatio >= 0.48);
+          const isBearishEmaBounce = (currentClose <= ema20Val * 1.003 || ema9[lastIdx] <= ema20Val) && (probabilityShort >= 0.48 || currentRsi <= 56 || this.orderFlowStats.takerBuyRatio <= 0.52);
+
+          if (isBullishEmaBounce && probabilityLong >= probabilityShort) {
+            signalDirection = "LONG";
+          } else if (isBearishEmaBounce && probabilityShort > probabilityLong) {
+            signalDirection = "SHORT";
+          } else {
+            signalDirection = "NEUTRAL";
+          }
+        } else {
+          signalDirection = "NEUTRAL";
+        }
       }
     } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
       signalDirection = "NEUTRAL";

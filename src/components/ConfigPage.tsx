@@ -1208,79 +1208,15 @@ export default function ConfigPage({
 
                 {generalConfig.regime_adaptive_gates_enabled && (
                   <div className="space-y-4 pt-1">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">
-                          Adaptive Strategy Profile
-                        </label>
-                        <select
-                          value={generalConfig.regime_adaptive_preset || "BALANCED_ADAPTIVE"}
-                          onChange={(e) =>
-                            setGeneralConfig({
-                              ...generalConfig,
-                              regime_adaptive_preset: e.target.value as any,
-                            })
-                          }
-                          className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-800 font-sans focus:ring-2 focus:ring-indigo-500 outline-none"
-                        >
-                          <option value="BALANCED_ADAPTIVE">Balanced Adaptive (Recommended)</option>
-                          <option value="DEFENSIVE_STRICT">Defensive Strict (Chop & Volatility Protection)</option>
-                          <option value="AGGRESSIVE_TREND">Aggressive Momentum (Fast Trend Execution)</option>
-                        </select>
-                      </div>
-
-                      <div className="md:col-span-2 bg-white/80 p-3 rounded-lg border border-slate-200/80 text-[11px] text-slate-600 space-y-1">
-                        <span className="font-bold text-slate-800">Adaptive Profile Rule Matrix:</span>
-                        {generalConfig.regime_adaptive_preset === "DEFENSIVE_STRICT" ? (
-                          <p className="text-slate-500">
-                            Enforces STRICT mode across all key technical, trend, order flow, order book, volume profile, and structure gates whenever market is in <strong className="text-indigo-700">Range-Bound</strong>, <strong className="text-amber-700">Low Volatility</strong>, or <strong className="text-rose-700">High Volatility</strong> regimes to suppress false signals.
-                          </p>
-                        ) : generalConfig.regime_adaptive_preset === "AGGRESSIVE_TREND" ? (
-                          <p className="text-slate-500">
-                            Relaxes trend and CatBoost gates to <strong className="text-indigo-700">WEIGHTED</strong> mode during <strong className="text-emerald-700">Strong Trends</strong> for maximum entry velocity, while enforcing <strong className="text-rose-700">STRICT</strong> structure and volume profile checks during Range-Bound periods.
-                          </p>
-                        ) : (
-                          <p className="text-slate-500">
-                            Automatically upgrades Trend Alignment, ADX, Order Flow, Order Book Imbalance, and MTF Volume Profiling to <strong className="text-rose-700">STRICT</strong> mode in <strong className="text-slate-800">Range-Bound</strong> or <strong className="text-amber-700">Weak Trends</strong>. Keeps gates <strong className="text-indigo-700">WEIGHTED</strong> in <strong className="text-emerald-700">Strong Trends</strong> for swift trend continuation.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px] pt-1">
-                      <div className="p-2 rounded bg-emerald-50/80 border border-emerald-100 space-y-1">
-                        <div className="font-bold text-emerald-800 flex items-center justify-between">
-                          <span>Strong Trend Regimes</span>
-                          <span className="text-[9px] bg-emerald-200/60 text-emerald-900 px-1.5 py-0.2 rounded">Uptrend / Downtrend</span>
-                        </div>
-                        <p className="text-emerald-700/90 leading-tight">
-                          EMA 100 & Order Book gates evaluate as <strong>STRICT</strong> to protect against overextension. Tactical gates evaluate as <strong>WEIGHTED</strong>.
-                        </p>
-                      </div>
-
-                      <div className="p-2 rounded bg-amber-50/80 border border-amber-100 space-y-1">
-                        <div className="font-bold text-amber-800 flex items-center justify-between">
-                          <span>Range / Weak Regimes</span>
-                          <span className="text-[9px] bg-amber-200/60 text-amber-900 px-1.5 py-0.2 rounded">Range / Low Volatility</span>
-                        </div>
-                        <p className="text-amber-700/90 leading-tight">
-                          Trend, ADX, Order Flow, Order Book & Volume Profile gates automatically upgrade to <strong>STRICT</strong> to eliminate fakeouts.
-                        </p>
-                      </div>
-
-                      <div className="p-2 rounded bg-rose-50/80 border border-rose-100 space-y-1">
-                        <div className="font-bold text-rose-800 flex items-center justify-between">
-                          <span>High Volatility</span>
-                          <span className="text-[9px] bg-rose-200/60 text-rose-900 px-1.5 py-0.2 rounded">Spikes & Chop</span>
-                        </div>
-                        <p className="text-rose-700/90 leading-tight">
-                          Squeeze, ATR, CatBoost AI, and Risk gates auto-upgrade to <strong>STRICT</strong> to prevent bad slippage and wicks.
-                        </p>
-                      </div>
+                    <div className="bg-indigo-50/60 p-3 rounded-lg border border-indigo-100 text-[11px] text-slate-600 flex items-start gap-2">
+                      <div className="text-indigo-600 font-bold shrink-0 mt-0.5">ℹ️</div>
+                      <p className="leading-relaxed">
+                        <strong className="text-indigo-900 font-bold">How Per-Regime Gate Adaptation Works:</strong> Select a Market Regime below to customize gate modes (STRICT, Weighted, or Bypassed). Gates left on <strong className="text-slate-800 font-bold">Default</strong> will automatically fall back to your <strong className="text-slate-800 font-bold">Global Static Gate Parameters</strong>.
+                      </p>
                     </div>
 
                     {/* Per-Regime Gate Custom Override Matrix */}
-                    <div className="mt-4 pt-3 border-t border-indigo-100 space-y-3">
+                    <div className="mt-2 space-y-3">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                         <div>
                           <span className="text-xs font-bold text-slate-800 uppercase font-sans">

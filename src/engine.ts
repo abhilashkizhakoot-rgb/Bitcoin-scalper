@@ -2116,14 +2116,7 @@ class TradingEngine {
   }
 
   public getCurrentCheckpoints() {
-    const state = this.evaluateStrategyState();
-    return {
-      conditions: state.conditions,
-      entry_score: state.entry_score,
-      signal_direction: state.signal_direction,
-      all_conditions_met: state.all_conditions_met,
-      rejection_reason: state.rejection_reason,
-    };
+    return this.evaluateStrategyState();
   }
 
   // Fetch initial candles from Delta Exchange or Binance or generate realistic ones as fallback
@@ -6140,8 +6133,9 @@ class TradingEngine {
     const closes = this.candles1m.map((c) => c.close);
     if (closes.length < 50) return;
 
-    const lastIdx = closes.length - 1;
-    let currentClose = this.currentPrice;
+    if (false) {
+      const lastIdx = closes.length - 1;
+      let currentClose = this.currentPrice;
 
     const ema9 = this.calculateEMA(closes, 9);
     const ema21 = this.calculateEMA(closes, 21);
@@ -7058,34 +7052,30 @@ class TradingEngine {
     } else {
       failedConditions = conditions.filter((c) => !c.met).map((c) => c.name);
     }
+    }
 
     // Evaluate the strategy state from the single source of truth (Symmetry Protection)
     const state = this.evaluateStrategyState();
-    if (state) {
-      // Overwrite local scanner variables to guarantee 100% mathematical and logical symmetry with the UI checklist
-      conditions.length = 0;
-      conditions.push(...state.conditions);
-      entryScore = state.entry_score;
-      signalDirection = state.signal_direction;
-      allConditionsMet = state.all_conditions_met;
-      failedConditions.length = 0;
-      failedConditions.push(...state.failedConditions);
-      probabilityLong = state.probabilityLong;
-      avgSentiment = state.avgSentiment;
-      currentClose = state.currentClose;
-      adxValue = state.adxValue;
-      relVolume = state.relVolume;
-      confidenceScore = state.confidenceScore;
-      confidenceThreshold = state.confidenceThreshold;
-      isWeightedEnabled = state.isWeightedEnabled;
-      tacticalConfidenceMet = state.tacticalConfidenceMet;
-      safetyGates.length = 0;
-      safetyGates.push(...state.safetyGates);
-      tacticalGatesMap.length = 0;
-      tacticalGatesMap.push(...state.tacticalGatesMap);
-      activeWeights = state.activeWeights;
-      marketStructurePassed = state.marketStructurePassed;
-    }
+    const {
+      conditions,
+      entry_score: entryScore,
+      signal_direction: signalDirection,
+      all_conditions_met: allConditionsMet,
+      failedConditions,
+      probabilityLong,
+      avgSentiment,
+      currentClose,
+      adxValue,
+      relVolume,
+      confidenceScore,
+      confidenceThreshold,
+      isWeightedEnabled,
+      tacticalConfidenceMet,
+      safetyGates,
+      tacticalGatesMap,
+      activeWeights,
+      marketStructurePassed,
+    } = state;
 
     // Write to trade_block_log backend file every 1 minute
     if (config.general.enable_block_logging !== false) {

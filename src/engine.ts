@@ -1309,19 +1309,28 @@ class TradingEngine {
     } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
       signalDirection = "NEUTRAL";
     } else {
-      // --- TREND-FOLLOWING LOGIC RESTRICTED TO 20/50 EMA PUSHBACKS ---
-      const recentCandles = this.candles1m.slice(-8);
+      // --- ENHANCED INTELLIGENT ENTRY SIGNAL DETECTION & PULLBACK PROXIMITY ---
+      const recentCandles = this.candles1m.slice(-10);
 
-      const recentPullbackToEma20Long = recentCandles.some(c => c.low <= ema20Val * 1.0015 && c.high >= ema20Val * 0.9985);
-      const recentPullbackToEma50Long = recentCandles.some(c => c.low <= ema50Val * 1.0015 && c.high >= ema50Val * 0.9985);
-      const hasValidPushbackLong = (recentPullbackToEma20Long || recentPullbackToEma50Long) && currentPrice >= ema50Val * 0.998;
+      const recentPullbackToEma9Long = recentCandles.some(c => c.low <= ema9[lastIdx] * 1.0025 && c.high >= ema9[lastIdx] * 0.9975);
+      const recentPullbackToEma20Long = recentCandles.some(c => c.low <= ema20Val * 1.0030 && c.high >= ema20Val * 0.9970);
+      const recentPullbackToEma50Long = recentCandles.some(c => c.low <= ema50Val * 1.0030 && c.high >= ema50Val * 0.9970);
+      const recentPullbackToVwapLong = recentCandles.some(c => c.low <= vwapVal * 1.0030 && c.high >= vwapVal * 0.9970);
 
-      const recentPullbackToEma20Short = recentCandles.some(c => c.high >= ema20Val * 0.9985 && c.low <= ema20Val * 1.0015);
-      const recentPullbackToEma50Short = recentCandles.some(c => c.high >= ema50Val * 0.9985 && c.low <= ema50Val * 1.0015);
-      const hasValidPushbackShort = (recentPullbackToEma20Short || recentPullbackToEma50Short) && currentPrice <= ema50Val * 1.002;
+      const recentPullbackToEma9Short = recentCandles.some(c => c.high >= ema9[lastIdx] * 0.9975 && c.low <= ema9[lastIdx] * 1.0025);
+      const recentPullbackToEma20Short = recentCandles.some(c => c.high >= ema20Val * 0.9970 && c.low <= ema20Val * 1.0030);
+      const recentPullbackToEma50Short = recentCandles.some(c => c.high >= ema50Val * 0.9970 && c.low <= ema50Val * 1.0030);
+      const recentPullbackToVwapShort = recentCandles.some(c => c.high >= vwapVal * 0.9970 && c.low <= vwapVal * 1.0030);
 
-      isUptrendAligned = ema20Val > ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val > ema100Val);
-      isDowntrendAligned = ema20Val < ema50Val && (adxValue >= ms.hf_momentum_adx_threshold || ema50Val < ema100Val);
+      const pbStatus = this.detectPullbackTrendlineBreak();
+      const isPbBreakoutLong = pbStatus.isLongBreak;
+      const isPbBreakoutShort = pbStatus.isShortBreak;
+
+      const hasValidPushbackLong = (recentPullbackToEma9Long || recentPullbackToEma20Long || recentPullbackToEma50Long || recentPullbackToVwapLong || isPbBreakoutLong) && currentPrice >= ema50Val * 0.996;
+      const hasValidPushbackShort = (recentPullbackToEma9Short || recentPullbackToEma20Short || recentPullbackToEma50Short || recentPullbackToVwapShort || isPbBreakoutShort) && currentPrice <= ema50Val * 1.004;
+
+      isUptrendAligned = ema20Val > ema50Val && (adxValue >= (ms.hf_momentum_adx_threshold || 20) || ema50Val > ema100Val);
+      isDowntrendAligned = ema20Val < ema50Val && (adxValue >= (ms.hf_momentum_adx_threshold || 20) || ema50Val < ema100Val);
 
       // For high-frequency scalping, we allow breakouts (momentum chasing) if ADX is strong or there is high order flow pressure
       const isScalperBreakoutLongAllowed = adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long);
@@ -1330,9 +1339,14 @@ class TradingEngine {
       const isNotLongBreakout = isScalperBreakoutLongAllowed ? true : (struct.current_HH ? currentPrice <= struct.current_HH.price : true);
       const isNotShortBreakdown = isScalperBreakdownShortAllowed ? true : (struct.current_LL ? currentPrice >= struct.current_LL.price : true);
 
-      if (isUptrendAligned && (hasValidPushbackLong || isScalperBreakoutLongAllowed) && isNotLongBreakout && probabilityLong >= 0.65) {
+      // Multi-factor intelligent direction assessment
+      if (isUptrendAligned && (hasValidPushbackLong || isScalperBreakoutLongAllowed) && isNotLongBreakout && probabilityLong >= 0.58) {
         signalDirection = "LONG";
-      } else if (isDowntrendAligned && (hasValidPushbackShort || isScalperBreakdownShortAllowed) && isNotShortBreakdown && probabilityShort >= 0.65) {
+      } else if (isDowntrendAligned && (hasValidPushbackShort || isScalperBreakdownShortAllowed) && isNotShortBreakdown && probabilityShort >= 0.58) {
+        signalDirection = "SHORT";
+      } else if (isUptrendAligned && (probabilityLong >= 0.55 || (this.orderFlowStats.takerBuyRatio >= 0.54 && currentRsi >= 45))) {
+        signalDirection = "LONG";
+      } else if (isDowntrendAligned && (probabilityShort >= 0.55 || (this.orderFlowStats.takerBuyRatio <= 0.46 && currentRsi <= 55))) {
         signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
@@ -1353,26 +1367,26 @@ class TradingEngine {
       sub_conditions?: MarketStructureSubCondition[];
     }[] = [];
 
-    // C1: CatBoost AI Prediction (threshold is 0.50 leaning direction in RANGE_BOUND, 0.70 for pullback, 0.75 in trending breakouts)
+    // C1: CatBoost AI Prediction
     const pbTrendStatus = this.detectPullbackTrendlineBreak();
     const isEnteringPullback = signalDirection !== "NEUTRAL";
     const catboostThreshold = this.currentRegime === MarketRegime.RANGE_BOUND 
       ? 0.50 
-      : 0.70;
+      : (isEnteringPullback ? 0.58 : 0.65);
     const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold) : false;
     const pShortMet = signalDirection === "SHORT" ? (probabilityShort >= catboostThreshold) : false;
     conditions.push({
       name: "CatBoost AI Prediction",
       met: (signalDirection === "NEUTRAL") 
-        ? (probabilityLong >= (this.currentRegime === MarketRegime.RANGE_BOUND ? 0.50 : 0.75) || 
-           probabilityShort >= (this.currentRegime === MarketRegime.RANGE_BOUND ? 0.50 : 0.75)) 
+        ? (probabilityLong >= (this.currentRegime === MarketRegime.RANGE_BOUND ? 0.50 : 0.65) || 
+           probabilityShort >= (this.currentRegime === MarketRegime.RANGE_BOUND ? 0.50 : 0.65)) 
         : (pLongMet || pShortMet),
       current_value: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}% | P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%`,
       required: signalDirection === "LONG"
-        ? `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : (isEnteringPullback ? "70" : "75")}% (Evaluating LONG Trade)`
+        ? `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "58"}% (Evaluating LONG Trade)`
         : signalDirection === "SHORT"
-        ? `P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : (isEnteringPullback ? "70" : "75")}% (Evaluating SHORT Trade)`
-        : `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : (isEnteringPullback ? "70" : "75")}% for LONG OR P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : (isEnteringPullback ? "70" : "75")}% for SHORT (Mutually Exclusive)`,
+        ? `P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "58"}% (Evaluating SHORT Trade)`
+        : `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "65"}% for LONG OR P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "65"}% for SHORT (Mutually Exclusive)`,
       description: "Uses pre-trained ensemble trees mapping momentum, EMA spreads, and ATR volatility expansion.",
       priority: "CRITICAL",
     });

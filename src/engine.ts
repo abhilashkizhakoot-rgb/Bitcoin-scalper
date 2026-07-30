@@ -7206,11 +7206,48 @@ class TradingEngine {
 
     this.log(`🚀 SIGNAL TRIGGERED! Entering Delta Exchange ${direction} position...`);
 
-    // Dynamically calculate dynamic Stop Loss and Take Profit
+    // Dynamically calculate dynamic Stop Loss, Take Profit, and Confluence of Extremes (Exhaustion + Overextension)
     const closes = this.candles1m.map((c) => c.close);
     const currentPrice = this.currentPrice;
     const atr14 = this.calculateATR(this.candles1m, 14);
     const lastAtr = atr14[closes.length - 1] || 150;
+    const bb = this.calculateBollingerBands(closes, 20, 2);
+    const ema9 = this.calculateEMA(closes, 9);
+    const lastIdx = closes.length - 1;
+    const ema9Val = ema9[lastIdx] || currentPrice;
+    const struct = this.getTrendMarketStructure();
+
+    const stProfile = this.getVolumeProfileCached(this.candles1m.slice(-90), "st_1m");
+    const mtProfile = this.getVolumeProfileCached(this.aggregateCandles(this.candles1m, 5).slice(-120), "mt_5m");
+
+    // --- CONFLUENCE OF EXTREMES (EXHAUSTION + OVEREXTENSION) BLOCK ---
+    const rawImbalance = this.orderBookStats.imbalanceRatio;
+    const takerRatio = this.orderFlowStats.takerBuyRatio;
+
+    // Condition A (Order Flow Climax): Raw Imbalance > 85% or Taker ratio > 90% in direction of trade
+    const isConditionA = direction === "LONG"
+      ? (rawImbalance > 0.85 || takerRatio > 0.90)
+      : (rawImbalance < -0.85 || takerRatio < 0.10);
+
+    // Condition B (Physical Overextension): Entry Price physically outside Bollinger Bands OR distance to EMA 9 > 1.5 * ATR_14
+    const isOutsideBB = direction === "LONG" ? (currentPrice > bb.upper) : (currentPrice < bb.lower);
+    const distEma9 = Math.abs(currentPrice - ema9Val);
+    const isEmaOverextended = distEma9 > 1.5 * lastAtr;
+    const isConditionB = isOutsideBB || isEmaOverextended;
+
+    // Extreme Confluence: Parabolic & mathematically exhausted -> BLOCK ENTRY
+    if (isConditionA && isConditionB) {
+      this.log(
+        `⛔ [ENTRY BLOCKED - Confluence of Extremes] Late-stage exhaustion breakout detected! Order Flow Climax (Imbalance: ${(rawImbalance * 100).toFixed(1)}%, Taker: ${(takerRatio * 100).toFixed(1)}%) & Physical Overextension (Outside BB: ${isOutsideBB}, Dist to EMA9: $${distEma9.toFixed(2)} vs 1.5xATR $${(1.5 * lastAtr).toFixed(2)}). Trade entry aborted.`
+      );
+      return;
+    }
+
+    if (isConditionA && !isConditionB) {
+      this.log(`⚡ [High-Momentum Breakout Allowed]: Extreme Order Flow detected, but Price is not overextended. Executing Market Order.`);
+    } else if (isConditionB && !isConditionA) {
+      this.log(`📈 [Steady Trend Grind Allowed]: Price is overextended, but Order Flow is not climactic. Executing Market Order.`);
+    }
 
     // Apply Maximum ATR Cap for Stop Loss calculation if enabled
     let stopLossAtr = lastAtr;
@@ -7249,7 +7286,7 @@ class TradingEngine {
     const takeProfitPrice = direction === "LONG" ? currentPrice + takeProfitDistance : currentPrice - takeProfitDistance;
 
     this.log(
-      `Computed Execution Parameters: Entry=$${currentPrice}, StopLoss=$${stopLossPrice.toFixed(2)} (Dist: $${actualSLDistance.toFixed(
+      `Computed Execution Parameters: Entry=$${currentPrice.toFixed(2)}, StopLoss=$${stopLossPrice.toFixed(2)} (Dist: $${actualSLDistance.toFixed(
         2
       )}), TakeProfit=$${takeProfitPrice.toFixed(2)} (Dist: $${takeProfitDistance.toFixed(
         2
@@ -7303,8 +7340,8 @@ class TradingEngine {
 
     // If live account mode is enabled, execute real-time order placement on Delta Exchange!
     if (!dbManager.isPaperMode()) {
-      this.log(`📡 Dispatching real market order to Delta Exchange REST API...`);
       const side = direction === "LONG" ? "buy" : "sell";
+      this.log(`📡 Dispatching real market order to Delta Exchange REST API...`);
       placeDeltaMarketOrder(creds, "BTCUSD", side, positionQtyBtc).then((res) => {
         if (res.success) {
           this.log(`✅ Delta Exchange order matched successfully! Order ID: ${res.order_id}`);
@@ -7315,7 +7352,6 @@ class TradingEngine {
               delta_response: res.response_data,
             }
           });
-          // Immediately sync balance
           getDeltaWalletBalance(creds).then((liveBal) => {
             if (liveBal !== null) {
               dbManager.updateCredentials({

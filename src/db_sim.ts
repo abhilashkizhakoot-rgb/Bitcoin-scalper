@@ -246,6 +246,10 @@ const DEFAULT_CONFIG: StrategyConfig = {
     crossover_only_lookback_candles: 5,
     timeframe_minutes: 5,
     very_high_probability_threshold: 0.82,
+    liquidity_sweep_enabled: true,
+    liquidity_sweep_lookback_candles: 20,
+    liquidity_sweep_min_wick_ratio: 0.35,
+    liquidity_sweep_volume_mult: 1.0,
   },
   gate_scoring: {
     enabled: true,
@@ -1140,6 +1144,10 @@ class DatabaseManager {
       if (ms.crossover_only_lookback_candles === undefined) { ms.crossover_only_lookback_candles = def.crossover_only_lookback_candles !== undefined ? def.crossover_only_lookback_candles : 5; changed = true; }
       if (ms.timeframe_minutes === undefined) { ms.timeframe_minutes = def.timeframe_minutes || 5; changed = true; }
       if (ms.very_high_probability_threshold === undefined) { ms.very_high_probability_threshold = def.very_high_probability_threshold || 0.82; changed = true; }
+      if (ms.liquidity_sweep_enabled === undefined) { ms.liquidity_sweep_enabled = def.liquidity_sweep_enabled !== undefined ? def.liquidity_sweep_enabled : true; changed = true; }
+      if (ms.liquidity_sweep_lookback_candles === undefined) { ms.liquidity_sweep_lookback_candles = def.liquidity_sweep_lookback_candles || 20; changed = true; }
+      if (ms.liquidity_sweep_min_wick_ratio === undefined) { ms.liquidity_sweep_min_wick_ratio = def.liquidity_sweep_min_wick_ratio || 0.35; changed = true; }
+      if (ms.liquidity_sweep_volume_mult === undefined) { ms.liquidity_sweep_volume_mult = def.liquidity_sweep_volume_mult || 1.0; changed = true; }
     }
 
     if (!this.cache?.config?.gate_scoring) {

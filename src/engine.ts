@@ -1339,8 +1339,15 @@ class TradingEngine {
       const isNotLongBreakout = isScalperBreakoutLongAllowed ? true : (struct.current_HH ? currentPrice <= struct.current_HH.price : true);
       const isNotShortBreakdown = isScalperBreakdownShortAllowed ? true : (struct.current_LL ? currentPrice >= struct.current_LL.price : true);
 
-      // Multi-factor intelligent direction assessment
-      if (isUptrendAligned && (hasValidPushbackLong || isScalperBreakoutLongAllowed) && isNotLongBreakout && probabilityLong >= 0.58) {
+      // Multi-factor intelligent direction assessment (including Liquidity Sweep Setup 3)
+      const longSweepSignal = this.detectLiquiditySweep("LONG");
+      const shortSweepSignal = this.detectLiquiditySweep("SHORT");
+
+      if (longSweepSignal.isSweep && probabilityLong >= 0.50) {
+        signalDirection = "LONG";
+      } else if (shortSweepSignal.isSweep && probabilityShort >= 0.50) {
+        signalDirection = "SHORT";
+      } else if (isUptrendAligned && (hasValidPushbackLong || isScalperBreakoutLongAllowed) && isNotLongBreakout && probabilityLong >= 0.58) {
         signalDirection = "LONG";
       } else if (isDowntrendAligned && (hasValidPushbackShort || isScalperBreakdownShortAllowed) && isNotShortBreakdown && probabilityShort >= 0.58) {
         signalDirection = "SHORT";
@@ -1427,7 +1434,14 @@ class TradingEngine {
     const standardAdxThreshold = trendAlignAdx;
     const softenedAdxThreshold = standardAdxThreshold * (1 - softeningPercent / 100);
 
-    if (this.currentRegime === MarketRegime.RANGE_BOUND) {
+    const activeSweepSignal = signalDirection !== "NEUTRAL" ? this.detectLiquiditySweep(signalDirection) : { isSweep: false };
+
+    if (activeSweepSignal.isSweep) {
+      trendAligned = true;
+      adxMet = true;
+      currentTrendStr = "PASSING (Bypassed via Liquidity Sweep Reversal Setup 3)";
+      requiredStr = "Liquidity Sweep Setup Active";
+    } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       if (signalDirection === "LONG") {
         trendAligned = !isBearAligned;
         currentTrendStr = isBearAligned ? "BLOCKED: STRONGLY BEARISH" : "PASSING (Not strongly bearish)";
@@ -3558,6 +3572,7 @@ class TradingEngine {
       "Volume-Validated Pullback": { status: "SKIP", reason: "Not evaluated." },
       "Pullback & Retest Setup (Setup 1)": { status: "SKIP", reason: "Not evaluated." },
       "EMA Retracement / Pushback Setup (Setup 2)": { status: "SKIP", reason: "Not evaluated." },
+      "Liquidity Sweep Setup (Setup 3)": { status: "SKIP", reason: "Not evaluated." },
     };
 
     const getReturnObj = (confirmed: boolean, message: string) => {
@@ -3612,6 +3627,25 @@ class TradingEngine {
         sub_conditions,
       };
     };
+
+    // --- FEATURE 5: Liquidity Sweep Setup (Setup 3) Check ---
+    const sweepResult = this.detectLiquiditySweep(direction);
+    if (sweepResult.isSweep) {
+      condDict["Liquidity Sweep Setup (Setup 3)"] = { status: "PASS", reason: sweepResult.description };
+      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Liquidity Sweep Reversal Setup" };
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Liquidity sweep confirmed at level $${sweepResult.sweptLevel.toFixed(2)}` };
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: `Reclaimed with ${sweepResult.wickRatio.toFixed(0)}% wick` };
+      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Sweep reversal entry" };
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "Reclamation intact" };
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Sweep reversal candle" };
+      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: `Confirmed volume expansion (${sweepResult.volumeMult.toFixed(1)}x)` };
+      condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Bypassed for Liquidity Sweep Setup" };
+
+      return getReturnObj(
+        true,
+        `[Setup 3 - Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`
+      );
+    }
 
     const hasHighHFPressure = adxValue >= (ms.hf_momentum_adx_threshold + 2) || 
       (direction === "LONG" 
@@ -4301,6 +4335,123 @@ class TradingEngine {
         return getReturnObj(false, failureReason);
       }
     }
+  }
+
+  public detectLiquiditySweep(direction: "LONG" | "SHORT" | "NEUTRAL"): {
+    isSweep: boolean;
+    sweptLevel: number;
+    reclaimPrice: number;
+    wickRatio: number;
+    volumeMult: number;
+    description: string;
+  } {
+    if (direction === "NEUTRAL") {
+      return { isSweep: false, sweptLevel: 0, reclaimPrice: 0, wickRatio: 0, volumeMult: 0, description: "Neutral direction" };
+    }
+
+    const config = dbManager.getConfig();
+    const ms: any = config.market_structure || {};
+    if (ms.liquidity_sweep_enabled === false) {
+      return { isSweep: false, sweptLevel: 0, reclaimPrice: 0, wickRatio: 0, volumeMult: 0, description: "Liquidity sweep strategy disabled in config" };
+    }
+
+    const lookback = ms.liquidity_sweep_lookback_candles || 20;
+    const minWickRatio = ms.liquidity_sweep_min_wick_ratio || 0.35;
+    const reqVolMult = ms.liquidity_sweep_volume_mult || 1.0;
+
+    if (this.candles1m.length < lookback + 2) {
+      return { isSweep: false, sweptLevel: 0, reclaimPrice: 0, wickRatio: 0, volumeMult: 0, description: "Insufficient candle history" };
+    }
+
+    const lastIdx = this.candles1m.length - 1;
+    const currentCandle = this.candles1m[lastIdx];
+    const struct = this.getTrendMarketStructure();
+
+    // Calculate average volume over recent 20 candles
+    const volumes = this.candles1m.map(c => c.volume);
+    const sumVol = volumes.slice(-20).reduce((a, b) => a + b, 0);
+    const avgVol = volumes.length >= 20 ? sumVol / 20 : 1.0;
+
+    // We inspect the last 3 candles for a sweep event
+    const recentCandles = this.candles1m.slice(-3);
+
+    if (direction === "LONG") {
+      // Find range low over lookback
+      const rangeCandles = this.candles1m.slice(-lookback - 1, -1);
+      const rangeLow = rangeCandles.length > 0 ? Math.min(...rangeCandles.map(c => c.low)) : struct.swingLow;
+
+      const levelsToTest = Array.from(new Set([
+        struct.swingLow,
+        struct.prev_LL ? struct.prev_LL.price : 0,
+        struct.current_LL ? struct.current_LL.price : 0,
+        struct.current_HL ? struct.current_HL.price : 0,
+        rangeLow,
+      ])).filter(p => p > 0);
+
+      for (const level of levelsToTest) {
+        // Find if any candle in recent 3 candles pierced below level
+        const sweepCandle = recentCandles.find(c => c.low < level * 0.9998);
+        if (sweepCandle) {
+          // Reclaimed: current price / candle close is back above (or at) the swept level
+          if (currentCandle.close >= level * 0.9995) {
+            const range = sweepCandle.high - sweepCandle.low;
+            const lowerWick = Math.min(sweepCandle.open, sweepCandle.close) - sweepCandle.low;
+            const wickRatio = range > 0 ? lowerWick / range : 0;
+            const volMult = avgVol > 0 ? sweepCandle.volume / avgVol : 1.0;
+
+            if (wickRatio >= minWickRatio && volMult >= reqVolMult * 0.8) {
+              return {
+                isSweep: true,
+                sweptLevel: level,
+                reclaimPrice: currentCandle.close,
+                wickRatio: wickRatio * 100,
+                volumeMult: volMult,
+                description: `Bullish Liquidity Sweep: Price pierced support level $${level.toFixed(2)} (low $${sweepCandle.low.toFixed(2)}), then reclaimed $${currentCandle.close.toFixed(2)} with ${(wickRatio * 100).toFixed(0)}% lower wick and ${volMult.toFixed(1)}x volume.`,
+              };
+            }
+          }
+        }
+      }
+    } else if (direction === "SHORT") {
+      // Find range high over lookback
+      const rangeCandles = this.candles1m.slice(-lookback - 1, -1);
+      const rangeHigh = rangeCandles.length > 0 ? Math.max(...rangeCandles.map(c => c.high)) : struct.swingHigh;
+
+      const levelsToTest = Array.from(new Set([
+        struct.swingHigh,
+        struct.prev_HH ? struct.prev_HH.price : 0,
+        struct.current_HH ? struct.current_HH.price : 0,
+        struct.current_LH ? struct.current_LH.price : 0,
+        rangeHigh,
+      ])).filter(p => p > 0);
+
+      for (const level of levelsToTest) {
+        // Find if any candle in recent 3 candles pierced above level
+        const sweepCandle = recentCandles.find(c => c.high > level * 1.0002);
+        if (sweepCandle) {
+          // Reclaimed: current price / candle close is back below (or at) the swept level
+          if (currentCandle.close <= level * 1.0005) {
+            const range = sweepCandle.high - sweepCandle.low;
+            const upperWick = sweepCandle.high - Math.max(sweepCandle.open, sweepCandle.close);
+            const wickRatio = range > 0 ? upperWick / range : 0;
+            const volMult = avgVol > 0 ? sweepCandle.volume / avgVol : 1.0;
+
+            if (wickRatio >= minWickRatio && volMult >= reqVolMult * 0.8) {
+              return {
+                isSweep: true,
+                sweptLevel: level,
+                reclaimPrice: currentCandle.close,
+                wickRatio: wickRatio * 100,
+                volumeMult: volMult,
+                description: `Bearish Liquidity Sweep: Price pierced resistance level $${level.toFixed(2)} (high $${sweepCandle.high.toFixed(2)}), then reclaimed $${currentCandle.close.toFixed(2)} with ${(wickRatio * 100).toFixed(0)}% upper wick and ${volMult.toFixed(1)}x volume.`,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    return { isSweep: false, sweptLevel: 0, reclaimPrice: 0, wickRatio: 0, volumeMult: 0, description: "No liquidity sweep detected" };
   }
 
   private validateRangeBreakout(

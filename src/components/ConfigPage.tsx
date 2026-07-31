@@ -31,15 +31,11 @@ const AVAILABLE_GATES = [
   { id: "regime", label: "Market Regime Lock", supportsWeight: true },
   { id: "trend", label: "Exponential Trend Alignment", supportsWeight: true },
   { id: "volume", label: "Relative Volume Confirmation", supportsWeight: true },
-  { id: "limit", label: "Daily Trade Count Limit", supportsWeight: false },
+  { id: "preflight", label: "Pre-Flight Account & Operational Safety Gate", supportsWeight: false },
   { id: "adx", label: "ADX Trend Strength Filter", supportsWeight: true },
-  { id: "equity", label: "Minimum Account Equity Check", supportsWeight: false },
-  { id: "credentials", label: "Exchange API Credentials Validation", supportsWeight: false },
-  { id: "cooldown", label: "Loss Streak Cooldown Protection", supportsWeight: false },
   { id: "timing", label: "Optimal Session Timing Window Check (IST)", supportsWeight: false },
-  { id: "vwap", label: "VWAP Deviation Anchor Check", supportsWeight: true },
+  { id: "value_extension", label: "Unified Value Extension Anchor", supportsWeight: true },
   { id: "wedge", label: "Wedge Pattern Filter", supportsWeight: true },
-  { id: "ema100", label: "EMA 100 Overextension Protection", supportsWeight: true },
   { id: "structure", label: "Market Structure Confirmation", supportsWeight: false },
   { id: "orderflow", label: "Binance Order Flow Confirmation", supportsWeight: true },
   { id: "squeeze", label: "Volatility Compression (Squeeze) Filter", supportsWeight: true },
@@ -217,8 +213,8 @@ export default function ConfigPage({
         order_book_max_imbalance: 0.35,
         order_book_max_spoof_risk: 70,
         required_gates: [
-          "catboost", "regime", "trend", "volume", "limit", "adx", "equity", "credentials",
-          "cooldown", "timing", "vwap", "wedge", "ema100", "structure", "orderflow", "squeeze",
+          "catboost", "regime", "trend", "volume", "preflight", "adx",
+          "timing", "value_extension", "wedge", "structure", "orderflow", "squeeze",
           "orderbook", "volume_profile", "atr", "regime_cooldown"
         ],
         regime_macro_slope_lookback: 5,
@@ -472,7 +468,7 @@ export default function ConfigPage({
     
     // Calculate new mandatory gates list
     let currentMandatory = generalConfig.mandatory_gates ? [...generalConfig.mandatory_gates] : [
-      "limit", "equity", "credentials", "cooldown", "timing", "structure", "atr", "regime_cooldown"
+      "preflight", "timing", "structure", "atr", "regime_cooldown"
     ];
     if (mode === "MANDATORY") {
       if (!currentMandatory.includes(gateId)) currentMandatory.push(gateId);

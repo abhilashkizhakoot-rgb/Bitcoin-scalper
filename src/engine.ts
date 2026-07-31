@@ -372,6 +372,8 @@ class TradingEngine {
 
   private getGateIdByName(name: string): string {
     const n = name.toLowerCase();
+    if (n.includes("pre-flight") || n.includes("preflight") || n.includes("operational safety")) return "preflight";
+    if (n.includes("value extension") || n.includes("z-score") || n.includes("z_dist") || n.includes("overextension") || n.includes("vwap deviation") || (n.includes("vwap") && !n.includes("ema")) || n.includes("ema 100") || n.includes("ema100")) return "value_extension";
     if (n.includes("catboost")) return "catboost";
     if (n.includes("regime transition") || n.includes("regime_cooldown")) return "regime_cooldown";
     if (n.includes("regime") && !n.includes("transition")) return "regime";
@@ -379,20 +381,15 @@ class TradingEngine {
     if (n.includes("sentiment")) return "sentiment";
     if (n.includes("volume") && !n.includes("volume profiling")) return "volume";
     if (n.includes("news")) return "news";
-    if (n.includes("limit")) return "limit";
+    if (n.includes("limit") || n.includes("equity") || n.includes("credentials") || (n.includes("cooldown") && !n.includes("regime"))) return "preflight";
     if (n.includes("adx")) return "adx";
-    if (n.includes("equity")) return "equity";
-    if (n.includes("credentials")) return "credentials";
-    if (n.includes("loss streak cooldown") || n.includes("cooldown")) return "cooldown";
     if (n.includes("timing")) return "timing";
-    if (n.includes("vwap deviation") || (n.includes("vwap") && !n.includes("ema"))) return "vwap";
     if (n.includes("wedge")) return "wedge";
     if (n.includes("order flow") || n.includes("orderflow")) return "orderflow";
     if (n.includes("squeeze")) return "squeeze";
     if (n.includes("imbalance") || n.includes("orderbook")) return "orderbook";
     if (n.includes("atr")) return "atr";
     if (n.includes("volume profiling") || n.includes("volume_profile")) return "volume_profile";
-    if (n.includes("ema 100") || n.includes("ema")) return "ema100";
     if (n.includes("structure")) return "structure";
     return n;
   }
@@ -408,6 +405,16 @@ class TradingEngine {
       if (customRegimeOverride.mandatory_gates?.includes(gateId)) return "MANDATORY";
       if (customRegimeOverride.weighted_gates?.includes(gateId)) return "WEIGHTED";
       if (customRegimeOverride.bypassed_gates?.includes(gateId)) return "BYPASSED";
+      if (gateId === "preflight") {
+        if (customRegimeOverride.mandatory_gates?.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g))) return "MANDATORY";
+        if (customRegimeOverride.weighted_gates?.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g))) return "WEIGHTED";
+        if (customRegimeOverride.bypassed_gates?.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g))) return "BYPASSED";
+      }
+      if (gateId === "value_extension") {
+        if (customRegimeOverride.mandatory_gates?.some(g => ["vwap", "ema100", "overextension", "value_extension"].includes(g))) return "MANDATORY";
+        if (customRegimeOverride.weighted_gates?.some(g => ["vwap", "ema100", "overextension", "value_extension"].includes(g))) return "WEIGHTED";
+        if (customRegimeOverride.bypassed_gates?.some(g => ["vwap", "ema100", "overextension", "value_extension"].includes(g))) return "BYPASSED";
+      }
     }
 
     // Falls back to Global Static Gate Parameters when no custom override is specified for this gate/regime
@@ -421,7 +428,10 @@ class TradingEngine {
     if (adaptiveStatus === "WEIGHTED" || adaptiveStatus === "BYPASSED") return false;
 
     const mandatory = config.general.mandatory_gates || [];
-    return mandatory.includes(gateId);
+    if (mandatory.includes(gateId)) return true;
+    if (gateId === "preflight" && mandatory.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g))) return true;
+    if (gateId === "value_extension" && mandatory.some(g => ["vwap", "ema100", "overextension", "value_extension"].includes(g))) return true;
+    return false;
   }
 
   private isGateWeighted(config: StrategyConfig, name: string): boolean {
@@ -431,7 +441,10 @@ class TradingEngine {
     if (adaptiveStatus === "MANDATORY" || adaptiveStatus === "BYPASSED") return false;
 
     const weighted = config.general.weighted_gates || [];
-    return weighted.includes(gateId);
+    if (weighted.includes(gateId)) return true;
+    if (gateId === "preflight" && weighted.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g))) return true;
+    if (gateId === "value_extension" && weighted.some(g => ["vwap", "ema100", "overextension", "value_extension"].includes(g))) return true;
+    return false;
   }
 
   private isGateActive(config: StrategyConfig, name: string): boolean {
@@ -443,7 +456,16 @@ class TradingEngine {
     if (config.general.mandatory_gates || config.general.weighted_gates) {
       const mandatory = config.general.mandatory_gates || [];
       const weighted = config.general.weighted_gates || [];
-      return mandatory.includes(gateId) || weighted.includes(gateId);
+      if (mandatory.includes(gateId) || weighted.includes(gateId)) return true;
+      if (gateId === "preflight" && (
+        mandatory.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g)) ||
+        weighted.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g))
+      )) return true;
+      if (gateId === "value_extension" && (
+        mandatory.some(g => ["vwap", "ema100", "overextension", "value_extension"].includes(g)) ||
+        weighted.some(g => ["vwap", "ema100", "overextension", "value_extension"].includes(g))
+      )) return true;
+      return false;
     }
     return this.isGateRequiredLegacy(config, name);
   }
@@ -1429,41 +1451,6 @@ class TradingEngine {
       };
     }
 
-    const lossCooldownPre = this.getConsecutiveLossesCooldownStatus();
-    if (lossCooldownPre.active) {
-      return {
-        conditions: [
-          {
-            name: "Loss Streak Cooldown Protection",
-            met: false,
-            current_value: `COOLDOWN ACTIVE (${Math.ceil(lossCooldownPre.remainingSeconds / 60)}m left)`,
-            required: "No active cooldown from loss streak",
-            description: "Trading paused due to consecutive losses.",
-            priority: "CRITICAL" as const,
-          },
-        ],
-        entry_score: 0,
-        signal_direction: signalDirection,
-        all_conditions_met: false,
-        rejection_reason: "Loss Streak Cooldown: Trading temporarily paused.",
-        probabilityLong,
-        probabilityShort,
-        avgSentiment: 0,
-        currentClose: currentPrice,
-        adxValue,
-        relVolume,
-        failedConditions: ["Loss Streak Cooldown Protection"],
-        confidenceScore: 0,
-        confidenceThreshold: 70,
-        isWeightedEnabled: false,
-        tacticalConfidenceMet: false,
-        safetyGates: ["Loss Streak Cooldown Protection"],
-        tacticalGatesMap: [],
-        activeWeights: {},
-        marketStructurePassed: false,
-      };
-    }
-
     const conditions: {
       name: string;
       met: boolean;
@@ -1619,46 +1606,40 @@ class TradingEngine {
       softened: isRelVolumeSoftened,
     });
 
-    // C7: Daily Circuit Breaker
+    // Consolidated Pre-Flight Account & Operational Safety Gate (Capital Balance, API Status, Daily Trade Limit, Loss Cooldown)
     const timestamp = new Date().toISOString();
     const tradesToday = dbManager.getTrades().filter(
       (t) => t.entry_timestamp.split("T")[0] === timestamp.split("T")[0]
     );
-    const cbDailyTradesPass = tradesToday.length < config.general.max_trades_per_day;
-    conditions.push({
-      name: "Daily Trade Count Limit",
-      met: cbDailyTradesPass,
-      current_value: `${tradesToday.length} trades`,
-      required: `< ${config.general.max_trades_per_day} trades/day`,
-      description: "Risk mitigation ceiling to prevent overtrading and revenge trading sessions.",
-      priority: "CRITICAL",
-    });
+    const maxDailyTrades = config.general.max_trades_per_day;
+    const cbDailyTradesPass = tradesToday.length < maxDailyTrades;
 
-    // C9 & C10 Combined: Account Equity & API Connection Verification
-    const balance = dbManager.getCredentials().account_balance_usdt;
-    const hasMinEquity = balance >= 100;
     const apiCreds = dbManager.getCredentials();
+    const balance = apiCreds.account_balance_usdt;
+    const hasMinEquity = balance >= 100;
     const hasValidCreds = dbManager.isPaperMode() || (!!apiCreds.api_key && !!apiCreds.api_secret);
 
-    conditions.push({
-      name: "Account Equity & API Connection Verification",
-      met: hasMinEquity && hasValidCreds,
-      current_value: `Balance: $${balance.toFixed(2)} USDT | API: ${dbManager.isPaperMode() ? "PAPER MODE ACTIVE" : (hasValidCreds ? "KEYS CONFIGURED" : "MISSING KEYS")}`,
-      required: "Balance >= $100.00 USDT and valid live connection keys or Paper Mode active",
-      description: "Ensures portfolio has sufficient margin buffer and API credentials are ready to route orders.",
-      priority: "CRITICAL",
-    });
-
-    // C11: Consecutive Losses Cooldown Protection
     const lossCooldown = this.getConsecutiveLossesCooldownStatus();
+    const lossCooldownPass = !lossCooldown.active;
+
+    const preFlightAllPass = cbDailyTradesPass && hasMinEquity && hasValidCreds && lossCooldownPass;
+
+    const preFlightFailedDetails: string[] = [];
+    if (!hasMinEquity) preFlightFailedDetails.push(`Equity ($${balance.toFixed(2)} < $100.00 USDT)`);
+    if (!hasValidCreds) preFlightFailedDetails.push("API keys missing");
+    if (!cbDailyTradesPass) preFlightFailedDetails.push(`Daily trade limit reached (${tradesToday.length}/${maxDailyTrades})`);
+    if (!lossCooldownPass) preFlightFailedDetails.push(`Loss streak cooldown active (${Math.ceil(lossCooldown.remainingSeconds / 60)}m left)`);
+
+    const preFlightStatusStr = preFlightAllPass
+      ? `PASSING | Balance: $${balance.toFixed(2)} USDT | API: ${dbManager.isPaperMode() ? "PAPER MODE ACTIVE" : "KEYS CONFIGURED"} | Daily Trades: ${tradesToday.length}/${maxDailyTrades} | Cooldown: Clear`
+      : `BLOCKED: ${preFlightFailedDetails.join(" | ")}`;
+
     conditions.push({
-      name: "Loss Streak Cooldown Protection",
-      met: !lossCooldown.active,
-      current_value: lossCooldown.active
-        ? `COOLDOWN (Streak: ${lossCooldown.consecutiveLosses}, ${Math.ceil(lossCooldown.remainingSeconds / 60)}m left)`
-        : "PASSING",
-      required: "No active cooldown from consecutive losses",
-      description: "Automated timeout that blocks trading after being hit by N consecutive losses to prevent emotional or algorithmic revenge trading.",
+      name: "Pre-Flight Account & Operational Safety Gate",
+      met: preFlightAllPass,
+      current_value: preFlightStatusStr,
+      required: "Balance >= $100.00 USDT, Valid API/Paper Mode, Trades < Daily Limit, No Active Loss Cooldown",
+      description: "Unified pre-flight safety check consolidating capital balance, API connection status, daily trade limit, and loss streak cooldown.",
       priority: "CRITICAL",
     });
 
@@ -1673,90 +1654,62 @@ class TradingEngine {
       priority: "HIGH",
     });
 
-    // C14 & C17 Combined: Overextension & Level Anchors (VWAP/EMA)
-    let vwapDevMet = signalDirection === "LONG"
-      ? currentPrice <= vwapUpperVal
-      : signalDirection === "SHORT"
-        ? currentPrice >= vwapLowerVal
-        : true;
-
-    // Optimize: In super strong trend breakouts or with extreme leading indicator momentum, bypass VWAP overextension lock
-    if (isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure) {
-      vwapDevMet = true;
-    }
-
+    // Unified Value Extension Anchor (VWAP Bands + EMA 100 Distance + Chasing Lookback Velocity into normalized Z-score distance Z_dist)
     const atr14 = hasEnoughData ? this.calculateATR(this.candles1m, 14) : [50];
     const currentAtr = atr14[lastIdx] || 50;
 
-    // Check for high movement in earlier short period (recent 10 candles)
+    // Component 1: VWAP Deviation Z-Score
+    const vwapStdDev = Math.max(Math.abs(vwapUpperVal - vwapVal), currentAtr);
+    const zVwap = (currentPrice - vwapVal) / vwapStdDev;
+
+    // Component 2: EMA 100 Distance Z-Score
+    const zEma = (currentPrice - ema100Val) / (1.5 * currentAtr);
+
+    // Component 3: 10-Bar Chasing Lookback Velocity Z-Score
     const shortLookback = 10;
-    let highMovementShort = false;
-    let shortMovementVal = 0;
+    let zChase = 0;
     if (this.candles1m.length >= shortLookback) {
-      const recentCandles = this.candles1m.slice(-shortLookback);
-      const recentHighs = recentCandles.map(c => c.high);
-      const recentLows = recentCandles.map(c => c.low);
-      const maxHigh = Math.max(...recentHighs);
-      const minLow = Math.min(...recentLows);
-      shortMovementVal = maxHigh - minLow;
-      highMovementShort = shortMovementVal > 1.8 * currentAtr;
+      const candle10Ago = this.candles1m[this.candles1m.length - shortLookback];
+      zChase = (currentPrice - candle10Ago.close) / (1.8 * currentAtr);
     }
 
-    const ema100Distance = currentPrice - ema100Val;
-    const maxAllowedDeviation = emaThreshold * currentAtr;
-    const isEma100OverextendedLong = currentPrice > ema100Val + maxAllowedDeviation;
-    const isEma100OverextendedShort = currentPrice < ema100Val - maxAllowedDeviation;
+    // Normalized Composite Z-Score Distance (Z_dist)
+    const zDist = 0.45 * zVwap + 0.35 * zEma + 0.20 * zChase;
 
-    let ema100Met = true;
-    let ema100ValStr = "PASSING (NORMAL DISTANCE)";
+    // Dynamic Z_dist Threshold based on Regime and Pressure
+    const baseZLimit = isTrending ? 2.20 : 2.00;
+    const maxZLimit = (isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure) ? 3.20 : baseZLimit;
 
-    if (hasExtremeRealtimePressure) {
-      ema100Met = true;
-      ema100ValStr = signalDirection === "LONG"
-        ? `PASSING (Extreme Leading Pressure Confirmed: Distance +$${ema100Distance.toFixed(2)})`
-        : `PASSING (Extreme Leading Pressure Confirmed: Distance -$${Math.abs(ema100Distance).toFixed(2)})`;
-    } else if (isTrending && !highMovementShort) {
-      ema100ValStr = `PASSING (No high momentum pulse in last 10 candles in Trending Regime)`;
-    } else {
-      if (signalDirection === "LONG") {
-        if (isSpecialSuperStrongTrendLogicActive) {
-          ema100Met = true;
-          ema100ValStr = `PASSING (Super Strong Trend Breakout Confirmed: Distance +$${ema100Distance.toFixed(2)})`;
-        } else if (isEma100OverextendedLong) {
-          ema100Met = false;
-          ema100ValStr = `OVEREXTENDED LONG: BLOCKED (Price: $${currentPrice.toFixed(2)} too far above 100 EMA)`;
-        } else {
-          ema100ValStr = `PASSING (Distance: +$${ema100Distance.toFixed(2)})`;
-        }
-      } else if (signalDirection === "SHORT") {
-        if (isSpecialSuperStrongTrendLogicActive) {
-          ema100Met = true;
-          ema100ValStr = `PASSING (Super Strong Trend Breakdown Confirmed: Distance -$${Math.abs(ema100Distance).toFixed(2)})`;
-        } else if (isEma100OverextendedShort) {
-          ema100Met = false;
-          ema100ValStr = `OVEREXTENDED SHORT: BLOCKED (Price: $${currentPrice.toFixed(2)} too far below 100 EMA)`;
-        } else {
-          ema100ValStr = `PASSING (Distance: -$${Math.abs(ema100Distance).toFixed(2)})`;
-        }
+    let isValueExtensionMet = true;
+    let isValueExtensionSoftened = false;
+
+    if (signalDirection === "LONG") {
+      if (zDist > maxZLimit) {
+        isValueExtensionMet = false;
+      } else if (zDist > baseZLimit && zDist <= maxZLimit) {
+        isValueExtensionSoftened = true;
+      }
+    } else if (signalDirection === "SHORT") {
+      if (zDist < -maxZLimit) {
+        isValueExtensionMet = false;
+      } else if (zDist < -baseZLimit && zDist >= -maxZLimit) {
+        isValueExtensionSoftened = true;
       }
     }
 
-    conditions.push({
-      name: "VWAP Deviation Anchor Check",
-      met: vwapDevMet,
-      current_value: vwapDevMet ? "PASSING" : "OVEREXTENDED",
-      required: "Price within dynamic VWAP standard deviation bands",
-      description: "Guards against entering trades when price is overextended relative to the VWAP standard deviation bands.",
-      priority: "CRITICAL",
-    });
+    const zDistFormatted = zDist >= 0 ? `+${zDist.toFixed(2)}` : zDist.toFixed(2);
+    const valueExtensionValStr = isValueExtensionMet
+      ? `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}σ, EMA100: ${zEma.toFixed(2)}σ, Chase: ${zChase.toFixed(2)}σ) | Status: PASSED${isValueExtensionSoftened ? " (SOFTENED BY MOMENTUM)" : ""}`
+      : `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}σ, EMA100: ${zEma.toFixed(2)}σ, Chase: ${zChase.toFixed(2)}σ) | EXHAUSTION BLOCKED (|Z_dist| > ${maxZLimit.toFixed(2)})`;
 
     conditions.push({
-      name: "EMA 100 Overextension Protection",
-      met: ema100Met,
-      current_value: ema100ValStr,
-      required: "Price not overextended relative to the 100 EMA baseline",
-      description: "Guards against buying the exact top or shorting the exact bottom relative to the 100 EMA baseline.",
+      name: "Unified Value Extension Anchor",
+      met: isValueExtensionMet,
+      current_value: valueExtensionValStr,
+      required: `Normalized Z-Score Distance (|Z_dist|) <= ${baseZLimit.toFixed(2)} from Fair Value Baseline`,
+      description: "Consolidates VWAP Bands, 100 EMA distance, and Chasing lookback into a single normalized Z-score distance (Z_dist) to eliminate conflicting overextension checks while blocking purchases at extreme exhaustion levels.",
       priority: "CRITICAL",
+      softened: isValueExtensionSoftened,
     });
 
     // C15: Market Structure & Entry Confirmation Check (Pullback, Retest, Reversal, High-Vol Confirmation)
@@ -2076,8 +2029,7 @@ class TradingEngine {
         trend_alignment: config.gate_scoring?.weights?.trend_alignment ?? 10,
         adx_strength: config.gate_scoring?.weights?.adx_strength ?? 5,
         relative_volume: config.gate_scoring?.weights?.relative_volume ?? 10,
-        overextension: config.gate_scoring?.weights?.overextension ?? 5,
-        ema100_overextension: config.gate_scoring?.weights?.ema100_overextension ?? 5,
+        overextension: (config.gate_scoring?.weights?.overextension ?? 5) + (config.gate_scoring?.weights?.ema100_overextension ?? 5),
         wedge_filter: config.gate_scoring?.weights?.wedge_filter ?? 5,
         order_flow: config.gate_scoring?.weights?.order_flow ?? 10,
         squeeze_filter: config.gate_scoring?.weights?.squeeze_filter ?? 5,
@@ -2117,8 +2069,7 @@ class TradingEngine {
         { condName: "Exponential Trend Alignment", weightKey: "trend_alignment" as const },
         { condName: "ADX Trend Strength Filter", weightKey: "adx_strength" as const },
         { condName: "Relative Volume Confirmation", weightKey: "relative_volume" as const },
-        { condName: "VWAP Deviation Anchor Check", weightKey: "overextension" as const },
-        { condName: "EMA 100 Overextension Protection", weightKey: "ema100_overextension" as const },
+        { condName: "Unified Value Extension Anchor", weightKey: "overextension" as const },
         { condName: "Wedge Pattern Filter", weightKey: "wedge_filter" as const },
         { condName: "Binance Order Flow Confirmation", weightKey: "order_flow" as const },
         { condName: "Volatility Compression (Squeeze) Filter", weightKey: "squeeze_filter" as const },

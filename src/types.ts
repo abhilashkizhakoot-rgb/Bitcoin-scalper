@@ -315,20 +315,32 @@ export interface StrategyConfig {
         trend_alignment_weight_boost: number;
         catboost_weight_boost: number;
         volume_profile_weight_boost?: number;
+        adx_strength_weight_boost?: number;
+        order_flow_weight_boost?: number;
+        squeeze_filter_weight_reduction?: number;
       };
       ranging: {
         order_flow_weight_boost: number;
         trend_alignment_weight_reduction: number;
         volume_profile_weight_boost?: number;
+        overextension_weight_boost?: number;
+        order_book_weight_boost?: number;
+        adx_strength_weight_reduction?: number;
       };
       high_volatility: {
         relative_volume_weight_boost: number;
         overextension_weight_boost: number;
         volume_profile_weight_boost?: number;
+        order_book_weight_boost?: number;
+        order_flow_weight_boost?: number;
+        trend_alignment_weight_reduction?: number;
       };
       low_volatility: {
         squeeze_filter_weight_boost: number;
         volume_profile_weight_boost?: number;
+        wedge_filter_weight_boost?: number;
+        relative_volume_weight_reduction?: number;
+        order_flow_weight_boost?: number;
       };
     };
   };

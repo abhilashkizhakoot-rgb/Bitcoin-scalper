@@ -2029,7 +2029,7 @@ class TradingEngine {
         trend_alignment: config.gate_scoring?.weights?.trend_alignment ?? 10,
         adx_strength: config.gate_scoring?.weights?.adx_strength ?? 5,
         relative_volume: config.gate_scoring?.weights?.relative_volume ?? 10,
-        overextension: (config.gate_scoring?.weights?.overextension ?? 5) + (config.gate_scoring?.weights?.ema100_overextension ?? 5),
+        overextension: config.gate_scoring?.weights?.overextension ?? 10,
         wedge_filter: config.gate_scoring?.weights?.wedge_filter ?? 5,
         order_flow: config.gate_scoring?.weights?.order_flow ?? 10,
         squeeze_filter: config.gate_scoring?.weights?.squeeze_filter ?? 5,
@@ -2038,10 +2038,10 @@ class TradingEngine {
       };
 
       const modifiers = config.gate_scoring?.adaptive_modifiers ?? {
-        trending: { trend_alignment_weight_boost: 10, catboost_weight_boost: 5, volume_profile_weight_boost: -5 },
-        ranging: { order_flow_weight_boost: 15, trend_alignment_weight_reduction: -10, volume_profile_weight_boost: 10 },
-        high_volatility: { relative_volume_weight_boost: 10, overextension_weight_boost: 10, volume_profile_weight_boost: 5 },
-        low_volatility: { squeeze_filter_weight_boost: 15, volume_profile_weight_boost: 0 },
+        trending: { trend_alignment_weight_boost: 10, catboost_weight_boost: 5, volume_profile_weight_boost: -5, adx_strength_weight_boost: 10, order_flow_weight_boost: 5, squeeze_filter_weight_reduction: -10 },
+        ranging: { order_flow_weight_boost: 15, trend_alignment_weight_reduction: -10, volume_profile_weight_boost: 10, overextension_weight_boost: 15, order_book_weight_boost: 10, adx_strength_weight_reduction: -10 },
+        high_volatility: { relative_volume_weight_boost: 10, overextension_weight_boost: 10, volume_profile_weight_boost: 5, order_book_weight_boost: 15, order_flow_weight_boost: 10, trend_alignment_weight_reduction: -5 },
+        low_volatility: { squeeze_filter_weight_boost: 15, volume_profile_weight_boost: 0, wedge_filter_weight_boost: 10, relative_volume_weight_reduction: -5, order_flow_weight_boost: 10 },
       };
 
       activeWeights = { ...baseWeights };
@@ -2050,17 +2050,29 @@ class TradingEngine {
         activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + (modifiers.trending?.trend_alignment_weight_boost ?? 10));
         activeWeights.catboost_ai = Math.max(0, activeWeights.catboost_ai + (modifiers.trending?.catboost_weight_boost ?? 5));
         activeWeights.volume_profile = Math.max(0, activeWeights.volume_profile + (modifiers.trending?.volume_profile_weight_boost ?? -5));
+        activeWeights.adx_strength = Math.max(0, activeWeights.adx_strength + (modifiers.trending?.adx_strength_weight_boost ?? 10));
+        activeWeights.order_flow = Math.max(0, activeWeights.order_flow + (modifiers.trending?.order_flow_weight_boost ?? 5));
+        activeWeights.squeeze_filter = Math.max(0, activeWeights.squeeze_filter + (modifiers.trending?.squeeze_filter_weight_reduction ?? -10));
       } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
         activeWeights.order_flow = Math.max(0, activeWeights.order_flow + (modifiers.ranging?.order_flow_weight_boost ?? 15));
         activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + (modifiers.ranging?.trend_alignment_weight_reduction ?? -10));
         activeWeights.volume_profile = Math.max(0, activeWeights.volume_profile + (modifiers.ranging?.volume_profile_weight_boost ?? 10));
+        activeWeights.overextension = Math.max(0, activeWeights.overextension + (modifiers.ranging?.overextension_weight_boost ?? 15));
+        activeWeights.order_book = Math.max(0, activeWeights.order_book + (modifiers.ranging?.order_book_weight_boost ?? 10));
+        activeWeights.adx_strength = Math.max(0, activeWeights.adx_strength + (modifiers.ranging?.adx_strength_weight_reduction ?? -10));
       } else if (this.currentRegime === MarketRegime.HIGH_VOLATILITY) {
         activeWeights.relative_volume = Math.max(0, activeWeights.relative_volume + (modifiers.high_volatility?.relative_volume_weight_boost ?? 10));
         activeWeights.overextension = Math.max(0, activeWeights.overextension + (modifiers.high_volatility?.overextension_weight_boost ?? 10));
         activeWeights.volume_profile = Math.max(0, activeWeights.volume_profile + (modifiers.high_volatility?.volume_profile_weight_boost ?? 5));
+        activeWeights.order_book = Math.max(0, activeWeights.order_book + (modifiers.high_volatility?.order_book_weight_boost ?? 15));
+        activeWeights.order_flow = Math.max(0, activeWeights.order_flow + (modifiers.high_volatility?.order_flow_weight_boost ?? 10));
+        activeWeights.trend_alignment = Math.max(0, activeWeights.trend_alignment + (modifiers.high_volatility?.trend_alignment_weight_reduction ?? -5));
       } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
         activeWeights.squeeze_filter = Math.max(0, activeWeights.squeeze_filter + (modifiers.low_volatility?.squeeze_filter_weight_boost ?? 15));
         activeWeights.volume_profile = Math.max(0, activeWeights.volume_profile + (modifiers.low_volatility?.volume_profile_weight_boost ?? 0));
+        activeWeights.wedge_filter = Math.max(0, activeWeights.wedge_filter + (modifiers.low_volatility?.wedge_filter_weight_boost ?? 10));
+        activeWeights.relative_volume = Math.max(0, activeWeights.relative_volume + (modifiers.low_volatility?.relative_volume_weight_reduction ?? -5));
+        activeWeights.order_flow = Math.max(0, activeWeights.order_flow + (modifiers.low_volatility?.order_flow_weight_boost ?? 10));
       }
 
       tacticalGatesMap = [

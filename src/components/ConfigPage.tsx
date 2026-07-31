@@ -124,29 +124,45 @@ export default function ConfigPage({
       trend_alignment: 10,
       adx_strength: 5,
       relative_volume: 10,
-      overextension: 5,
-      ema100_overextension: 5,
+      overextension: 10,
       wedge_filter: 5,
       order_flow: 10,
       squeeze_filter: 5,
       order_book: 5,
+      volume_profile: 10,
       ...((config.gate_scoring && config.gate_scoring.weights) || {}),
     },
     adaptive_modifiers: {
       trending: {
         trend_alignment_weight_boost: 10,
         catboost_weight_boost: 5,
+        volume_profile_weight_boost: -5,
+        adx_strength_weight_boost: 10,
+        order_flow_weight_boost: 5,
+        squeeze_filter_weight_reduction: -10,
       },
       ranging: {
         order_flow_weight_boost: 15,
         trend_alignment_weight_reduction: -10,
+        volume_profile_weight_boost: 10,
+        overextension_weight_boost: 15,
+        order_book_weight_boost: 10,
+        adx_strength_weight_reduction: -10,
       },
       high_volatility: {
         relative_volume_weight_boost: 10,
         overextension_weight_boost: 10,
+        volume_profile_weight_boost: 5,
+        order_book_weight_boost: 15,
+        order_flow_weight_boost: 10,
+        trend_alignment_weight_reduction: -5,
       },
       low_volatility: {
         squeeze_filter_weight_boost: 15,
+        volume_profile_weight_boost: 0,
+        wedge_filter_weight_boost: 10,
+        relative_volume_weight_reduction: -5,
+        order_flow_weight_boost: 10,
       },
     },
   });
@@ -3269,7 +3285,7 @@ export default function ConfigPage({
 
                   <div className="space-y-1.5">
                     <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
-                      <span>VWAP Deviation Anchor Check</span>
+                      <span>Unified Value Extension Anchor (Z-Score)</span>
                     </label>
                     <input
                       type="number"
@@ -3283,26 +3299,7 @@ export default function ConfigPage({
                       })}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
                     />
-                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of VWAP standard deviation band limits.</p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
-                      <span>EMA 100 Overextension Protection</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="0"
-                      max="100"
-                      value={gateScoringConfig.weights.ema100_overextension !== undefined ? gateScoringConfig.weights.ema100_overextension : 5}
-                      onChange={(e) => setGateScoringConfig({
-                        ...gateScoringConfig,
-                        weights: { ...gateScoringConfig.weights, ema100_overextension: Number(e.target.value) }
-                      })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
-                    />
-                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of 100 EMA deviation limits to prevent chasing tops/bottoms.</p>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of normalized Z-score distance from fair value (VWAP deviation + EMA 100 + velocity).</p>
                   </div>
 
                   <div className="space-y-1.5">
@@ -3412,7 +3409,7 @@ export default function ConfigPage({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {/* Trending Modifier */}
                   <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 space-y-3">
-                    <span className="text-xs font-semibold text-slate-700 block">Trending Conditions</span>
+                    <span className="text-xs font-semibold text-indigo-700 block uppercase tracking-wider">Trending Conditions</span>
                     <div className="space-y-3">
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
@@ -3438,7 +3435,7 @@ export default function ConfigPage({
                       </div>
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>CatBoost Weight Boost</span>
+                          <span>CatBoost AI Weight Boost</span>
                           <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.trending?.catboost_weight_boost ?? 5}%</span>
                         </label>
                         <input
@@ -3452,6 +3449,50 @@ export default function ConfigPage({
                               trending: {
                                 ...gateScoringConfig.adaptive_modifiers?.trending,
                                 catboost_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>ADX Trend Strength Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.trending?.adx_strength_weight_boost ?? 10}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.trending?.adx_strength_weight_boost ?? 10}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              trending: {
+                                ...gateScoringConfig.adaptive_modifiers?.trending,
+                                adx_strength_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Order Flow Weight Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.trending?.order_flow_weight_boost ?? 5}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.trending?.order_flow_weight_boost ?? 5}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              trending: {
+                                ...gateScoringConfig.adaptive_modifiers?.trending,
+                                order_flow_weight_boost: Number(e.target.value)
                               }
                             }
                           })}
@@ -3483,12 +3524,34 @@ export default function ConfigPage({
                           className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
                         />
                       </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Squeeze Filter Weight Reduction</span>
+                          <span className="text-indigo-600 font-semibold font-mono">{gateScoringConfig.adaptive_modifiers?.trending?.squeeze_filter_weight_reduction ?? -10}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.trending?.squeeze_filter_weight_reduction ?? -10}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              trending: {
+                                ...gateScoringConfig.adaptive_modifiers?.trending,
+                                squeeze_filter_weight_reduction: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
                     </div>
                   </div>
 
                   {/* Ranging Modifier */}
                   <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 space-y-3">
-                    <span className="text-xs font-semibold text-slate-700 block">Ranging Conditions</span>
+                    <span className="text-xs font-semibold text-amber-700 block uppercase tracking-wider">Ranging Conditions</span>
                     <div className="space-y-3">
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
@@ -3514,6 +3577,50 @@ export default function ConfigPage({
                       </div>
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Value Extension (Z-Score) Weight Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.ranging?.overextension_weight_boost ?? 15}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.ranging?.overextension_weight_boost ?? 15}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              ranging: {
+                                ...gateScoringConfig.adaptive_modifiers?.ranging,
+                                overextension_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Order Book Imbalance Weight Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.ranging?.order_book_weight_boost ?? 10}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.ranging?.order_book_weight_boost ?? 10}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              ranging: {
+                                ...gateScoringConfig.adaptive_modifiers?.ranging,
+                                order_book_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
                           <span>Trend Alignment Weight Reduction</span>
                           <span className="text-indigo-600 font-semibold font-mono">{gateScoringConfig.adaptive_modifiers?.ranging?.trend_alignment_weight_reduction ?? -10}%</span>
                         </label>
@@ -3528,6 +3635,28 @@ export default function ConfigPage({
                               ranging: {
                                 ...gateScoringConfig.adaptive_modifiers?.ranging,
                                 trend_alignment_weight_reduction: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>ADX Trend Strength Weight Reduction</span>
+                          <span className="text-indigo-600 font-semibold font-mono">{gateScoringConfig.adaptive_modifiers?.ranging?.adx_strength_weight_reduction ?? -10}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.ranging?.adx_strength_weight_reduction ?? -10}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              ranging: {
+                                ...gateScoringConfig.adaptive_modifiers?.ranging,
+                                adx_strength_weight_reduction: Number(e.target.value)
                               }
                             }
                           })}
@@ -3564,7 +3693,7 @@ export default function ConfigPage({
 
                   {/* High Volatility Modifier */}
                   <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 space-y-3">
-                    <span className="text-xs font-semibold text-slate-700 block">High Volatility Conditions</span>
+                    <span className="text-xs font-semibold text-rose-700 block uppercase tracking-wider">High Volatility Conditions</span>
                     <div className="space-y-3">
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
@@ -3590,7 +3719,7 @@ export default function ConfigPage({
                       </div>
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>Overextension Weight Boost</span>
+                          <span>Value Extension (Z-Score) Weight Boost</span>
                           <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.high_volatility?.overextension_weight_boost ?? 10}%</span>
                         </label>
                         <input
@@ -3604,6 +3733,50 @@ export default function ConfigPage({
                               high_volatility: {
                                 ...gateScoringConfig.adaptive_modifiers?.high_volatility,
                                 overextension_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Order Book Imbalance Depth Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.high_volatility?.order_book_weight_boost ?? 15}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.high_volatility?.order_book_weight_boost ?? 15}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              high_volatility: {
+                                ...gateScoringConfig.adaptive_modifiers?.high_volatility,
+                                order_book_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Order Flow Weight Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.high_volatility?.order_flow_weight_boost ?? 10}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.high_volatility?.order_flow_weight_boost ?? 10}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              high_volatility: {
+                                ...gateScoringConfig.adaptive_modifiers?.high_volatility,
+                                order_flow_weight_boost: Number(e.target.value)
                               }
                             }
                           })}
@@ -3635,12 +3808,34 @@ export default function ConfigPage({
                           className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
                         />
                       </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Trend Alignment Weight Reduction</span>
+                          <span className="text-indigo-600 font-semibold font-mono">{gateScoringConfig.adaptive_modifiers?.high_volatility?.trend_alignment_weight_reduction ?? -5}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.high_volatility?.trend_alignment_weight_reduction ?? -5}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              high_volatility: {
+                                ...gateScoringConfig.adaptive_modifiers?.high_volatility,
+                                trend_alignment_weight_reduction: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
                     </div>
                   </div>
 
                   {/* Low Volatility Modifier */}
                   <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 space-y-3">
-                    <span className="text-xs font-semibold text-slate-700 block">Low Volatility Conditions</span>
+                    <span className="text-xs font-semibold text-emerald-700 block uppercase tracking-wider">Low Volatility Conditions</span>
                     <div className="space-y-3">
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
@@ -3658,6 +3853,72 @@ export default function ConfigPage({
                               low_volatility: {
                                 ...gateScoringConfig.adaptive_modifiers?.low_volatility,
                                 squeeze_filter_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Wedge Pattern Weight Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.low_volatility?.wedge_filter_weight_boost ?? 10}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.low_volatility?.wedge_filter_weight_boost ?? 10}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              low_volatility: {
+                                ...gateScoringConfig.adaptive_modifiers?.low_volatility,
+                                wedge_filter_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Order Flow Weight Boost</span>
+                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.low_volatility?.order_flow_weight_boost ?? 10}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.low_volatility?.order_flow_weight_boost ?? 10}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              low_volatility: {
+                                ...gateScoringConfig.adaptive_modifiers?.low_volatility,
+                                order_flow_weight_boost: Number(e.target.value)
+                              }
+                            }
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Relative Volume Weight Reduction</span>
+                          <span className="text-indigo-600 font-semibold font-mono">{gateScoringConfig.adaptive_modifiers?.low_volatility?.relative_volume_weight_reduction ?? -5}%</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={gateScoringConfig.adaptive_modifiers?.low_volatility?.relative_volume_weight_reduction ?? -5}
+                          onChange={(e) => setGateScoringConfig({
+                            ...gateScoringConfig,
+                            adaptive_modifiers: {
+                              ...gateScoringConfig.adaptive_modifiers,
+                              low_volatility: {
+                                ...gateScoringConfig.adaptive_modifiers?.low_volatility,
+                                relative_volume_weight_reduction: Number(e.target.value)
                               }
                             }
                           })}

@@ -230,6 +230,9 @@ const DEFAULT_CONFIG: StrategyConfig = {
     fast_ema_period: 20,
     medium_ema_period: 50,
     slow_ema_period: 200,
+    rsi_enhanced_range_trend_alignment_enabled: true,
+    range_rsi_oversold_threshold: 40,
+    range_rsi_overbought_threshold: 60,
     micro_trend_alignment_enabled: true,
     micro_trend_fast_period: 5,
     micro_trend_slow_period: 15,
@@ -1128,6 +1131,9 @@ class DatabaseManager {
       if (ms.fast_ema_period === undefined) { ms.fast_ema_period = def.fast_ema_period || 20; changed = true; }
       if (ms.medium_ema_period === undefined) { ms.medium_ema_period = def.medium_ema_period || 50; changed = true; }
       if (ms.slow_ema_period === undefined) { ms.slow_ema_period = def.slow_ema_period || 200; changed = true; }
+      if (ms.rsi_enhanced_range_trend_alignment_enabled === undefined) { ms.rsi_enhanced_range_trend_alignment_enabled = def.rsi_enhanced_range_trend_alignment_enabled !== false; changed = true; }
+      if (ms.range_rsi_oversold_threshold === undefined) { ms.range_rsi_oversold_threshold = def.range_rsi_oversold_threshold ?? 40; changed = true; }
+      if (ms.range_rsi_overbought_threshold === undefined) { ms.range_rsi_overbought_threshold = def.range_rsi_overbought_threshold ?? 60; changed = true; }
       if (ms.micro_trend_alignment_enabled === undefined) { ms.micro_trend_alignment_enabled = def.micro_trend_alignment_enabled !== false; changed = true; }
       if (ms.micro_trend_fast_period === undefined) { ms.micro_trend_fast_period = def.micro_trend_fast_period || 5; changed = true; }
       if (ms.micro_trend_slow_period === undefined) { ms.micro_trend_slow_period = def.micro_trend_slow_period || 15; changed = true; }

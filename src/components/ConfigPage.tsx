@@ -183,6 +183,9 @@ export default function ConfigPage({
     fast_ema_period: 20,
     medium_ema_period: 50,
     slow_ema_period: 200,
+    rsi_enhanced_range_trend_alignment_enabled: true,
+    range_rsi_oversold_threshold: 40,
+    range_rsi_overbought_threshold: 60,
     micro_trend_alignment_enabled: true,
     micro_trend_fast_period: 5,
     micro_trend_slow_period: 15,
@@ -284,6 +287,9 @@ export default function ConfigPage({
         fast_ema_period: 20,
         medium_ema_period: 50,
         slow_ema_period: 200,
+        rsi_enhanced_range_trend_alignment_enabled: true,
+        range_rsi_oversold_threshold: 40,
+        range_rsi_overbought_threshold: 60,
         micro_trend_alignment_enabled: true,
         micro_trend_fast_period: 5,
         micro_trend_slow_period: 15,
@@ -2802,6 +2808,66 @@ export default function ConfigPage({
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     The candle interval (in minutes) used to construct and analyze structural swing levels (HH/HL/LH/LL). Higher values (e.g. 5m) filter out 1m noise and align with larger charts.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5 md:col-span-2 border-t border-slate-100 pt-4">
+                  <h4 className="text-xs font-sans font-semibold text-slate-700 uppercase tracking-wider mb-1">RSI-Enhanced Range-Bound Trend Alignment</h4>
+                </div>
+
+                <div className="space-y-1.5 flex items-center justify-between md:col-span-2 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-700">Enable RSI-Enhanced Range Alignment</span>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      In RANGE_BOUND regime, prevents trend alignment filter from blocking valid mean-reversion entries if RSI is oversold (for LONG) or overbought (for SHORT), while keeping weak mid-range trades blocked.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, rsi_enhanced_range_trend_alignment_enabled: !msConfig.rsi_enhanced_range_trend_alignment_enabled })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.rsi_enhanced_range_trend_alignment_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.rsi_enhanced_range_trend_alignment_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Range LONG RSI Oversold Relief Threshold</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="10"
+                    max="50"
+                    disabled={msConfig.rsi_enhanced_range_trend_alignment_enabled === false}
+                    value={msConfig.range_rsi_oversold_threshold !== undefined ? msConfig.range_rsi_oversold_threshold : 40}
+                    onChange={(e) => setMsConfig({ ...msConfig, range_rsi_oversold_threshold: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Maximum RSI level to unlock LONG trades when trend is bear-aligned in range-bound regime (Default: 40).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Range SHORT RSI Overbought Relief Threshold</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="50"
+                    max="90"
+                    disabled={msConfig.rsi_enhanced_range_trend_alignment_enabled === false}
+                    value={msConfig.range_rsi_overbought_threshold !== undefined ? msConfig.range_rsi_overbought_threshold : 60}
+                    onChange={(e) => setMsConfig({ ...msConfig, range_rsi_overbought_threshold: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Minimum RSI level to unlock SHORT trades when trend is bull-aligned in range-bound regime (Default: 60).
                   </p>
                 </div>
 

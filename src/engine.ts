@@ -1520,6 +1520,10 @@ class TradingEngine {
     const standardAdxThreshold = trendAlignAdx;
     const softenedAdxThreshold = standardAdxThreshold * (1 - softeningPercent / 100);
 
+    const rsiEnhancedEnabled = ms.rsi_enhanced_range_trend_alignment_enabled !== false;
+    const rsiOversoldThresh = ms.range_rsi_oversold_threshold ?? 40;
+    const rsiOverboughtThresh = ms.range_rsi_overbought_threshold ?? 60;
+
     const activeSweepSignal = this.detectLiquiditySweep(signalDirection);
 
     if (activeSweepSignal.isSweep) {
@@ -1529,14 +1533,32 @@ class TradingEngine {
       requiredStr = "Liquidity Sweep Setup Active";
     } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       if (signalDirection === "LONG") {
-        trendAligned = !isBearAligned;
-        currentTrendStr = isBearAligned ? "BLOCKED: STRONGLY BEARISH" : "PASSING (Not strongly bearish)";
+        if (!isBearAligned) {
+          trendAligned = true;
+          currentTrendStr = "PASSING (Not strongly bearish)";
+        } else if (rsiEnhancedEnabled && currentRsi <= rsiOversoldThresh) {
+          trendAligned = true;
+          currentTrendStr = `PASSING (RSI Oversold Relief in Range: RSI ${currentRsi.toFixed(1)} <= ${rsiOversoldThresh})`;
+        } else {
+          trendAligned = false;
+          currentTrendStr = `BLOCKED: STRONGLY BEARISH (RSI ${currentRsi.toFixed(1)} > ${rsiOversoldThresh}, no oversold relief)`;
+        }
       } else {
-        trendAligned = !isBullAligned;
-        currentTrendStr = isBullAligned ? "BLOCKED: STRONGLY BULLISH" : "PASSING (Not strongly bullish)";
+        if (!isBullAligned) {
+          trendAligned = true;
+          currentTrendStr = "PASSING (Not strongly bullish)";
+        } else if (rsiEnhancedEnabled && currentRsi >= rsiOverboughtThresh) {
+          trendAligned = true;
+          currentTrendStr = `PASSING (RSI Overbought Relief in Range: RSI ${currentRsi.toFixed(1)} >= ${rsiOverboughtThresh})`;
+        } else {
+          trendAligned = false;
+          currentTrendStr = `BLOCKED: STRONGLY BULLISH (RSI ${currentRsi.toFixed(1)} < ${rsiOverboughtThresh}, no overbought relief)`;
+        }
       }
       adxMet = true; // Bypassed in RANGE_BOUND
-      requiredStr = "LONG: Not strongly bearish (isBearAligned), SHORT: Not strongly bullish (isBullAligned)";
+      requiredStr = rsiEnhancedEnabled
+        ? `LONG: Not strongly bearish OR RSI <= ${rsiOversoldThresh}, SHORT: Not strongly bullish OR RSI >= ${rsiOverboughtThresh}`
+        : "LONG: Not strongly bearish (isBearAligned), SHORT: Not strongly bullish (isBullAligned)";
     } else {
       if (hasExtremeRealtimePressure) {
         const fastEma = ms.fast_ema_period || 20;
@@ -6600,19 +6622,41 @@ class TradingEngine {
     const standardAdxThreshold = trendAlignAdx;
     const softenedAdxThreshold = standardAdxThreshold * (1 - softeningPercent / 100);
 
+    const rsiEnhancedEnabled = ms.rsi_enhanced_range_trend_alignment_enabled !== false;
+    const rsiOversoldThresh = ms.range_rsi_oversold_threshold ?? 40;
+    const rsiOverboughtThresh = ms.range_rsi_overbought_threshold ?? 60;
+
     if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       if (signalDirection === "LONG") {
-        trendAligned = !isBearAligned;
-        currentTrendStr = isBearAligned ? "BLOCKED: STRONGLY BEARISH" : "PASSING (Not strongly bearish)";
+        if (!isBearAligned) {
+          trendAligned = true;
+          currentTrendStr = "PASSING (Not strongly bearish)";
+        } else if (rsiEnhancedEnabled && currentRsi <= rsiOversoldThresh) {
+          trendAligned = true;
+          currentTrendStr = `PASSING (RSI Oversold Relief in Range: RSI ${currentRsi.toFixed(1)} <= ${rsiOversoldThresh})`;
+        } else {
+          trendAligned = false;
+          currentTrendStr = `BLOCKED: STRONGLY BEARISH (RSI ${currentRsi.toFixed(1)} > ${rsiOversoldThresh}, no oversold relief)`;
+        }
       } else if (signalDirection === "SHORT") {
-        trendAligned = !isBullAligned;
-        currentTrendStr = isBullAligned ? "BLOCKED: STRONGLY BULLISH" : "PASSING (Not strongly bullish)";
+        if (!isBullAligned) {
+          trendAligned = true;
+          currentTrendStr = "PASSING (Not strongly bullish)";
+        } else if (rsiEnhancedEnabled && currentRsi >= rsiOverboughtThresh) {
+          trendAligned = true;
+          currentTrendStr = `PASSING (RSI Overbought Relief in Range: RSI ${currentRsi.toFixed(1)} >= ${rsiOverboughtThresh})`;
+        } else {
+          trendAligned = false;
+          currentTrendStr = `BLOCKED: STRONGLY BULLISH (RSI ${currentRsi.toFixed(1)} < ${rsiOverboughtThresh}, no overbought relief)`;
+        }
       } else {
         trendAligned = true;
         currentTrendStr = "NEUTRAL";
       }
       adxMet = true; // Bypassed in RANGE_BOUND
-      requiredStr = "LONG: Not strongly bearish (isBearAligned), SHORT: Not strongly bullish (isBullAligned)";
+      requiredStr = rsiEnhancedEnabled
+        ? `LONG: Not strongly bearish OR RSI <= ${rsiOversoldThresh}, SHORT: Not strongly bullish OR RSI >= ${rsiOverboughtThresh}`
+        : "LONG: Not strongly bearish (isBearAligned), SHORT: Not strongly bullish (isBullAligned)";
     } else {
       if (hasExtremeRealtimePressure) {
         const fastEma = ms.fast_ema_period || 20;

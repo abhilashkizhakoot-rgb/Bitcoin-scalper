@@ -35,7 +35,6 @@ const AVAILABLE_GATES = [
   { id: "adx", label: "ADX Trend Strength Filter", supportsWeight: true },
   { id: "timing", label: "Optimal Session Timing Window Check (IST)", supportsWeight: false },
   { id: "value_extension", label: "Unified Value Extension Anchor", supportsWeight: true },
-  { id: "wedge", label: "Wedge Pattern Filter", supportsWeight: true },
   { id: "structure", label: "Market Structure Confirmation", supportsWeight: false },
   { id: "orderflow", label: "Binance Order Flow Confirmation", supportsWeight: true },
   { id: "squeeze", label: "Volatility Compression (Squeeze) Filter", supportsWeight: true },
@@ -3304,25 +3303,6 @@ export default function ConfigPage({
 
                   <div className="space-y-1.5">
                     <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
-                      <span>Wedge Pattern Filter</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="0"
-                      max="100"
-                      value={gateScoringConfig.weights.wedge_filter}
-                      onChange={(e) => setGateScoringConfig({
-                        ...gateScoringConfig,
-                        weights: { ...gateScoringConfig.weights, wedge_filter: Number(e.target.value) }
-                      })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
-                    />
-                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of active wedge breakout structural validations.</p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
                       <span>Order Flow Confirmation</span>
                     </label>
                     <input
@@ -3853,28 +3833,6 @@ export default function ConfigPage({
                               low_volatility: {
                                 ...gateScoringConfig.adaptive_modifiers?.low_volatility,
                                 squeeze_filter_weight_boost: Number(e.target.value)
-                              }
-                            }
-                          })}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>Wedge Pattern Weight Boost</span>
-                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.low_volatility?.wedge_filter_weight_boost ?? 10}%</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          value={gateScoringConfig.adaptive_modifiers?.low_volatility?.wedge_filter_weight_boost ?? 10}
-                          onChange={(e) => setGateScoringConfig({
-                            ...gateScoringConfig,
-                            adaptive_modifiers: {
-                              ...gateScoringConfig.adaptive_modifiers,
-                              low_volatility: {
-                                ...gateScoringConfig.adaptive_modifiers?.low_volatility,
-                                wedge_filter_weight_boost: Number(e.target.value)
                               }
                             }
                           })}

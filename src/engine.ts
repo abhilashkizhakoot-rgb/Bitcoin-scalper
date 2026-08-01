@@ -1771,70 +1771,7 @@ class TradingEngine {
       sub_conditions: structCheck.sub_conditions,
     });
 
-    // C16: Wedge Pattern Filter (Avoid entry during rising/falling wedges unless confirmed breakout)
-    const wedge = this.detectWedgePattern();
-    let wedgeMet = true;
-    let wedgeVal = "NO WEDGE PATTERN DETECTED";
-    let wedgeReq = "None (Pattern normal)";
-    const wedgeRelVolume = relVolume;
 
-    // Cross-optimization: Calculate if volatility is squeezed
-    const sqBb_wedge = this.calculateBollingerBands(closes, 20, 2);
-    const sqAtr_wedge = currentAtr_cp;
-    const sqKbWidth_wedge = 2 * 1.5 * sqAtr_wedge;
-    const sqBbWidth_wedge = sqBb_wedge.upper - sqBb_wedge.lower;
-    const isSqueezed_wedge = sqBbWidth_wedge <= sqKbWidth_wedge;
-
-    if (wedge.risingWedge) {
-      if (signalDirection === "LONG") {
-        // Counter-trend LONG in rising wedge. Requires superior breakout.
-        const requiredVol = isSqueezed_wedge ? 1.40 : 1.25;
-        const isBreakout = currentPrice > wedge.upperLineCurrent && wedgeRelVolume >= requiredVol;
-        wedgeMet = isBreakout;
-        wedgeVal = isBreakout
-          ? `RISING WEDGE: SUPERIOR BULL BREAKOUT (Close: $${currentPrice.toFixed(2)} > Upper: $${wedge.upperLineCurrent.toFixed(2)} | Vol: ${wedgeRelVolume.toFixed(2)} >= ${requiredVol})`
-          : `RISING WEDGE: BLOCKED (LONG counter-trend requires upper breakout with volume >= ${requiredVol})`;
-        wedgeReq = `LONG Breakout: Price > Upper ($${wedge.upperLineCurrent.toFixed(2)}) & Rel Volume >= ${requiredVol}`;
-      } else if (signalDirection === "SHORT") {
-        // Aligned SHORT in rising wedge. Requires confirmed lower breakdown to avoid trap.
-        const requiredVol = 1.10;
-        const isBreakdown = currentPrice < wedge.lowerLineCurrent && wedgeRelVolume >= requiredVol;
-        wedgeMet = isBreakdown;
-        wedgeVal = isBreakdown
-          ? `RISING WEDGE: BEAR BREAKDOWN CONFIRMED (Close: $${currentPrice.toFixed(2)} < Lower: $${wedge.lowerLineCurrent.toFixed(2)} | Vol: ${wedgeRelVolume.toFixed(2)} >= ${requiredVol})`
-          : `RISING WEDGE: BLOCKED (SHORT requires confirmed lower breakdown with volume >= ${requiredVol})`;
-        wedgeReq = `SHORT Breakdown: Price < Lower ($${wedge.lowerLineCurrent.toFixed(2)}) & Rel Volume >= ${requiredVol}`;
-      }
-    } else if (wedge.fallingWedge) {
-      if (signalDirection === "SHORT") {
-        // Counter-trend SHORT in falling wedge. Requires superior breakdown.
-        const requiredVol = isSqueezed_wedge ? 1.40 : 1.25;
-        const isBreakdown = currentPrice < wedge.lowerLineCurrent && wedgeRelVolume >= requiredVol;
-        wedgeMet = isBreakdown;
-        wedgeVal = isBreakdown
-          ? `FALLING WEDGE: SUPERIOR BEAR BREAKDOWN (Close: $${currentPrice.toFixed(2)} < Lower: $${wedge.lowerLineCurrent.toFixed(2)} | Vol: ${wedgeRelVolume.toFixed(2)} >= ${requiredVol})`
-          : `FALLING WEDGE: BLOCKED (SHORT counter-trend requires lower breakdown with volume >= ${requiredVol})`;
-        wedgeReq = `SHORT Breakdown: Price < Lower ($${wedge.lowerLineCurrent.toFixed(2)}) & Rel Volume >= ${requiredVol}`;
-      } else if (signalDirection === "LONG") {
-        // Aligned LONG in falling wedge. Requires confirmed upper breakout to avoid trap.
-        const requiredVol = 1.10;
-        const isBreakout = currentPrice > wedge.upperLineCurrent && wedgeRelVolume >= requiredVol;
-        wedgeMet = isBreakout;
-        wedgeVal = isBreakout
-          ? `FALLING WEDGE: BULL BREAKOUT CONFIRMED (Close: $${currentPrice.toFixed(2)} > Upper: $${wedge.upperLineCurrent.toFixed(2)} | Vol: ${wedgeRelVolume.toFixed(2)} >= ${requiredVol})`
-          : `FALLING WEDGE: BLOCKED (LONG requires confirmed upper breakout with volume >= ${requiredVol})`;
-        wedgeReq = `LONG Breakout: Price > Upper ($${wedge.upperLineCurrent.toFixed(2)}) & Rel Volume >= ${requiredVol}`;
-      }
-    }
-
-    conditions.push({
-      name: "Wedge Pattern Filter",
-      met: wedgeMet,
-      current_value: wedgeVal,
-      required: wedgeReq,
-      description: "Filters trades during wedge compression to avoid low-probability trendline traps, unless a confirmed breakout with high volume occurs.",
-      priority: "CRITICAL",
-    });
 
     // C17: Binance Order Flow Confirmation
     let ofMet = true;
@@ -2082,7 +2019,6 @@ class TradingEngine {
         { condName: "ADX Trend Strength Filter", weightKey: "adx_strength" as const },
         { condName: "Relative Volume Confirmation", weightKey: "relative_volume" as const },
         { condName: "Unified Value Extension Anchor", weightKey: "overextension" as const },
-        { condName: "Wedge Pattern Filter", weightKey: "wedge_filter" as const },
         { condName: "Binance Order Flow Confirmation", weightKey: "order_flow" as const },
         { condName: "Volatility Compression (Squeeze) Filter", weightKey: "squeeze_filter" as const },
         { condName: "Order Book Imbalance & Liquidity Depth Gate", weightKey: "order_book" as const },
@@ -6920,68 +6856,7 @@ class TradingEngine {
       sub_conditions: structCheck.sub_conditions,
     });
 
-    // C16: Wedge Pattern Filter (Avoid entry during rising/falling wedges unless confirmed breakout)
-    const wedge = this.detectWedgePattern();
-    let wedgeMet = true;
-    let wedgeVal = "NO WEDGE PATTERN DETECTED";
-    let wedgeReq = "None (Pattern normal)";
-    const wedgeRelVolume = relVolume;
 
-    // Cross-optimization: Calculate if volatility is squeezed
-    const sqBb_wedge = this.calculateBollingerBands(closes, 20, 2);
-    const sqAtr_wedge = currentAtr;
-    const sqKbWidth_wedge = 2 * 1.5 * sqAtr_wedge;
-    const sqBbWidth_wedge = sqBb_wedge.upper - sqBb_wedge.lower;
-    const isSqueezed_wedge = sqBbWidth_wedge <= sqKbWidth_wedge;
-
-    if (wedge.risingWedge) {
-      if (signalDirection === "LONG") {
-        // Counter-trend LONG in rising wedge. Requires superior breakout.
-        const requiredVol = isSqueezed_wedge ? 1.40 : 1.25;
-        const isBreakout = currentClose > wedge.upperLineCurrent && wedgeRelVolume >= requiredVol;
-        wedgeMet = isBreakout;
-        wedgeVal = isBreakout
-          ? `RISING WEDGE: SUPERIOR BULL BREAKOUT (Close: $${currentClose.toFixed(2)} > Upper: $${wedge.upperLineCurrent.toFixed(2)} | Vol: ${wedgeRelVolume.toFixed(2)} >= ${requiredVol})`
-          : `RISING WEDGE: BLOCKED (LONG counter-trend requires upper breakout with volume >= ${requiredVol})`;
-        wedgeReq = `LONG Breakout: Price > Upper ($${wedge.upperLineCurrent.toFixed(2)}) & Rel Volume >= ${requiredVol}`;
-      } else if (signalDirection === "SHORT") {
-        // Aligned SHORT in rising wedge. Requires confirmed lower breakdown to avoid trap.
-        const requiredVol = 1.10;
-        const isBreakdown = currentClose < wedge.lowerLineCurrent && wedgeRelVolume >= requiredVol;
-        wedgeMet = isBreakdown;
-        wedgeVal = isBreakdown
-          ? `RISING WEDGE: BEAR BREAKDOWN CONFIRMED (Close: $${currentClose.toFixed(2)} < Lower: $${wedge.lowerLineCurrent.toFixed(2)} | Vol: ${wedgeRelVolume.toFixed(2)} >= ${requiredVol})`
-          : `RISING WEDGE: BLOCKED (SHORT requires confirmed lower breakdown with volume >= ${requiredVol})`;
-        wedgeReq = `SHORT Breakdown: Price < Lower ($${wedge.lowerLineCurrent.toFixed(2)}) & Rel Volume >= ${requiredVol}`;
-      }
-    } else if (wedge.fallingWedge) {
-      if (signalDirection === "SHORT") {
-        // Counter-trend SHORT in falling wedge. Requires superior breakdown.
-        const requiredVol = isSqueezed_wedge ? 1.40 : 1.25;
-        const isBreakdown = currentClose < wedge.lowerLineCurrent && wedgeRelVolume >= requiredVol;
-        wedgeMet = isBreakdown;
-        wedgeVal = isBreakdown
-          ? `FALLING WEDGE: SUPERIOR BEAR BREAKDOWN (Close: $${currentClose.toFixed(2)} < Lower: $${wedge.lowerLineCurrent.toFixed(2)} | Vol: ${wedgeRelVolume.toFixed(2)} >= ${requiredVol})`
-          : `FALLING WEDGE: BLOCKED (SHORT counter-trend requires lower breakdown with volume >= ${requiredVol})`;
-        wedgeReq = `SHORT Breakdown: Price < Lower ($${wedge.lowerLineCurrent.toFixed(2)}) & Rel Volume >= ${requiredVol}`;
-      } else if (signalDirection === "LONG") {
-        // Aligned LONG in falling wedge. Requires confirmed upper breakout to avoid trap.
-        const requiredVol = 1.10;
-        const isBreakout = currentClose > wedge.upperLineCurrent && wedgeRelVolume >= requiredVol;
-        wedgeMet = isBreakout;
-        wedgeVal = isBreakout
-          ? `FALLING WEDGE: BULL BREAKOUT CONFIRMED (Close: $${currentClose.toFixed(2)} > Upper: $${wedge.upperLineCurrent.toFixed(2)} | Vol: ${wedgeRelVolume.toFixed(2)} >= ${requiredVol})`
-          : `FALLING WEDGE: BLOCKED (LONG requires confirmed upper breakout with volume >= ${requiredVol})`;
-        wedgeReq = `LONG Breakout: Price > Upper ($${wedge.upperLineCurrent.toFixed(2)}) & Rel Volume >= ${requiredVol}`;
-      }
-    }
-
-    conditions.push({
-      name: "Wedge Pattern Filter",
-      met: wedgeMet,
-      current_value: wedgeVal,
-      required: wedgeReq,
-    });
 
     // C17: Binance Order Flow Confirmation
     let ofMet = true;
@@ -7212,7 +7087,6 @@ class TradingEngine {
       { condName: "Relative Volume Confirmation", weightKey: "relative_volume" as const },
       { condName: "VWAP Deviation Anchor Check", weightKey: "overextension" as const },
       { condName: "EMA 100 Overextension Protection", weightKey: "ema100_overextension" as const },
-      { condName: "Wedge Pattern Filter", weightKey: "wedge_filter" as const },
       { condName: "Binance Order Flow Confirmation", weightKey: "order_flow" as const },
       { condName: "Volatility Compression (Squeeze) Filter", weightKey: "squeeze_filter" as const },
       { condName: "Order Book Imbalance & Liquidity Depth Gate", weightKey: "order_book" as const },

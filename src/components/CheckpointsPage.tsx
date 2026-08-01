@@ -150,14 +150,6 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
       priority: "CRITICAL",
     },
     {
-      name: "Wedge Pattern Filter",
-      met: true,
-      current_value: "PASSING (NO WEDGE)",
-      required: "Trendline Breakout Confirmation: Rel Volume >= 1.10 (aligned) / >= 1.25-1.40 (counter-trend)",
-      description: "Filters trades during wedge compression to avoid low-probability trendline traps, unless a confirmed breakout with high volume occurs.",
-      priority: "CRITICAL",
-    },
-    {
       name: "Volatility Compression (Squeeze) Filter",
       met: true,
       current_value: "PASSING (NO SQUEEZE)",
@@ -246,7 +238,6 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
     { condName: "Trend Alignment & Strength (EMA/ADX)", weightKey: "trend_alignment", label: "EMA & ADX Trend Support" },
     { condName: "Relative Volume Confirmation", weightKey: "relative_volume", label: "Relative Volume Surge" },
     { condName: "Overextension & Level Anchors (VWAP/EMA)", weightKey: "overextension", label: "VWAP & EMA Overextension" },
-    { condName: "Wedge Pattern Filter", weightKey: "wedge_filter", label: "Wedge Pattern Lock" },
     { condName: "Binance Order Flow Confirmation", weightKey: "order_flow", label: "Binance Order Flow Score" },
     { condName: "Volatility Compression (Squeeze) Filter", weightKey: "squeeze_filter", label: "Bollinger Squeeze Filter" },
     { condName: "Order Book Imbalance & Liquidity Depth Gate", weightKey: "order_book", label: "Near-Book Imbalance Gate" },

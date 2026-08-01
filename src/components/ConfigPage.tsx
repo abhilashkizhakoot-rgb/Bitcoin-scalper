@@ -2819,7 +2819,7 @@ export default function ConfigPage({
                   <div className="space-y-0.5">
                     <span className="text-xs font-sans font-semibold text-slate-700">Enable RSI-Enhanced Range Alignment</span>
                     <p className="text-[10px] text-slate-400 leading-relaxed">
-                      In RANGE_BOUND regime, prevents trend alignment filter from blocking valid mean-reversion entries if RSI is oversold (for LONG) or overbought (for SHORT), while keeping weak mid-range trades blocked.
+                      In RANGE_BOUND regime, allows valid mean-reversion entries to pass the Trend Alignment gate when RSI reaches oversold (40 or lower for LONG) or overbought (60 or higher for SHORT) levels even if EMAs are opposing.
                     </p>
                   </div>
                   <button

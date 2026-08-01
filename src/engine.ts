@@ -2071,8 +2071,11 @@ class TradingEngine {
 
       if (totalTacticalWeight > 0) {
         confidenceScore = Math.round((earnedTacticalWeight / totalTacticalWeight) * 100);
+        tacticalConfidenceMet = confidenceScore >= confidenceThreshold;
+      } else {
+        confidenceScore = 100;
+        tacticalConfidenceMet = true;
       }
-      tacticalConfidenceMet = confidenceScore >= confidenceThreshold;
 
       entryScore = confidenceScore;
 
@@ -2080,17 +2083,17 @@ class TradingEngine {
         .filter((c) => safetyGates.includes(c.name))
         .every((c) => c.met);
 
-      // Check "Market Structure Confirmation" dynamically based on whether it is active and mandatory
+      // Check "Market Structure Confirmation" dynamically based on whether it is active
       const isStructureMandatory = this.isGateMandatory(config, "Market Structure Confirmation");
       const isStructureActive = this.isGateActive(config, "Market Structure Confirmation");
-      marketStructurePassed = isStructureActive && isStructureMandatory
+      marketStructurePassed = isStructureActive
         ? (conditions.find(c => c.name === "Market Structure Confirmation")?.met ?? false)
         : true;
 
       // Handle optional mandatory volume profile in ranging regime
       let isMtfVpPassedIfRequired = true;
       if (this.currentRegime === MarketRegime.RANGE_BOUND && config.general.require_volume_profile_in_ranging !== false) {
-        if (this.isGateActive(config, "Multi-Timeframe Volume Profiling (Horizontal Liquidity)") && this.isGateMandatory(config, "Multi-Timeframe Volume Profiling (Horizontal Liquidity)")) {
+        if (this.isGateActive(config, "Multi-Timeframe Volume Profiling (Horizontal Liquidity)")) {
           const vpGate = conditions.find(c => c.name === "Multi-Timeframe Volume Profiling (Horizontal Liquidity)");
           if (vpGate && !vpGate.met) {
             isMtfVpPassedIfRequired = false;
@@ -2105,10 +2108,10 @@ class TradingEngine {
           return !c.met;
         }
         if (c.name === "Market Structure Confirmation") {
-          return isStructureActive && isStructureMandatory && !c.met;
+          return isStructureActive && !c.met;
         }
         if (this.currentRegime === MarketRegime.RANGE_BOUND && config.general.require_volume_profile_in_ranging !== false && c.name === "Multi-Timeframe Volume Profiling (Horizontal Liquidity)") {
-          return this.isGateActive(config, c.name) && this.isGateMandatory(config, c.name) && !c.met;
+          return this.isGateActive(config, c.name) && !c.met;
         }
         return false;
       }).map((c) => c.name);
@@ -2121,7 +2124,7 @@ class TradingEngine {
       if ((regimeValid && regimeAligned) || !this.isGateActive(config, "Market Regime Filter")) entryScore += 20;
       if (trendAligned || !this.isGateActive(config, "Exponential Trend Alignment")) entryScore += 15;
       if (adxMet || !this.isGateActive(config, "ADX Trend Strength Filter")) entryScore += 15;
-      if (relVolume > requiredRelVol || !this.isGateActive(config, "Relative Volume Confirmation")) entryScore += 10;
+      if (relVolume >= requiredRelVol || !this.isGateActive(config, "Relative Volume Confirmation")) entryScore += 10;
       allConditionsMet = conditions.every((c) => c.met);
       failedConditions = conditions.filter((c) => !c.met).map((c) => c.name);
     }

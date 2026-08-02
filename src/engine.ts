@@ -382,6 +382,7 @@ class TradingEngine {
     if (n.includes("volume") && !n.includes("volume profiling")) return "volume";
     if (n.includes("news")) return "news";
     if (n.includes("limit") || n.includes("equity") || n.includes("credentials") || (n.includes("cooldown") && !n.includes("regime"))) return "preflight";
+    if (n.includes("adx exhaustion") || n.includes("parabolic adx")) return "adx_exhaustion";
     if (n.includes("adx")) return "adx";
     if (n.includes("timing")) return "timing";
     if (n.includes("wedge")) return "wedge";
@@ -1700,7 +1701,8 @@ class TradingEngine {
 
     // Dynamic Z_dist Threshold based on Regime and Pressure
     const baseZLimit = isTrending ? 2.20 : 2.00;
-    const maxZLimit = (isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure) ? 3.20 : baseZLimit;
+    const isSofteningAllowed = config.risk_management?.zscore_softening_enabled !== false;
+    const maxZLimit = (isSofteningAllowed && (isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure)) ? 3.20 : baseZLimit;
 
     let isValueExtensionMet = true;
     let isValueExtensionSoftened = false;
@@ -1877,6 +1879,53 @@ class TradingEngine {
       current_value: minAtrVal,
       required: minAtrReq,
       description: "Blocks trade entry signals if the current market 14-period Average True Range (ATR) falls below the user-defined floor threshold (e.g., 11 or 12) to avoid thin, low-volatility ranges.",
+      priority: "CRITICAL",
+    });
+
+    // Parabolic ADX Exhaustion Cap Filter
+    const adxExhaustionEnabled = config.risk_management?.adx_exhaustion_cap_enabled !== false;
+    const adxExhaustionThresh = config.risk_management?.adx_exhaustion_threshold !== undefined
+      ? config.risk_management.adx_exhaustion_threshold
+      : 45;
+    const maxEmaDistAtr = config.risk_management?.adx_exhaustion_max_ema_dist_atr !== undefined
+      ? config.risk_management.adx_exhaustion_max_ema_dist_atr
+      : 0.5;
+
+    let adxExhaustionMet = true;
+    let adxExhaustionVal = "";
+    let adxExhaustionReq = "";
+
+    if (!adxExhaustionEnabled) {
+      adxExhaustionMet = true;
+      adxExhaustionVal = `ADX: ${adxValue.toFixed(1)} - CAP DISABLED`;
+      adxExhaustionReq = "None (Disabled)";
+    } else {
+      const distToEma20 = Math.abs(currentPrice - ema20Val);
+      const maxAllowedDist = maxEmaDistAtr * currentAtr_cp;
+      const isNearEma20 = distToEma20 <= maxAllowedDist;
+
+      adxExhaustionReq = `If ADX > ${adxExhaustionThresh.toFixed(1)}, price must be within ${maxEmaDistAtr}x ATR ($${maxAllowedDist.toFixed(2)}) of 20 EMA`;
+
+      if (adxValue > adxExhaustionThresh) {
+        if (isNearEma20) {
+          adxExhaustionMet = true;
+          adxExhaustionVal = `EXHAUSTION ZONE PASSED (ADX ${adxValue.toFixed(1)} > ${adxExhaustionThresh.toFixed(1)}) | Pullback Entry Confirmed (Dist $${distToEma20.toFixed(2)} <= ${maxEmaDistAtr}x ATR $${maxAllowedDist.toFixed(2)} from 20 EMA $${ema20Val.toFixed(2)})`;
+        } else {
+          adxExhaustionMet = false;
+          adxExhaustionVal = `PARABOLIC ADX EXHAUSTION BLOCKED (ADX ${adxValue.toFixed(1)} > ${adxExhaustionThresh.toFixed(1)}) | Overextended from 20 EMA (Dist $${distToEma20.toFixed(2)} > ${maxEmaDistAtr}x ATR $${maxAllowedDist.toFixed(2)})`;
+        }
+      } else {
+        adxExhaustionMet = true;
+        adxExhaustionVal = `NORMAL ADX (ADX ${adxValue.toFixed(1)} <= ${adxExhaustionThresh.toFixed(1)}) | Dist to 20 EMA: $${distToEma20.toFixed(2)}`;
+      }
+    }
+
+    conditions.push({
+      name: "Parabolic ADX Exhaustion Cap",
+      met: adxExhaustionMet,
+      current_value: adxExhaustionVal,
+      required: adxExhaustionReq,
+      description: `Caps new entries when ADX exceeds ${adxExhaustionThresh} (parabolic exhaustion phase) unless price is within ${maxEmaDistAtr}x ATR of the 20 EMA for a pullback entry.`,
       priority: "CRITICAL",
     });
 

@@ -257,6 +257,10 @@ export default function ConfigPage({
         daily_loss_limit_pct: 2.0,
         weekly_loss_limit_pct: 5.0,
         intra_trade_drawdown_limit_pct: 1.5,
+        zscore_softening_enabled: true,
+        adx_exhaustion_cap_enabled: true,
+        adx_exhaustion_threshold: 45,
+        adx_exhaustion_max_ema_dist_atr: 0.5,
       },
       ml_settings: {
         entry_threshold_long: 0.8,
@@ -1883,6 +1887,72 @@ export default function ConfigPage({
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Multiplier for VWAP standard deviation bands in range-bound environments. Set to 1.0 to block trades near outer range boundaries (Default: 1.0).
                   </p>
+                </div>
+
+                <div className="md:col-span-2 space-y-2 pt-3 border-t border-slate-100">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                    <input
+                      type="checkbox"
+                      checked={riskConfig.zscore_softening_enabled !== false}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, zscore_softening_enabled: e.target.checked })}
+                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
+                    />
+                    <span className="text-xs font-semibold text-slate-700">Enable Z-Score Overextension Softening</span>
+                  </label>
+                  <p className="text-[10px] text-slate-500 leading-relaxed pl-6.5">
+                    When enabled, strong trend momentum or extreme order flow pressure softens the Unified Value Extension Z-Score overextension ceiling from base Z (2.0/2.2) up to 3.20. Uncheck this toggle to disable softening and strictly enforce base Z-score limits, blocking entries when overextended even during momentum surges.
+                  </p>
+                </div>
+
+                <div className="md:col-span-2 space-y-3 pt-3 border-t border-slate-100">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                    <input
+                      type="checkbox"
+                      checked={riskConfig.adx_exhaustion_cap_enabled !== false}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, adx_exhaustion_cap_enabled: e.target.checked })}
+                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
+                    />
+                    <span className="text-xs font-semibold text-slate-700">Enable Parabolic ADX Exhaustion Cap</span>
+                  </label>
+                  <p className="text-[10px] text-slate-500 leading-relaxed pl-6.5">
+                    Caps new entries when ADX exceeds the exhaustion threshold unless price is within a pullback distance of the 20 EMA. When ADX exceeds 45, market moves are often in an exhaustion phase.
+                  </p>
+
+                  {riskConfig.adx_exhaustion_cap_enabled !== false && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-6.5 pt-1">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-mono text-slate-400 uppercase">ADX Exhaustion Threshold</label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="10"
+                          max="100"
+                          value={riskConfig.adx_exhaustion_threshold !== undefined ? riskConfig.adx_exhaustion_threshold : 45}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, adx_exhaustion_threshold: parseInputNumber(e.target.value, true) })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                        />
+                        <p className="text-[10px] text-slate-400 leading-relaxed">
+                          ADX level above which moves are treated as parabolic exhaustion (Default: 45).
+                        </p>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-mono text-slate-400 uppercase">Max 20 EMA Pullback Dist (ATR Multiplier)</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0.1"
+                          max="3.0"
+                          value={riskConfig.adx_exhaustion_max_ema_dist_atr !== undefined ? riskConfig.adx_exhaustion_max_ema_dist_atr : 0.5}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, adx_exhaustion_max_ema_dist_atr: parseInputNumber(e.target.value, true) })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                        />
+                        <p className="text-[10px] text-slate-400 leading-relaxed">
+                          Maximum distance between price and 20 EMA (in ATR multiplier) to allow entry during ADX exhaustion (Default: 0.5x ATR).
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

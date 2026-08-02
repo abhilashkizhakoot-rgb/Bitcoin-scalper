@@ -249,6 +249,10 @@ export interface StrategyConfig {
     overextension_ema_ranging_threshold?: number; // EMA overextension threshold in ranging/other markets (default: 1.2)
     overextension_vwap_trending_multiplier?: number; // VWAP band multiplier in trending markets (default: 1.5)
     overextension_vwap_ranging_multiplier?: number; // VWAP band multiplier in ranging/other markets (default: 1.0)
+    zscore_softening_enabled?: boolean; // Enable/disable momentum Z-score overextension softening
+    adx_exhaustion_cap_enabled?: boolean; // Enable Parabolic ADX Exhaustion Cap (default: true)
+    adx_exhaustion_threshold?: number; // ADX threshold for parabolic exhaustion (default: 45)
+    adx_exhaustion_max_ema_dist_atr?: number; // Max distance from 20 EMA in ATR multiplier to allow entry (default: 0.5)
   };
   market_structure: {
     min_breakout_body_ratio: number; // e.g. 0.22 (22% body ratio)

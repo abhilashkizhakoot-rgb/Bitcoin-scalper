@@ -188,6 +188,7 @@ export interface StrategyConfig {
     regime_macro_slope_lookback?: number;
     regime_macro_slope_threshold?: number;
     regime_ribbon_compression_threshold?: number;
+    regime_grinding_trend_exemption_enabled?: boolean;
     require_volume_profile_in_ranging?: boolean;
     regime_adaptive_gates_enabled?: boolean;
     regime_adaptive_preset?: "BALANCED_ADAPTIVE" | "DEFENSIVE_STRICT" | "AGGRESSIVE_TREND" | "CUSTOM";

@@ -238,6 +238,7 @@ export default function ConfigPage({
         regime_macro_slope_lookback: 5,
         regime_macro_slope_threshold: 0.0005,
         regime_ribbon_compression_threshold: 0.0015,
+        regime_grinding_trend_exemption_enabled: true,
       },
       risk_management: {
         default_quantity_btc: 0.001,
@@ -978,6 +979,22 @@ export default function ConfigPage({
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Threshold standard deviation of EMAs (9, 21, 50) relative to price below which they are considered compressed/tangled. Default is 0.0015.
+                  </p>
+                </div>
+
+                <div className="md:col-span-2 space-y-2 pt-2 border-t border-slate-100">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                    <input
+                      type="checkbox"
+                      checked={generalConfig.regime_grinding_trend_exemption_enabled !== false}
+                      onChange={(e) => setGeneralConfig({ ...generalConfig, regime_grinding_trend_exemption_enabled: e.target.checked })}
+                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
+                      id="config-regime-grinding-exemption-toggle"
+                    />
+                    <span className="text-xs font-semibold text-slate-700">Enable Low-Liquidity Grinding Trend Exemption</span>
+                  </label>
+                  <p className="text-[10px] text-slate-500 leading-relaxed pl-6.5">
+                    Bypasses Step 2 RANGE_BOUND compression intercept during low liquidity (weekends / Asian session) when full 4-EMA alignment, ATR-adaptive ADX strength, and minimum EMA spacing strictly confirm an active directional grinding trend.
                   </p>
                 </div>
 

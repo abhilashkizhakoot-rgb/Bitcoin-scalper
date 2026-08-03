@@ -6164,31 +6164,50 @@ class TradingEngine {
     }
     const trendStrength = Math.abs(upwardCount - downwardCount) / 15; // 0 to 1
 
-    const isStrongUptrend = isBullAligned && (
-      currentAdx > adxThreshold ||
-      trendStrength > 0.4 ||
-      (isBullAlignedFull && (currentAdx > 15.0 || trendStrength > 0.25 || spread21to50Percent > 0.0005))
-    );
+    // Calculate ATR-adaptive ADX threshold for low-liquidity conditions
+    // When atrExpansionRatio < 1.0 (volatility is suppressed during weekends/Asian sessions),
+    // derive effective ADX threshold proportionally from config adxThreshold (capped between 0.65 and 1.0).
+    const isLowLiquidity = atrExpansionRatio < 1.0;
+    const adaptiveFactor = isLowLiquidity ? Math.max(0.65, Math.min(1.0, atrExpansionRatio)) : 1.0;
+    const effectiveAdxThreshold = adxThreshold * adaptiveFactor;
 
-    const isStrongDowntrend = isBearAligned && (
+    // Grinding Trend Exemption Check
+    // Prevents low-liquidity compression from incorrectly forcing RANGE_BOUND when clear structural evidence exists.
+    // Requires ALL key structural confirmations (no permissive OR conditions):
+    // 1. Full 4-EMA alignment (9, 21, 50, 100)
+    // 2. Minimum trend strength (ADX >= effectiveAdxThreshold && trendStrength >= 0.25)
+    // 3. Minimum EMA spacing (spread21to50Percent >= 0.0003)
+    const grindingTrendEnabled = config.general.regime_grinding_trend_exemption_enabled !== false;
+    const minEmaSpacing = 0.0003;
+    const isGrindingUptrend = grindingTrendEnabled && isBullAlignedFull && (currentAdx >= effectiveAdxThreshold) && (trendStrength >= 0.25) && (spread21to50Percent >= minEmaSpacing);
+    const isGrindingDowntrend = grindingTrendEnabled && isBearAlignedFull && (currentAdx >= effectiveAdxThreshold) && (trendStrength >= 0.25) && (spread21to50Percent >= minEmaSpacing);
+    const hasGrindingTrendEvidence = isGrindingUptrend || isGrindingDowntrend;
+
+    const isStrongUptrend = (isBullAligned && (
       currentAdx > adxThreshold ||
       trendStrength > 0.4 ||
-      (isBearAlignedFull && (currentAdx > 15.0 || trendStrength > 0.25 || spread21to50Percent > 0.0005))
-    );
+      (isBullAlignedFull && (currentAdx > effectiveAdxThreshold || trendStrength > 0.25 || spread21to50Percent > 0.0005))
+    )) || isGrindingUptrend;
+
+    const isStrongDowntrend = (isBearAligned && (
+      currentAdx > adxThreshold ||
+      trendStrength > 0.4 ||
+      (isBearAlignedFull && (currentAdx > effectiveAdxThreshold || trendStrength > 0.25 || spread21to50Percent > 0.0005))
+    )) || isGrindingDowntrend;
 
     let regime = MarketRegime.RANGE_BOUND;
     let confidence = 0.5;
 
     // Step 1: Volatility Extremes
-    if (atrExpansionRatio < 0.6) {
+    if (atrExpansionRatio < 0.6 && !hasGrindingTrendEvidence) {
       regime = MarketRegime.LOW_VOLATILITY;
       confidence = 0.65 + (0.6 - atrExpansionRatio) * 0.5;
     } else if (atrExpansionRatio > 1.5) {
       regime = MarketRegime.HIGH_VOLATILITY;
       confidence = 0.7 + (atrExpansionRatio - 1.5) * 0.2;
     } 
-    // Step 2: Compression Intercept (NEW)
-    else if (isSlopeFlat && isRibbonCompressed) {
+    // Step 2: Compression Intercept (Bypassed if clear grinding trend evidence exists)
+    else if (isSlopeFlat && isRibbonCompressed && !hasGrindingTrendEvidence) {
       regime = MarketRegime.RANGE_BOUND;
       confidence = 0.8 + (1 - normalizedSpread / compressionThreshold) * 0.15;
     } 
@@ -6223,9 +6242,9 @@ class TradingEngine {
       this.log(
         `Market Regime Shift detected: [${this.currentRegime}] → [${regime}] (using ${intervalMinutes}m aggregated candles) with confidence ${(
           confidence * 100
-         ).toFixed(1)}%. Real ADX: ${currentAdx.toFixed(1)}, ATR Expansion: ${atrExpansionRatio.toFixed(
+        ).toFixed(1)}%. Real ADX: ${currentAdx.toFixed(1)} (Effective Thresh: ${effectiveAdxThreshold.toFixed(1)}), ATR Expansion: ${atrExpansionRatio.toFixed(
           2
-        )}x`
+        )}x${hasGrindingTrendEvidence ? " [Grinding Trend Exemption Active]" : ""}`
       );
 
       // Record regime change to DB

@@ -1334,15 +1334,43 @@ class TradingEngine {
     } else {
       // --- ENHANCED INTELLIGENT ENTRY SIGNAL DETECTION & PULLBACK PROXIMITY ---
       const recentCandles = this.candles1m.slice(-10);
+      const startRecentIdx = this.candles1m.length - recentCandles.length;
 
-      const recentPullbackToEma9Long = recentCandles.some(c => c.low <= ema9[lastIdx] * 1.0025 && c.high >= ema9[lastIdx] * 0.9975);
-      const recentPullbackToEma20Long = recentCandles.some(c => c.low <= ema20Val * 1.0030 && c.high >= ema20Val * 0.9970);
-      const recentPullbackToEma50Long = recentCandles.some(c => c.low <= ema50Val * 1.0030 && c.high >= ema50Val * 0.9970);
+      const ema20Series = this.calculateEMA(closes, ms.fast_ema_period || 20);
+      const ema50Series = this.calculateEMA(closes, ms.medium_ema_period || 50);
+
+      const recentPullbackToEma9Long = recentCandles.some((c, i) => {
+        const cIdx = startRecentIdx + i;
+        const e9 = ema9[cIdx] !== undefined ? ema9[cIdx] : ema9[lastIdx];
+        return c.low <= e9 * 1.0025 && c.high >= e9 * 0.9975;
+      });
+      const recentPullbackToEma20Long = recentCandles.some((c, i) => {
+        const cIdx = startRecentIdx + i;
+        const e20 = ema20Series[cIdx] !== undefined ? ema20Series[cIdx] : ema20Val;
+        return c.low <= e20 * 1.0030 && c.high >= e20 * 0.9970;
+      });
+      const recentPullbackToEma50Long = recentCandles.some((c, i) => {
+        const cIdx = startRecentIdx + i;
+        const e50 = ema50Series[cIdx] !== undefined ? ema50Series[cIdx] : ema50Val;
+        return c.low <= e50 * 1.0030 && c.high >= e50 * 0.9970;
+      });
       const recentPullbackToVwapLong = recentCandles.some(c => c.low <= vwapVal * 1.0030 && c.high >= vwapVal * 0.9970);
 
-      const recentPullbackToEma9Short = recentCandles.some(c => c.high >= ema9[lastIdx] * 0.9975 && c.low <= ema9[lastIdx] * 1.0025);
-      const recentPullbackToEma20Short = recentCandles.some(c => c.high >= ema20Val * 0.9970 && c.low <= ema20Val * 1.0030);
-      const recentPullbackToEma50Short = recentCandles.some(c => c.high >= ema50Val * 0.9970 && c.low <= ema50Val * 1.0030);
+      const recentPullbackToEma9Short = recentCandles.some((c, i) => {
+        const cIdx = startRecentIdx + i;
+        const e9 = ema9[cIdx] !== undefined ? ema9[cIdx] : ema9[lastIdx];
+        return c.high >= e9 * 0.9975 && c.low <= e9 * 1.0025;
+      });
+      const recentPullbackToEma20Short = recentCandles.some((c, i) => {
+        const cIdx = startRecentIdx + i;
+        const e20 = ema20Series[cIdx] !== undefined ? ema20Series[cIdx] : ema20Val;
+        return c.high >= e20 * 0.9970 && c.low <= e20 * 1.0030;
+      });
+      const recentPullbackToEma50Short = recentCandles.some((c, i) => {
+        const cIdx = startRecentIdx + i;
+        const e50 = ema50Series[cIdx] !== undefined ? ema50Series[cIdx] : ema50Val;
+        return c.high >= e50 * 0.9970 && c.low <= e50 * 1.0030;
+      });
       const recentPullbackToVwapShort = recentCandles.some(c => c.high >= vwapVal * 0.9970 && c.low <= vwapVal * 1.0030);
 
       const pbStatus = this.detectPullbackTrendlineBreak();
@@ -7756,10 +7784,11 @@ class TradingEngine {
       
       const activationRatio = config.risk_management.trailing_stop_loss_activation_ratio !== undefined
         ? config.risk_management.trailing_stop_loss_activation_ratio
-        : 1.2;
+        : 0.6;
       
       let trailingActivated = this.activeTrade.feature_snapshot.trailing_activated === true;
-      
+      const roundtripFeeBtc = (entryFee + exitFeeProj) / qty;
+
       if (direction === TradeDirection.LONG) {
         // Track maximum price observed since entry
         const peakPrice = Math.max(
@@ -7768,7 +7797,10 @@ class TradingEngine {
         );
         this.activeTrade.feature_snapshot.peak_price = peakPrice;
         
-        // Trailing Stop Loss is placed distance below peakPrice
+        // Breakeven price floor covering roundtrip trading fees
+        const breakevenPriceLong = entryPrice + roundtripFeeBtc + 5;
+        
+        // Trailing Stop Loss is placed distance below peakPrice, but never below breakeven once activated
         const trailingSl = peakPrice - tsldistance;
         this.activeTrade.feature_snapshot.trailing_stop_loss_price = trailingSl;
         
@@ -7778,13 +7810,13 @@ class TradingEngine {
           if (reachedTarget) {
             trailingActivated = true;
             this.activeTrade.feature_snapshot.trailing_activated = true;
-            this.log(`📈 Trailing Stop Loss ACTIVATED for trade ${this.activeTrade.id}! Peak profit reached ${activationRatio}x of risk threshold ($${(stopLossDistance * activationRatio).toFixed(2)} USD in profit).`);
+            this.log(`📈 Trailing Stop Loss & Breakeven Protection ACTIVATED for trade ${this.activeTrade.id}! Peak profit reached ${activationRatio}x of risk threshold ($${(stopLossDistance * activationRatio).toFixed(2)} USD in profit). Locked breakeven floor at $${breakevenPriceLong.toFixed(2)}.`);
           }
         }
         
-        // Apply trailing stop loss ONLY if activated
+        // Apply trailing stop loss ONLY if activated (guaranteeing at least breakeven protection)
         if (trailingActivated) {
-          finalStopLossPrice = Math.max(stopLossPrice, trailingSl);
+          finalStopLossPrice = Math.max(stopLossPrice, Math.max(trailingSl, breakevenPriceLong));
         } else {
           finalStopLossPrice = stopLossPrice;
         }
@@ -7796,7 +7828,10 @@ class TradingEngine {
         );
         this.activeTrade.feature_snapshot.valley_price = valleyPrice;
         
-        // Trailing Stop Loss is placed distance above valleyPrice
+        // Breakeven price ceiling covering roundtrip trading fees
+        const breakevenPriceShort = entryPrice - roundtripFeeBtc - 5;
+        
+        // Trailing Stop Loss is placed distance above valleyPrice, but never above breakeven once activated
         const trailingSl = valleyPrice + tsldistance;
         this.activeTrade.feature_snapshot.trailing_stop_loss_price = trailingSl;
         
@@ -7806,13 +7841,13 @@ class TradingEngine {
           if (reachedTarget) {
             trailingActivated = true;
             this.activeTrade.feature_snapshot.trailing_activated = true;
-            this.log(`📉 Trailing Stop Loss ACTIVATED for trade ${this.activeTrade.id}! Peak profit reached ${activationRatio}x of risk threshold ($${(stopLossDistance * activationRatio).toFixed(2)} USD in profit).`);
+            this.log(`📉 Trailing Stop Loss & Breakeven Protection ACTIVATED for trade ${this.activeTrade.id}! Peak profit reached ${activationRatio}x of risk threshold ($${(stopLossDistance * activationRatio).toFixed(2)} USD in profit). Locked breakeven ceiling at $${breakevenPriceShort.toFixed(2)}.`);
           }
         }
         
-        // Apply trailing stop loss ONLY if activated
+        // Apply trailing stop loss ONLY if activated (guaranteeing at least breakeven protection)
         if (trailingActivated) {
-          finalStopLossPrice = Math.min(stopLossPrice, trailingSl);
+          finalStopLossPrice = Math.min(stopLossPrice, Math.min(trailingSl, breakevenPriceShort));
         } else {
           finalStopLossPrice = stopLossPrice;
         }

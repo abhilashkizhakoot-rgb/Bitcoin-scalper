@@ -4045,8 +4045,8 @@ class TradingEngine {
       }
 
       const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isLongRejectionConfirmed && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
-      const hasRetracedToEmaSinceBreakout = recentPostBreakoutCandles.some(c => c.low <= emaRetraceThresholdFirst || c.low <= emaRetraceThresholdSecond);
-      const isFallbackEmaPushbackValid = isFallbackCrossoverBullish && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
+      const hasRetracedToEmaSinceBreakout = postBreakoutCandles.some(c => c.low <= emaRetraceThresholdFirst || c.low <= emaRetraceThresholdSecond);
+      const isFallbackEmaPushbackValid = isFallbackCrossoverBullish && (hasRetracedToEmaSinceBreakout || touchesFirstEma || touchesSecondEma);
 
       const isEmaPushbackValid = (isRegularEmaPushbackValid || isFallbackEmaPushbackValid) && !isSetup2Invalidated;
       let emaPushbackMessage = "";
@@ -4389,8 +4389,8 @@ class TradingEngine {
       }
 
       const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isShortRejectionConfirmed && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
-      const hasRetracedToEmaSinceBreakout = recentPostBreakoutCandles.some(c => c.high >= emaRetraceThresholdFirst || c.high >= emaRetraceThresholdSecond);
-      const isFallbackEmaPushbackValid = isFallbackCrossoverBearish && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
+      const hasRetracedToEmaSinceBreakout = postBreakoutCandles.some(c => c.high >= emaRetraceThresholdFirst || c.high >= emaRetraceThresholdSecond);
+      const isFallbackEmaPushbackValid = isFallbackCrossoverBearish && (hasRetracedToEmaSinceBreakout || touchesFirstEma || touchesSecondEma);
 
       const isEmaPushbackValid = (isRegularEmaPushbackValid || isFallbackEmaPushbackValid) && !isSetup2Invalidated;
       let emaPushbackMessage = "";

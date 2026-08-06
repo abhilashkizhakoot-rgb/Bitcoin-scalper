@@ -181,8 +181,8 @@ const DEFAULT_CONFIG: StrategyConfig = {
   risk_management: {
     risk_per_trade_pct: 0.5,
     max_risk_per_trade_pct: 1.0,
-    stop_loss_atr_multiplier: 1.8,
-    take_profit_ratio: 2.0,
+    stop_loss_atr_multiplier: 2.2,
+    take_profit_ratio: 2.5,
     max_consecutive_losses: 3,
     consecutive_losses_cooldown_minutes: 30,
     daily_loss_limit_pct: 2.0,
@@ -195,9 +195,9 @@ const DEFAULT_CONFIG: StrategyConfig = {
     delta_scalper_offer_enabled: true,
     default_order_execution: "TAKER",
     trailing_stop_loss_enabled: true,
-    trailing_stop_loss_distance_atr: 1.2,
-    trailing_stop_loss_activation_ratio: 0.6,
-    min_stop_loss_distance_usd: 100,
+    trailing_stop_loss_distance_atr: 1.8,
+    trailing_stop_loss_activation_ratio: 1.2,
+    min_stop_loss_distance_usd: 80,
     min_stop_loss_distance_pct: 0.12,
     static_stop_loss_enabled: false,
     static_stop_loss_value_usd: 150,
@@ -230,9 +230,6 @@ const DEFAULT_CONFIG: StrategyConfig = {
     fast_ema_period: 20,
     medium_ema_period: 50,
     slow_ema_period: 200,
-    rsi_enhanced_range_trend_alignment_enabled: true,
-    range_rsi_oversold_threshold: 40,
-    range_rsi_overbought_threshold: 60,
     micro_trend_alignment_enabled: true,
     micro_trend_fast_period: 5,
     micro_trend_slow_period: 15,
@@ -249,10 +246,6 @@ const DEFAULT_CONFIG: StrategyConfig = {
     crossover_only_lookback_candles: 5,
     timeframe_minutes: 5,
     very_high_probability_threshold: 0.82,
-    liquidity_sweep_enabled: true,
-    liquidity_sweep_lookback_candles: 20,
-    liquidity_sweep_min_wick_ratio: 0.35,
-    liquidity_sweep_volume_mult: 1.0,
   },
   gate_scoring: {
     enabled: true,
@@ -1131,9 +1124,6 @@ class DatabaseManager {
       if (ms.fast_ema_period === undefined) { ms.fast_ema_period = def.fast_ema_period || 20; changed = true; }
       if (ms.medium_ema_period === undefined) { ms.medium_ema_period = def.medium_ema_period || 50; changed = true; }
       if (ms.slow_ema_period === undefined) { ms.slow_ema_period = def.slow_ema_period || 200; changed = true; }
-      if (ms.rsi_enhanced_range_trend_alignment_enabled === undefined) { ms.rsi_enhanced_range_trend_alignment_enabled = def.rsi_enhanced_range_trend_alignment_enabled !== false; changed = true; }
-      if (ms.range_rsi_oversold_threshold === undefined) { ms.range_rsi_oversold_threshold = def.range_rsi_oversold_threshold ?? 40; changed = true; }
-      if (ms.range_rsi_overbought_threshold === undefined) { ms.range_rsi_overbought_threshold = def.range_rsi_overbought_threshold ?? 60; changed = true; }
       if (ms.micro_trend_alignment_enabled === undefined) { ms.micro_trend_alignment_enabled = def.micro_trend_alignment_enabled !== false; changed = true; }
       if (ms.micro_trend_fast_period === undefined) { ms.micro_trend_fast_period = def.micro_trend_fast_period || 5; changed = true; }
       if (ms.micro_trend_slow_period === undefined) { ms.micro_trend_slow_period = def.micro_trend_slow_period || 15; changed = true; }
@@ -1150,10 +1140,6 @@ class DatabaseManager {
       if (ms.crossover_only_lookback_candles === undefined) { ms.crossover_only_lookback_candles = def.crossover_only_lookback_candles !== undefined ? def.crossover_only_lookback_candles : 5; changed = true; }
       if (ms.timeframe_minutes === undefined) { ms.timeframe_minutes = def.timeframe_minutes || 5; changed = true; }
       if (ms.very_high_probability_threshold === undefined) { ms.very_high_probability_threshold = def.very_high_probability_threshold || 0.82; changed = true; }
-      if (ms.liquidity_sweep_enabled === undefined) { ms.liquidity_sweep_enabled = def.liquidity_sweep_enabled !== undefined ? def.liquidity_sweep_enabled : true; changed = true; }
-      if (ms.liquidity_sweep_lookback_candles === undefined) { ms.liquidity_sweep_lookback_candles = def.liquidity_sweep_lookback_candles || 20; changed = true; }
-      if (ms.liquidity_sweep_min_wick_ratio === undefined) { ms.liquidity_sweep_min_wick_ratio = def.liquidity_sweep_min_wick_ratio || 0.35; changed = true; }
-      if (ms.liquidity_sweep_volume_mult === undefined) { ms.liquidity_sweep_volume_mult = def.liquidity_sweep_volume_mult || 1.0; changed = true; }
     }
 
     if (!this.cache?.config?.gate_scoring) {

@@ -188,7 +188,6 @@ export interface StrategyConfig {
     regime_macro_slope_lookback?: number;
     regime_macro_slope_threshold?: number;
     regime_ribbon_compression_threshold?: number;
-    regime_grinding_trend_exemption_enabled?: boolean;
     require_volume_profile_in_ranging?: boolean;
     regime_adaptive_gates_enabled?: boolean;
     regime_adaptive_preset?: "BALANCED_ADAPTIVE" | "DEFENSIVE_STRICT" | "AGGRESSIVE_TREND" | "CUSTOM";
@@ -250,10 +249,6 @@ export interface StrategyConfig {
     overextension_ema_ranging_threshold?: number; // EMA overextension threshold in ranging/other markets (default: 1.2)
     overextension_vwap_trending_multiplier?: number; // VWAP band multiplier in trending markets (default: 1.5)
     overextension_vwap_ranging_multiplier?: number; // VWAP band multiplier in ranging/other markets (default: 1.0)
-    zscore_softening_enabled?: boolean; // Enable/disable momentum Z-score overextension softening
-    adx_exhaustion_cap_enabled?: boolean; // Enable Parabolic ADX Exhaustion Cap (default: true)
-    adx_exhaustion_threshold?: number; // ADX threshold for parabolic exhaustion (default: 45)
-    adx_exhaustion_max_ema_dist_atr?: number; // Max distance from 20 EMA in ATR multiplier to allow entry (default: 0.5)
   };
   market_structure: {
     min_breakout_body_ratio: number; // e.g. 0.22 (22% body ratio)
@@ -275,9 +270,6 @@ export interface StrategyConfig {
     fast_ema_period?: number; // Fast EMA period (default: 20)
     medium_ema_period?: number; // Medium EMA period (default: 50)
     slow_ema_period?: number; // Slow EMA period (default: 200)
-    rsi_enhanced_range_trend_alignment_enabled?: boolean; // Enable RSI-Enhanced Trend Alignment in Ranging Markets (default: true)
-    range_rsi_oversold_threshold?: number; // Max RSI for LONG relief in range-bound market (default: 40)
-    range_rsi_overbought_threshold?: number; // Min RSI for SHORT relief in range-bound market (default: 60)
     micro_trend_alignment_enabled?: boolean; // Enable Micro-Trend Alignment Filter (default: true)
     micro_trend_fast_period?: number; // Fast period for micro-trend tracking (default: 5)
     micro_trend_slow_period?: number; // Slow period for micro-trend tracking (default: 15)
@@ -294,10 +286,6 @@ export interface StrategyConfig {
     crossover_only_lookback_candles?: number; // Max lookback candles for crossover event check (default: 5)
     timeframe_minutes?: number; // Market Structure Timeframe in minutes (default: 5)
     very_high_probability_threshold?: number; // Probability threshold above which direct breakouts are traded, otherwise waiting for pullback (default: 0.82)
-    liquidity_sweep_enabled?: boolean; // Enable Liquidity Sweep Strategy (Setup 3) (default: true)
-    liquidity_sweep_lookback_candles?: number; // Lookback candles to identify liquidity pools (default: 20)
-    liquidity_sweep_min_wick_ratio?: number; // Minimum wick ratio for sweep candle (default: 0.35)
-    liquidity_sweep_volume_mult?: number; // Minimum volume multiplier for liquidity sweep (default: 1.0)
   };
   gate_scoring?: {
     enabled: boolean;
@@ -323,32 +311,20 @@ export interface StrategyConfig {
         trend_alignment_weight_boost: number;
         catboost_weight_boost: number;
         volume_profile_weight_boost?: number;
-        adx_strength_weight_boost?: number;
-        order_flow_weight_boost?: number;
-        squeeze_filter_weight_reduction?: number;
       };
       ranging: {
         order_flow_weight_boost: number;
         trend_alignment_weight_reduction: number;
         volume_profile_weight_boost?: number;
-        overextension_weight_boost?: number;
-        order_book_weight_boost?: number;
-        adx_strength_weight_reduction?: number;
       };
       high_volatility: {
         relative_volume_weight_boost: number;
         overextension_weight_boost: number;
         volume_profile_weight_boost?: number;
-        order_book_weight_boost?: number;
-        order_flow_weight_boost?: number;
-        trend_alignment_weight_reduction?: number;
       };
       low_volatility: {
         squeeze_filter_weight_boost: number;
         volume_profile_weight_boost?: number;
-        wedge_filter_weight_boost?: number;
-        relative_volume_weight_reduction?: number;
-        order_flow_weight_boost?: number;
       };
     };
   };

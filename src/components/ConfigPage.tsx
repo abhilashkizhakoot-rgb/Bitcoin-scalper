@@ -31,10 +31,15 @@ const AVAILABLE_GATES = [
   { id: "regime", label: "Market Regime Lock", supportsWeight: true },
   { id: "trend", label: "Exponential Trend Alignment", supportsWeight: true },
   { id: "volume", label: "Relative Volume Confirmation", supportsWeight: true },
-  { id: "preflight", label: "Pre-Flight Account & Operational Safety Gate", supportsWeight: false },
+  { id: "limit", label: "Daily Trade Count Limit", supportsWeight: false },
   { id: "adx", label: "ADX Trend Strength Filter", supportsWeight: true },
+  { id: "equity", label: "Minimum Account Equity Check", supportsWeight: false },
+  { id: "credentials", label: "Exchange API Credentials Validation", supportsWeight: false },
+  { id: "cooldown", label: "Loss Streak Cooldown Protection", supportsWeight: false },
   { id: "timing", label: "Optimal Session Timing Window Check (IST)", supportsWeight: false },
-  { id: "value_extension", label: "Unified Value Extension Anchor", supportsWeight: true },
+  { id: "vwap", label: "VWAP Deviation Anchor Check", supportsWeight: true },
+  { id: "wedge", label: "Wedge Pattern Filter", supportsWeight: true },
+  { id: "ema100", label: "EMA 100 Overextension Protection", supportsWeight: true },
   { id: "structure", label: "Market Structure Confirmation", supportsWeight: false },
   { id: "orderflow", label: "Binance Order Flow Confirmation", supportsWeight: true },
   { id: "squeeze", label: "Volatility Compression (Squeeze) Filter", supportsWeight: true },
@@ -123,45 +128,29 @@ export default function ConfigPage({
       trend_alignment: 10,
       adx_strength: 5,
       relative_volume: 10,
-      overextension: 10,
+      overextension: 5,
+      ema100_overextension: 5,
       wedge_filter: 5,
       order_flow: 10,
       squeeze_filter: 5,
       order_book: 5,
-      volume_profile: 10,
       ...((config.gate_scoring && config.gate_scoring.weights) || {}),
     },
     adaptive_modifiers: {
       trending: {
         trend_alignment_weight_boost: 10,
         catboost_weight_boost: 5,
-        volume_profile_weight_boost: -5,
-        adx_strength_weight_boost: 10,
-        order_flow_weight_boost: 5,
-        squeeze_filter_weight_reduction: -10,
       },
       ranging: {
         order_flow_weight_boost: 15,
         trend_alignment_weight_reduction: -10,
-        volume_profile_weight_boost: 10,
-        overextension_weight_boost: 15,
-        order_book_weight_boost: 10,
-        adx_strength_weight_reduction: -10,
       },
       high_volatility: {
         relative_volume_weight_boost: 10,
         overextension_weight_boost: 10,
-        volume_profile_weight_boost: 5,
-        order_book_weight_boost: 15,
-        order_flow_weight_boost: 10,
-        trend_alignment_weight_reduction: -5,
       },
       low_volatility: {
         squeeze_filter_weight_boost: 15,
-        volume_profile_weight_boost: 0,
-        wedge_filter_weight_boost: 10,
-        relative_volume_weight_reduction: -5,
-        order_flow_weight_boost: 10,
       },
     },
   });
@@ -183,9 +172,6 @@ export default function ConfigPage({
     fast_ema_period: 20,
     medium_ema_period: 50,
     slow_ema_period: 200,
-    rsi_enhanced_range_trend_alignment_enabled: true,
-    range_rsi_oversold_threshold: 40,
-    range_rsi_overbought_threshold: 60,
     micro_trend_alignment_enabled: true,
     micro_trend_fast_period: 5,
     micro_trend_slow_period: 15,
@@ -231,14 +217,13 @@ export default function ConfigPage({
         order_book_max_imbalance: 0.35,
         order_book_max_spoof_risk: 70,
         required_gates: [
-          "catboost", "regime", "trend", "volume", "preflight", "adx",
-          "timing", "value_extension", "wedge", "structure", "orderflow", "squeeze",
+          "catboost", "regime", "trend", "volume", "limit", "adx", "equity", "credentials",
+          "cooldown", "timing", "vwap", "wedge", "ema100", "structure", "orderflow", "squeeze",
           "orderbook", "volume_profile", "atr", "regime_cooldown"
         ],
         regime_macro_slope_lookback: 5,
         regime_macro_slope_threshold: 0.0005,
         regime_ribbon_compression_threshold: 0.0015,
-        regime_grinding_trend_exemption_enabled: true,
       },
       risk_management: {
         default_quantity_btc: 0.001,
@@ -258,10 +243,6 @@ export default function ConfigPage({
         daily_loss_limit_pct: 2.0,
         weekly_loss_limit_pct: 5.0,
         intra_trade_drawdown_limit_pct: 1.5,
-        zscore_softening_enabled: true,
-        adx_exhaustion_cap_enabled: true,
-        adx_exhaustion_threshold: 45,
-        adx_exhaustion_max_ema_dist_atr: 0.5,
       },
       ml_settings: {
         entry_threshold_long: 0.8,
@@ -292,9 +273,6 @@ export default function ConfigPage({
         fast_ema_period: 20,
         medium_ema_period: 50,
         slow_ema_period: 200,
-        rsi_enhanced_range_trend_alignment_enabled: true,
-        range_rsi_oversold_threshold: 40,
-        range_rsi_overbought_threshold: 60,
         micro_trend_alignment_enabled: true,
         micro_trend_fast_period: 5,
         micro_trend_slow_period: 15,
@@ -494,7 +472,7 @@ export default function ConfigPage({
     
     // Calculate new mandatory gates list
     let currentMandatory = generalConfig.mandatory_gates ? [...generalConfig.mandatory_gates] : [
-      "preflight", "timing", "structure", "atr", "regime_cooldown"
+      "limit", "equity", "credentials", "cooldown", "timing", "structure", "atr", "regime_cooldown"
     ];
     if (mode === "MANDATORY") {
       if (!currentMandatory.includes(gateId)) currentMandatory.push(gateId);
@@ -979,22 +957,6 @@ export default function ConfigPage({
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Threshold standard deviation of EMAs (9, 21, 50) relative to price below which they are considered compressed/tangled. Default is 0.0015.
-                  </p>
-                </div>
-
-                <div className="md:col-span-2 space-y-2 pt-2 border-t border-slate-100">
-                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
-                    <input
-                      type="checkbox"
-                      checked={generalConfig.regime_grinding_trend_exemption_enabled !== false}
-                      onChange={(e) => setGeneralConfig({ ...generalConfig, regime_grinding_trend_exemption_enabled: e.target.checked })}
-                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
-                      id="config-regime-grinding-exemption-toggle"
-                    />
-                    <span className="text-xs font-semibold text-slate-700">Enable Low-Liquidity Grinding Trend Exemption</span>
-                  </label>
-                  <p className="text-[10px] text-slate-500 leading-relaxed pl-6.5">
-                    Bypasses Step 2 RANGE_BOUND compression intercept during low liquidity (weekends / Asian session) when full 4-EMA alignment, ATR-adaptive ADX strength, and minimum EMA spacing strictly confirm an active directional grinding trend.
                   </p>
                 </div>
 
@@ -1904,72 +1866,6 @@ export default function ConfigPage({
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Multiplier for VWAP standard deviation bands in range-bound environments. Set to 1.0 to block trades near outer range boundaries (Default: 1.0).
                   </p>
-                </div>
-
-                <div className="md:col-span-2 space-y-2 pt-3 border-t border-slate-100">
-                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
-                    <input
-                      type="checkbox"
-                      checked={riskConfig.zscore_softening_enabled !== false}
-                      onChange={(e) => setRiskConfig({ ...riskConfig, zscore_softening_enabled: e.target.checked })}
-                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
-                    />
-                    <span className="text-xs font-semibold text-slate-700">Enable Z-Score Overextension Softening</span>
-                  </label>
-                  <p className="text-[10px] text-slate-500 leading-relaxed pl-6.5">
-                    When enabled, strong trend momentum or extreme order flow pressure softens the Unified Value Extension Z-Score overextension ceiling from base Z (2.0/2.2) up to 3.20. Uncheck this toggle to disable softening and strictly enforce base Z-score limits, blocking entries when overextended even during momentum surges.
-                  </p>
-                </div>
-
-                <div className="md:col-span-2 space-y-3 pt-3 border-t border-slate-100">
-                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
-                    <input
-                      type="checkbox"
-                      checked={riskConfig.adx_exhaustion_cap_enabled !== false}
-                      onChange={(e) => setRiskConfig({ ...riskConfig, adx_exhaustion_cap_enabled: e.target.checked })}
-                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
-                    />
-                    <span className="text-xs font-semibold text-slate-700">Enable Parabolic ADX Exhaustion Cap</span>
-                  </label>
-                  <p className="text-[10px] text-slate-500 leading-relaxed pl-6.5">
-                    Caps new entries when ADX exceeds the exhaustion threshold unless price is within a pullback distance of the 20 EMA. When ADX exceeds 45, market moves are often in an exhaustion phase.
-                  </p>
-
-                  {riskConfig.adx_exhaustion_cap_enabled !== false && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-6.5 pt-1">
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-mono text-slate-400 uppercase">ADX Exhaustion Threshold</label>
-                        <input
-                          type="number"
-                          step="1"
-                          min="10"
-                          max="100"
-                          value={riskConfig.adx_exhaustion_threshold !== undefined ? riskConfig.adx_exhaustion_threshold : 45}
-                          onChange={(e) => setRiskConfig({ ...riskConfig, adx_exhaustion_threshold: parseInputNumber(e.target.value, true) })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                        />
-                        <p className="text-[10px] text-slate-400 leading-relaxed">
-                          ADX level above which moves are treated as parabolic exhaustion (Default: 45).
-                        </p>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-mono text-slate-400 uppercase">Max 20 EMA Pullback Dist (ATR Multiplier)</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0.1"
-                          max="3.0"
-                          value={riskConfig.adx_exhaustion_max_ema_dist_atr !== undefined ? riskConfig.adx_exhaustion_max_ema_dist_atr : 0.5}
-                          onChange={(e) => setRiskConfig({ ...riskConfig, adx_exhaustion_max_ema_dist_atr: parseInputNumber(e.target.value, true) })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                        />
-                        <p className="text-[10px] text-slate-400 leading-relaxed">
-                          Maximum distance between price and 20 EMA (in ATR multiplier) to allow entry during ADX exhaustion (Default: 0.5x ATR).
-                        </p>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
@@ -2899,66 +2795,6 @@ export default function ConfigPage({
                 </div>
 
                 <div className="space-y-1.5 md:col-span-2 border-t border-slate-100 pt-4">
-                  <h4 className="text-xs font-sans font-semibold text-slate-700 uppercase tracking-wider mb-1">RSI-Enhanced Range-Bound Trend Alignment</h4>
-                </div>
-
-                <div className="space-y-1.5 flex items-center justify-between md:col-span-2 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-sans font-semibold text-slate-700">Enable RSI-Enhanced Range Alignment</span>
-                    <p className="text-[10px] text-slate-400 leading-relaxed">
-                      In RANGE_BOUND regime, allows valid mean-reversion entries to pass the Trend Alignment gate when RSI reaches oversold (40 or lower for LONG) or overbought (60 or higher for SHORT) levels even if EMAs are opposing.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setMsConfig({ ...msConfig, rsi_enhanced_range_trend_alignment_enabled: !msConfig.rsi_enhanced_range_trend_alignment_enabled })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.rsi_enhanced_range_trend_alignment_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.rsi_enhanced_range_trend_alignment_enabled !== false ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Range LONG RSI Oversold Relief Threshold</label>
-                  <input
-                    type="number"
-                    step="1"
-                    min="10"
-                    max="50"
-                    disabled={msConfig.rsi_enhanced_range_trend_alignment_enabled === false}
-                    value={msConfig.range_rsi_oversold_threshold !== undefined ? msConfig.range_rsi_oversold_threshold : 40}
-                    onChange={(e) => setMsConfig({ ...msConfig, range_rsi_oversold_threshold: parseInputNumber(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
-                  />
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Maximum RSI level to unlock LONG trades when trend is bear-aligned in range-bound regime (Default: 40).
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Range SHORT RSI Overbought Relief Threshold</label>
-                  <input
-                    type="number"
-                    step="1"
-                    min="50"
-                    max="90"
-                    disabled={msConfig.rsi_enhanced_range_trend_alignment_enabled === false}
-                    value={msConfig.range_rsi_overbought_threshold !== undefined ? msConfig.range_rsi_overbought_threshold : 60}
-                    onChange={(e) => setMsConfig({ ...msConfig, range_rsi_overbought_threshold: parseInputNumber(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
-                  />
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Minimum RSI level to unlock SHORT trades when trend is bull-aligned in range-bound regime (Default: 60).
-                  </p>
-                </div>
-
-                <div className="space-y-1.5 md:col-span-2 border-t border-slate-100 pt-4">
                   <h4 className="text-xs font-sans font-semibold text-slate-700 uppercase tracking-wider mb-1">Solution A: Micro-Trend Alignment Filters</h4>
                 </div>
 
@@ -3437,7 +3273,7 @@ export default function ConfigPage({
 
                   <div className="space-y-1.5">
                     <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
-                      <span>Unified Value Extension Anchor (Z-Score)</span>
+                      <span>VWAP Deviation Anchor Check</span>
                     </label>
                     <input
                       type="number"
@@ -3451,7 +3287,45 @@ export default function ConfigPage({
                       })}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
                     />
-                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of normalized Z-score distance from fair value (VWAP deviation + EMA 100 + velocity).</p>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of VWAP standard deviation band limits.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>EMA 100 Overextension Protection</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.ema100_overextension !== undefined ? gateScoringConfig.weights.ema100_overextension : 5}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, ema100_overextension: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of 100 EMA deviation limits to prevent chasing tops/bottoms.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase flex justify-between">
+                      <span>Wedge Pattern Filter</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      value={gateScoringConfig.weights.wedge_filter}
+                      onChange={(e) => setGateScoringConfig({
+                        ...gateScoringConfig,
+                        weights: { ...gateScoringConfig.weights, wedge_filter: Number(e.target.value) }
+                      })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 outline-none font-mono focus:ring-1 focus:ring-indigo-400"
+                    />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">Weight of active wedge breakout structural validations.</p>
                   </div>
 
                   <div className="space-y-1.5">
@@ -3542,7 +3416,7 @@ export default function ConfigPage({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {/* Trending Modifier */}
                   <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 space-y-3">
-                    <span className="text-xs font-semibold text-indigo-700 block uppercase tracking-wider">Trending Conditions</span>
+                    <span className="text-xs font-semibold text-slate-700 block">Trending Conditions</span>
                     <div className="space-y-3">
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
@@ -3568,7 +3442,7 @@ export default function ConfigPage({
                       </div>
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>CatBoost AI Weight Boost</span>
+                          <span>CatBoost Weight Boost</span>
                           <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.trending?.catboost_weight_boost ?? 5}%</span>
                         </label>
                         <input
@@ -3582,50 +3456,6 @@ export default function ConfigPage({
                               trending: {
                                 ...gateScoringConfig.adaptive_modifiers?.trending,
                                 catboost_weight_boost: Number(e.target.value)
-                              }
-                            }
-                          })}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>ADX Trend Strength Boost</span>
-                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.trending?.adx_strength_weight_boost ?? 10}%</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          value={gateScoringConfig.adaptive_modifiers?.trending?.adx_strength_weight_boost ?? 10}
-                          onChange={(e) => setGateScoringConfig({
-                            ...gateScoringConfig,
-                            adaptive_modifiers: {
-                              ...gateScoringConfig.adaptive_modifiers,
-                              trending: {
-                                ...gateScoringConfig.adaptive_modifiers?.trending,
-                                adx_strength_weight_boost: Number(e.target.value)
-                              }
-                            }
-                          })}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>Order Flow Weight Boost</span>
-                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.trending?.order_flow_weight_boost ?? 5}%</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          value={gateScoringConfig.adaptive_modifiers?.trending?.order_flow_weight_boost ?? 5}
-                          onChange={(e) => setGateScoringConfig({
-                            ...gateScoringConfig,
-                            adaptive_modifiers: {
-                              ...gateScoringConfig.adaptive_modifiers,
-                              trending: {
-                                ...gateScoringConfig.adaptive_modifiers?.trending,
-                                order_flow_weight_boost: Number(e.target.value)
                               }
                             }
                           })}
@@ -3657,34 +3487,12 @@ export default function ConfigPage({
                           className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
                         />
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>Squeeze Filter Weight Reduction</span>
-                          <span className="text-indigo-600 font-semibold font-mono">{gateScoringConfig.adaptive_modifiers?.trending?.squeeze_filter_weight_reduction ?? -10}%</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          value={gateScoringConfig.adaptive_modifiers?.trending?.squeeze_filter_weight_reduction ?? -10}
-                          onChange={(e) => setGateScoringConfig({
-                            ...gateScoringConfig,
-                            adaptive_modifiers: {
-                              ...gateScoringConfig.adaptive_modifiers,
-                              trending: {
-                                ...gateScoringConfig.adaptive_modifiers?.trending,
-                                squeeze_filter_weight_reduction: Number(e.target.value)
-                              }
-                            }
-                          })}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
-                        />
-                      </div>
                     </div>
                   </div>
 
                   {/* Ranging Modifier */}
                   <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 space-y-3">
-                    <span className="text-xs font-semibold text-amber-700 block uppercase tracking-wider">Ranging Conditions</span>
+                    <span className="text-xs font-semibold text-slate-700 block">Ranging Conditions</span>
                     <div className="space-y-3">
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
@@ -3710,50 +3518,6 @@ export default function ConfigPage({
                       </div>
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>Value Extension (Z-Score) Weight Boost</span>
-                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.ranging?.overextension_weight_boost ?? 15}%</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          value={gateScoringConfig.adaptive_modifiers?.ranging?.overextension_weight_boost ?? 15}
-                          onChange={(e) => setGateScoringConfig({
-                            ...gateScoringConfig,
-                            adaptive_modifiers: {
-                              ...gateScoringConfig.adaptive_modifiers,
-                              ranging: {
-                                ...gateScoringConfig.adaptive_modifiers?.ranging,
-                                overextension_weight_boost: Number(e.target.value)
-                              }
-                            }
-                          })}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>Order Book Imbalance Weight Boost</span>
-                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.ranging?.order_book_weight_boost ?? 10}%</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          value={gateScoringConfig.adaptive_modifiers?.ranging?.order_book_weight_boost ?? 10}
-                          onChange={(e) => setGateScoringConfig({
-                            ...gateScoringConfig,
-                            adaptive_modifiers: {
-                              ...gateScoringConfig.adaptive_modifiers,
-                              ranging: {
-                                ...gateScoringConfig.adaptive_modifiers?.ranging,
-                                order_book_weight_boost: Number(e.target.value)
-                              }
-                            }
-                          })}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
                           <span>Trend Alignment Weight Reduction</span>
                           <span className="text-indigo-600 font-semibold font-mono">{gateScoringConfig.adaptive_modifiers?.ranging?.trend_alignment_weight_reduction ?? -10}%</span>
                         </label>
@@ -3768,28 +3532,6 @@ export default function ConfigPage({
                               ranging: {
                                 ...gateScoringConfig.adaptive_modifiers?.ranging,
                                 trend_alignment_weight_reduction: Number(e.target.value)
-                              }
-                            }
-                          })}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>ADX Trend Strength Weight Reduction</span>
-                          <span className="text-indigo-600 font-semibold font-mono">{gateScoringConfig.adaptive_modifiers?.ranging?.adx_strength_weight_reduction ?? -10}%</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          value={gateScoringConfig.adaptive_modifiers?.ranging?.adx_strength_weight_reduction ?? -10}
-                          onChange={(e) => setGateScoringConfig({
-                            ...gateScoringConfig,
-                            adaptive_modifiers: {
-                              ...gateScoringConfig.adaptive_modifiers,
-                              ranging: {
-                                ...gateScoringConfig.adaptive_modifiers?.ranging,
-                                adx_strength_weight_reduction: Number(e.target.value)
                               }
                             }
                           })}
@@ -3826,7 +3568,7 @@ export default function ConfigPage({
 
                   {/* High Volatility Modifier */}
                   <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 space-y-3">
-                    <span className="text-xs font-semibold text-rose-700 block uppercase tracking-wider">High Volatility Conditions</span>
+                    <span className="text-xs font-semibold text-slate-700 block">High Volatility Conditions</span>
                     <div className="space-y-3">
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
@@ -3852,7 +3594,7 @@ export default function ConfigPage({
                       </div>
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>Value Extension (Z-Score) Weight Boost</span>
+                          <span>Overextension Weight Boost</span>
                           <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.high_volatility?.overextension_weight_boost ?? 10}%</span>
                         </label>
                         <input
@@ -3866,50 +3608,6 @@ export default function ConfigPage({
                               high_volatility: {
                                 ...gateScoringConfig.adaptive_modifiers?.high_volatility,
                                 overextension_weight_boost: Number(e.target.value)
-                              }
-                            }
-                          })}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>Order Book Imbalance Depth Boost</span>
-                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.high_volatility?.order_book_weight_boost ?? 15}%</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          value={gateScoringConfig.adaptive_modifiers?.high_volatility?.order_book_weight_boost ?? 15}
-                          onChange={(e) => setGateScoringConfig({
-                            ...gateScoringConfig,
-                            adaptive_modifiers: {
-                              ...gateScoringConfig.adaptive_modifiers,
-                              high_volatility: {
-                                ...gateScoringConfig.adaptive_modifiers?.high_volatility,
-                                order_book_weight_boost: Number(e.target.value)
-                              }
-                            }
-                          })}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>Order Flow Weight Boost</span>
-                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.high_volatility?.order_flow_weight_boost ?? 10}%</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          value={gateScoringConfig.adaptive_modifiers?.high_volatility?.order_flow_weight_boost ?? 10}
-                          onChange={(e) => setGateScoringConfig({
-                            ...gateScoringConfig,
-                            adaptive_modifiers: {
-                              ...gateScoringConfig.adaptive_modifiers,
-                              high_volatility: {
-                                ...gateScoringConfig.adaptive_modifiers?.high_volatility,
-                                order_flow_weight_boost: Number(e.target.value)
                               }
                             }
                           })}
@@ -3941,34 +3639,12 @@ export default function ConfigPage({
                           className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
                         />
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>Trend Alignment Weight Reduction</span>
-                          <span className="text-indigo-600 font-semibold font-mono">{gateScoringConfig.adaptive_modifiers?.high_volatility?.trend_alignment_weight_reduction ?? -5}%</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          value={gateScoringConfig.adaptive_modifiers?.high_volatility?.trend_alignment_weight_reduction ?? -5}
-                          onChange={(e) => setGateScoringConfig({
-                            ...gateScoringConfig,
-                            adaptive_modifiers: {
-                              ...gateScoringConfig.adaptive_modifiers,
-                              high_volatility: {
-                                ...gateScoringConfig.adaptive_modifiers?.high_volatility,
-                                trend_alignment_weight_reduction: Number(e.target.value)
-                              }
-                            }
-                          })}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
-                        />
-                      </div>
                     </div>
                   </div>
 
                   {/* Low Volatility Modifier */}
                   <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 space-y-3">
-                    <span className="text-xs font-semibold text-emerald-700 block uppercase tracking-wider">Low Volatility Conditions</span>
+                    <span className="text-xs font-semibold text-slate-700 block">Low Volatility Conditions</span>
                     <div className="space-y-3">
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
@@ -3986,50 +3662,6 @@ export default function ConfigPage({
                               low_volatility: {
                                 ...gateScoringConfig.adaptive_modifiers?.low_volatility,
                                 squeeze_filter_weight_boost: Number(e.target.value)
-                              }
-                            }
-                          })}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>Order Flow Weight Boost</span>
-                          <span className="text-indigo-600 font-semibold font-mono">+{gateScoringConfig.adaptive_modifiers?.low_volatility?.order_flow_weight_boost ?? 10}%</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          value={gateScoringConfig.adaptive_modifiers?.low_volatility?.order_flow_weight_boost ?? 10}
-                          onChange={(e) => setGateScoringConfig({
-                            ...gateScoringConfig,
-                            adaptive_modifiers: {
-                              ...gateScoringConfig.adaptive_modifiers,
-                              low_volatility: {
-                                ...gateScoringConfig.adaptive_modifiers?.low_volatility,
-                                order_flow_weight_boost: Number(e.target.value)
-                              }
-                            }
-                          })}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
-                          <span>Relative Volume Weight Reduction</span>
-                          <span className="text-indigo-600 font-semibold font-mono">{gateScoringConfig.adaptive_modifiers?.low_volatility?.relative_volume_weight_reduction ?? -5}%</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          value={gateScoringConfig.adaptive_modifiers?.low_volatility?.relative_volume_weight_reduction ?? -5}
-                          onChange={(e) => setGateScoringConfig({
-                            ...gateScoringConfig,
-                            adaptive_modifiers: {
-                              ...gateScoringConfig.adaptive_modifiers,
-                              low_volatility: {
-                                ...gateScoringConfig.adaptive_modifiers?.low_volatility,
-                                relative_volume_weight_reduction: Number(e.target.value)
                               }
                             }
                           })}

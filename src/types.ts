@@ -290,6 +290,15 @@ export interface StrategyConfig {
     liquidity_sweep_lookback_candles?: number; // Lookback candles to identify liquidity pools (default: 20)
     liquidity_sweep_min_wick_ratio?: number; // Minimum wick ratio for sweep candle (default: 0.35)
     liquidity_sweep_volume_mult?: number; // Minimum volume multiplier for liquidity sweep (default: 1.0)
+    choch_confirmation_enabled?: boolean; // Require Change of Character (CHoCH) post-sweep confirmation
+    fvg_strategy_enabled?: boolean; // Enable Fair Value Gap (FVG) / Inefficiency Retest Strategy
+    fvg_min_gap_atr_ratio?: number; // Minimum FVG gap size relative to ATR (default 0.12)
+    fvg_entry_level?: "BOUNDARY" | "CONSEQUENT_ENCROACHMENT"; // Entry on FVG boundary or 50% midpoint (CE)
+    eqh_eql_detection_enabled?: boolean; // Enable Equal Highs / Equal Lows Liquidity Pool Detector
+    eqh_eql_tolerance_pct?: number; // Tolerance % for EQH/EQL touches (default 0.08%)
+    order_block_strategy_enabled?: boolean; // Enable Institutional Order Block (OB) Retest Strategy
+    asian_session_sweep_enabled?: boolean; // Enable Asian Session High/Low Sweep Strategy
+    smc_tp_targeting_enabled?: boolean; // Enable SMC Dynamic Take-Profit targeting opposing liquidity
   };
   gate_scoring?: {
     enabled: boolean;

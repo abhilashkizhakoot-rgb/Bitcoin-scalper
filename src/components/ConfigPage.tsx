@@ -3068,6 +3068,222 @@ export default function ConfigPage({
               </div>
             </div>
 
+            {/* Smart Money Concepts (SMC) & Liquidity Grab Strategy Controls */}
+            <div className="bg-white border border-indigo-100 rounded-xl p-5 space-y-5 shadow-sm">
+              <div className="border-b border-slate-100 pb-3">
+                <h4 className="text-sm font-sans font-bold text-indigo-900 flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] rounded border border-indigo-200">SMC ENGINE</span>
+                  Smart Money Concepts & Liquidity Grab Trading Strategy
+                </h4>
+                <p className="text-xs text-slate-500 font-sans mt-1">
+                  Integrates institutional liquidity sweep detection, Change of Character (CHoCH) structural shifts, 3-candle Fair Value Gap (FVG) inefficiencies, Equal Highs/Lows (EQH/EQL) liquidity pools, Order Blocks, and Asian session range sweeps.
+                </p>
+              </div>
+
+              {/* Grid 1: Liquidity Sweep & CHoCH */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Enable Liquidity Sweep Strategy (Setup 3)</span>
+                    <p className="text-[10px] text-slate-400">Captures fake breakouts and stop hunts at key support/resistance levels.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, liquidity_sweep_enabled: !msConfig.liquidity_sweep_enabled })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.liquidity_sweep_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.liquidity_sweep_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Require Change of Character (CHoCH)</span>
+                    <p className="text-[10px] text-slate-400">Demands a lower-timeframe market structure shift following a sweep before confirming entry.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, choch_confirmation_enabled: !msConfig.choch_confirmation_enabled })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.choch_confirmation_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.choch_confirmation_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Liquidity Sweep Lookback Candles</label>
+                  <input
+                    type="number"
+                    min="5"
+                    max="100"
+                    value={msConfig.liquidity_sweep_lookback_candles || 20}
+                    onChange={(e) => setMsConfig({ ...msConfig, liquidity_sweep_lookback_candles: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400">Number of historical candles scanned to identify key range liquidity boundaries (Standard: 20).</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Min Sweep Wick Ratio</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0.1"
+                    max="0.9"
+                    value={msConfig.liquidity_sweep_min_wick_ratio || 0.35}
+                    onChange={(e) => setMsConfig({ ...msConfig, liquidity_sweep_min_wick_ratio: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400">Minimum percentage of the sweep candle's total height that must be rejection wick (Standard: 0.35 / 35%).</p>
+                </div>
+              </div>
+
+              {/* Grid 2: FVG and Order Blocks */}
+              <div className="border-t border-slate-100 pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Enable Fair Value Gap (FVG) Strategy (Setup 4)</span>
+                    <p className="text-[10px] text-slate-400">Detects 3-candle price inefficiencies and trades retests into the FVG gap zone.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, fvg_strategy_enabled: !msConfig.fvg_strategy_enabled })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.fvg_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.fvg_strategy_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Enable Order Block Strategy (Setup 5)</span>
+                    <p className="text-[10px] text-slate-400">Identifies institutional up/down manipulation candles prior to displacement moves.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, order_block_strategy_enabled: !msConfig.order_block_strategy_enabled })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.order_block_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.order_block_strategy_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">FVG Entry Target Level</label>
+                  <select
+                    value={msConfig.fvg_entry_level || "CONSEQUENT_ENCROACHMENT"}
+                    onChange={(e) => setMsConfig({ ...msConfig, fvg_entry_level: e.target.value as any })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-sans"
+                  >
+                    <option value="CONSEQUENT_ENCROACHMENT">50% Midpoint (Consequent Encroachment / CE)</option>
+                    <option value="BOUNDARY">Outer Boundary / Edge</option>
+                  </select>
+                  <p className="text-[10px] text-slate-400">Determines if entries trigger at 50% FVG fill or outer boundary.</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Min FVG Gap ATR Ratio</label>
+                  <input
+                    type="number"
+                    step="0.02"
+                    min="0.05"
+                    max="0.5"
+                    value={msConfig.fvg_min_gap_atr_ratio || 0.12}
+                    onChange={(e) => setMsConfig({ ...msConfig, fvg_min_gap_atr_ratio: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400">Minimum gap size expressed as a fraction of ATR (Standard: 0.12).</p>
+                </div>
+              </div>
+
+              {/* Grid 3: EQH/EQL, Asian Session Range, and SMC TP */}
+              <div className="border-t border-slate-100 pt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-1.5 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Equal Highs / Lows (EQH/EQL)</span>
+                    <button
+                      type="button"
+                      onClick={() => setMsConfig({ ...msConfig, eqh_eql_detection_enabled: !msConfig.eqh_eql_detection_enabled })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                        msConfig.eqh_eql_detection_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.eqh_eql_detection_enabled !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400">Tracks high-density double/triple top/bottom liquidity pools.</p>
+                </div>
+
+                <div className="space-y-1.5 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Asian Session Range Sweep</span>
+                    <button
+                      type="button"
+                      onClick={() => setMsConfig({ ...msConfig, asian_session_sweep_enabled: !msConfig.asian_session_sweep_enabled })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                        msConfig.asian_session_sweep_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.asian_session_sweep_enabled !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400">Detects sweeps of Asian session highs/lows during London/NY killzones.</p>
+                </div>
+
+                <div className="space-y-1.5 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-sans font-semibold text-slate-800">SMC Liquidity Target TP</span>
+                    <button
+                      type="button"
+                      onClick={() => setMsConfig({ ...msConfig, smc_tp_targeting_enabled: !msConfig.smc_tp_targeting_enabled })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                        msConfig.smc_tp_targeting_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.smc_tp_targeting_enabled !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400">Dynamically sets Take Profit at opposing unmitigated liquidity pools.</p>
+                </div>
+              </div>
+            </div>
+
             {/* Commit Button */}
             <div className="border-t border-slate-200 pt-5 flex justify-end">
               <button

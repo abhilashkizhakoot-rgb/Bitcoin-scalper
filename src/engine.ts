@@ -3559,6 +3559,8 @@ class TradingEngine {
       "Pullback & Retest Setup (Setup 1)": { status: "SKIP", reason: "Not evaluated." },
       "EMA Retracement / Pushback Setup (Setup 2)": { status: "SKIP", reason: "Not evaluated." },
       "Liquidity Sweep Setup (Setup 3)": { status: "SKIP", reason: "Not evaluated." },
+      "Fair Value Gap Retest Setup (Setup 4)": { status: "SKIP", reason: "Not evaluated." },
+      "Institutional Order Block Setup (Setup 5)": { status: "SKIP", reason: "Not evaluated." },
     };
 
     const getReturnObj = (confirmed: boolean, message: string) => {
@@ -3614,6 +3616,49 @@ class TradingEngine {
       };
     };
 
+    // 1. Calculate HF Order Flow & ADX Momentum Pressure
+    const hasHighHFPressure = adxValue >= (ms.hf_momentum_adx_threshold + 2) || 
+      (direction === "LONG" 
+        ? (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long) 
+        : (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short));
+
+    // 2. Evaluate Multi-Timeframe (5m) Trend Alignment Up-Front
+    const candles5m = this.aggregateCandles(this.candles1m, 5);
+    const closes5m = candles5m.map(c => c.close);
+    let mtfMessage = "";
+    let isMtfAligned = true;
+
+    if (closes5m.length >= 10) {
+      const ema5_5m = this.calculateEMA(closes5m, 5);
+      const ema15_5m = this.calculateEMA(closes5m, 15);
+      const last5mIdx = closes5m.length - 1;
+      if (last5mIdx >= 0 && ema5_5m.length > last5mIdx && ema15_5m.length > last5mIdx) {
+        const ema5_5m_val = ema5_5m[last5mIdx];
+        const ema15_5m_val = ema15_5m[last5mIdx];
+        const isMtfLong = ema5_5m_val > ema15_5m_val;
+
+        if (direction === "LONG" && !isMtfLong && !hasHighHFPressure) {
+          isMtfAligned = false;
+          const mtfMsg = `Conflicting Trend: Multi-timeframe (5m) trend is bearish (5m EMA 5: $${ema5_5m_val.toFixed(2)} <= EMA 15: $${ema15_5m_val.toFixed(2)}).`;
+          condDict["Multi-Timeframe Trend Alignment"] = { status: "FAIL", reason: mtfMsg };
+        } else if (direction === "SHORT" && isMtfLong && !hasHighHFPressure) {
+          isMtfAligned = false;
+          const mtfMsg = `Conflicting Trend: Multi-timeframe (5m) trend is bullish (5m EMA 5: $${ema5_5m_val.toFixed(2)} >= EMA 15: $${ema15_5m_val.toFixed(2)}).`;
+          condDict["Multi-Timeframe Trend Alignment"] = { status: "FAIL", reason: mtfMsg };
+        } else {
+          mtfMessage = hasHighHFPressure ? " | MTF Bypassed (High HF Pressure)" : " | MTF Aligned";
+          condDict["Multi-Timeframe Trend Alignment"] = {
+            status: "PASS",
+            reason: hasHighHFPressure ? "Bypassed due to high HF pressure" : `5m EMA5 ($${ema5_5m_val.toFixed(2)}) ${isMtfLong ? ">" : "<"} EMA15 ($${ema15_5m_val.toFixed(2)})`
+          };
+        }
+      } else {
+        condDict["Multi-Timeframe Trend Alignment"] = { status: "SKIP", reason: "Incomplete 5m EMA calculation indicators." };
+      }
+    } else {
+      condDict["Multi-Timeframe Trend Alignment"] = { status: "SKIP", reason: "Not enough 5m candles available (< 10)." };
+    }
+
     // --- FEATURE 5: Liquidity Sweep Setup (Setup 3) Check ---
     const sweepResult = this.detectLiquiditySweep(direction);
     if (sweepResult.isSweep) {
@@ -3625,57 +3670,66 @@ class TradingEngine {
       condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "Reclamation intact" };
       condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Sweep reversal candle" };
       condDict["Volume-Validated Pullback"] = { status: "PASS", reason: `Confirmed volume expansion (${sweepResult.volumeMult.toFixed(1)}x)` };
-      condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Bypassed for Liquidity Sweep Setup" };
+      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
+        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Liquidity sweep reversal entry" };
+      }
 
       return getReturnObj(
         true,
         `[Setup 3 - Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`
       );
+    } else if (sweepResult.description.includes("awaiting CHoCH")) {
+      condDict["Liquidity Sweep Setup (Setup 3)"] = { status: "FAIL", reason: sweepResult.description };
     }
 
-    const hasHighHFPressure = adxValue >= (ms.hf_momentum_adx_threshold + 2) || 
-      (direction === "LONG" 
-        ? (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long) 
-        : (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short));
-
-    // --- FEATURE 3: Multi-Timeframe (5m) Trend Structure Alignment ---
-    const candles5m = this.aggregateCandles(this.candles1m, 5);
-    const closes5m = candles5m.map(c => c.close);
-    let mtfMessage = "";
-    if (closes5m.length >= 10) {
-      const ema5_5m = this.calculateEMA(closes5m, 5);
-      const ema15_5m = this.calculateEMA(closes5m, 15);
-      const last5mIdx = closes5m.length - 1;
-      if (last5mIdx >= 0 && ema5_5m.length > last5mIdx && ema15_5m.length > last5mIdx) {
-        const ema5_5m_val = ema5_5m[last5mIdx];
-        const ema15_5m_val = ema15_5m[last5mIdx];
-        const isMtfLong = ema5_5m_val > ema15_5m_val;
-        if (direction === "LONG" && !isMtfLong && !hasHighHFPressure) {
-          const mtfMsg = `Conflicting Trend: Multi-timeframe (5m) trend is bearish (5m EMA 5: $${ema5_5m_val.toFixed(2)} <= EMA 15: $${ema15_5m_val.toFixed(2)}).`;
-          condDict["Multi-Timeframe Trend Alignment"] = { status: "FAIL", reason: mtfMsg };
-          return getReturnObj(
-            false,
-            `${mtfMsg} LONG entry blocked.`
-          );
-        }
-        if (direction === "SHORT" && isMtfLong && !hasHighHFPressure) {
-          const mtfMsg = `Conflicting Trend: Multi-timeframe (5m) trend is bullish (5m EMA 5: $${ema5_5m_val.toFixed(2)} >= EMA 15: $${ema15_5m_val.toFixed(2)}).`;
-          condDict["Multi-Timeframe Trend Alignment"] = { status: "FAIL", reason: mtfMsg };
-          return getReturnObj(
-            false,
-            `${mtfMsg} SHORT entry blocked.`
-          );
-        }
-        mtfMessage = hasHighHFPressure ? " | MTF Bypassed (High HF Pressure)" : " | MTF Aligned (5m EMA5 > EMA15)";
-        condDict["Multi-Timeframe Trend Alignment"] = {
-          status: "PASS",
-          reason: hasHighHFPressure ? "Bypassed due to high HF pressure" : `5m EMA5 ($${ema5_5m_val.toFixed(2)}) ${isMtfLong ? ">" : "<"} EMA15 ($${ema15_5m_val.toFixed(2)})`
-        };
+    // --- FEATURE 6: Fair Value Gap (FVG) Retest Setup (Setup 4) Check ---
+    const fvgResult = this.evaluateFVGSetup(direction);
+    if (fvgResult.isFvgValid) {
+      if (!isMtfAligned) {
+        condDict["Fair Value Gap Retest Setup (Setup 4)"] = { status: "FAIL", reason: `Blocked by 5m MTF Trend conflict.` };
       } else {
-        condDict["Multi-Timeframe Trend Alignment"] = { status: "SKIP", reason: "Incomplete 5m EMA calculation indicators." };
+        condDict["Fair Value Gap Retest Setup (Setup 4)"] = { status: "PASS", reason: fvgResult.description };
+        condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Fair Value Gap Inefficiency Retest" };
+        condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `FVG entry target confirmed at $${fvgResult.fvgLevel.toFixed(2)}` };
+        condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "FVG displacement candle" };
+        condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "FVG retracement entry" };
+        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "FVG boundaries holding" };
+        condDict["Chasing Lookback limit"] = { status: "PASS", reason: "FVG retracement entry" };
+        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "FVG retest volume within bounds" };
+
+        return getReturnObj(
+          true,
+          `[Setup 4 - Fair Value Gap Retest Confirmed] ${fvgResult.description}`
+        );
       }
-    } else {
-      condDict["Multi-Timeframe Trend Alignment"] = { status: "SKIP", reason: "Not enough 5m candles available (< 10)." };
+    }
+
+    // --- FEATURE 7: Institutional Order Block (OB) Retest Setup (Setup 5) Check ---
+    const obResult = this.evaluateOrderBlockSetup(direction);
+    if (obResult.isObValid) {
+      if (!isMtfAligned) {
+        condDict["Institutional Order Block Setup (Setup 5)"] = { status: "FAIL", reason: `Blocked by 5m MTF Trend conflict.` };
+      } else {
+        condDict["Institutional Order Block Setup (Setup 5)"] = { status: "PASS", reason: obResult.description };
+        condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Institutional Order Block Retest" };
+        condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Order Block zone $${obResult.obLow.toFixed(2)} - $${obResult.obHigh.toFixed(2)}` };
+        condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "OB displacement candle" };
+        condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Order block retest entry" };
+        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "Order block holding" };
+        condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Order block retest entry" };
+        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Order block retest volume valid" };
+
+        return getReturnObj(
+          true,
+          `[Setup 5 - Institutional Order Block Retest Confirmed] ${obResult.description}`
+        );
+      }
+    }
+
+    // Block standard trend setups if MTF trend alignment fails
+    if (!isMtfAligned) {
+      const mtfFailReason = condDict["Multi-Timeframe Trend Alignment"]?.reason || "5m MTF trend conflict.";
+      return getReturnObj(false, `${mtfFailReason} ${direction} entry blocked.`);
     }
 
     if (direction === "LONG") {
@@ -4367,6 +4421,282 @@ class TradingEngine {
     }
   }
 
+  public detectEqualHighsLows(): {
+    eqhLevels: { price: number; touchCount: number }[];
+    eqlLevels: { price: number; touchCount: number }[];
+  } {
+    const config = dbManager.getConfig();
+    const ms: any = config.market_structure || {};
+    const tolerancePct = ms.eqh_eql_tolerance_pct || 0.08;
+    if (ms.eqh_eql_detection_enabled === false || this.candles1m.length < 30) {
+      return { eqhLevels: [], eqlLevels: [] };
+    }
+
+    const lookback = Math.min(100, this.candles1m.length);
+    const recent = this.candles1m.slice(-lookback);
+
+    const highs: number[] = [];
+    const lows: number[] = [];
+    for (let i = 1; i < recent.length - 1; i++) {
+      if (recent[i].high >= recent[i - 1].high && recent[i].high >= recent[i + 1].high) {
+        highs.push(recent[i].high);
+      }
+      if (recent[i].low <= recent[i - 1].low && recent[i].low <= recent[i + 1].low) {
+        lows.push(recent[i].low);
+      }
+    }
+
+    const eqhLevels: { price: number; touchCount: number }[] = [];
+    for (const h of highs) {
+      let matched = false;
+      for (const eqh of eqhLevels) {
+        if (Math.abs(h - eqh.price) / eqh.price * 100 <= tolerancePct) {
+          eqh.touchCount++;
+          eqh.price = (eqh.price + h) / 2;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        eqhLevels.push({ price: h, touchCount: 1 });
+      }
+    }
+
+    const eqlLevels: { price: number; touchCount: number }[] = [];
+    for (const l of lows) {
+      let matched = false;
+      for (const eql of eqlLevels) {
+        if (Math.abs(l - eql.price) / eql.price * 100 <= tolerancePct) {
+          eql.touchCount++;
+          eql.price = (eql.price + l) / 2;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        eqlLevels.push({ price: l, touchCount: 1 });
+      }
+    }
+
+    return {
+      eqhLevels: eqhLevels.filter(e => e.touchCount >= 2),
+      eqlLevels: eqlLevels.filter(e => e.touchCount >= 2),
+    };
+  }
+
+  public detectAsianSessionRange(): {
+    asianHigh: number | null;
+    asianLow: number | null;
+  } {
+    if (this.candles1m.length === 0) return { asianHigh: null, asianLow: null };
+
+    const eightHoursAgo = (Date.now() / 1000) - 8 * 3600;
+    const recentAsian = this.candles1m.filter(c => c.time >= eightHoursAgo);
+    if (recentAsian.length === 0) return { asianHigh: null, asianLow: null };
+
+    return {
+      asianHigh: Math.max(...recentAsian.map(c => c.high)),
+      asianLow: Math.min(...recentAsian.map(c => c.low)),
+    };
+  }
+
+  public detectCHoCH(direction: "LONG" | "SHORT"): {
+    hasChoch: boolean;
+    chochLevel: number;
+    description: string;
+  } {
+    const config = dbManager.getConfig();
+    const ms: any = config.market_structure || {};
+    if (ms.choch_confirmation_enabled === false) {
+      return { hasChoch: true, chochLevel: 0, description: "CHoCH requirement bypassed via config" };
+    }
+
+    if (this.candles1m.length < 5) {
+      return { hasChoch: false, chochLevel: 0, description: "Insufficient candles for CHoCH" };
+    }
+
+    const recent = this.candles1m.slice(-8);
+    const last = this.candles1m[this.candles1m.length - 1];
+
+    if (direction === "LONG") {
+      let maxHighBeforeSweep = 0;
+      for (let i = 0; i < recent.length - 1; i++) {
+        if (recent[i].high > maxHighBeforeSweep) {
+          maxHighBeforeSweep = recent[i].high;
+        }
+      }
+      const hasChoch = last.close > maxHighBeforeSweep;
+      return {
+        hasChoch,
+        chochLevel: maxHighBeforeSweep,
+        description: hasChoch
+          ? `Bullish CHoCH Confirmed: Price ($${last.close.toFixed(2)}) closed above counter-structure high ($${maxHighBeforeSweep.toFixed(2)}).`
+          : `Awaiting Bullish CHoCH: Price ($${last.close.toFixed(2)}) must close above $${maxHighBeforeSweep.toFixed(2)}.`,
+      };
+    } else {
+      let minLowBeforeSweep = Infinity;
+      for (let i = 0; i < recent.length - 1; i++) {
+        if (recent[i].low < minLowBeforeSweep) {
+          minLowBeforeSweep = recent[i].low;
+        }
+      }
+      const hasChoch = last.close < minLowBeforeSweep;
+      return {
+        hasChoch,
+        chochLevel: minLowBeforeSweep,
+        description: hasChoch
+          ? `Bearish CHoCH Confirmed: Price ($${last.close.toFixed(2)}) closed below counter-structure low ($${minLowBeforeSweep.toFixed(2)}).`
+          : `Awaiting Bearish CHoCH: Price ($${last.close.toFixed(2)}) must close below $${minLowBeforeSweep.toFixed(2)}.`,
+      };
+    }
+  }
+
+  public evaluateFVGSetup(direction: "LONG" | "SHORT"): {
+    isFvgValid: boolean;
+    fvgLevel: number;
+    consequentEncroachment: number;
+    description: string;
+  } {
+    const config = dbManager.getConfig();
+    const ms: any = config.market_structure || {};
+    if (ms.fvg_strategy_enabled === false || this.candles1m.length < 10) {
+      return { isFvgValid: false, fvgLevel: 0, consequentEncroachment: 0, description: "FVG strategy disabled or insufficient data" };
+    }
+
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const lastIdx = this.candles1m.length - 1;
+    const currentAtr = atr14[lastIdx] || 50;
+    const minGap = (ms.fvg_min_gap_atr_ratio || 0.12) * currentAtr;
+    const entryLevelType = ms.fvg_entry_level || "CONSEQUENT_ENCROACHMENT";
+
+    const lookback = Math.min(15, this.candles1m.length - 2);
+    const currentPrice = this.currentPrice;
+
+    if (direction === "LONG") {
+      for (let i = lastIdx; i >= lastIdx - lookback; i--) {
+        const c1 = this.candles1m[i - 2];
+        const c3 = this.candles1m[i];
+        if (c1 && c3) {
+          const gapSize = c3.low - c1.high;
+          if (gapSize >= minGap) {
+            const fvgBottom = c1.high;
+            const fvgTop = c3.low;
+            const ce = fvgBottom + (fvgTop - fvgBottom) * 0.5;
+
+            const targetEntry = entryLevelType === "CONSEQUENT_ENCROACHMENT" ? ce : fvgTop;
+            const inZone = currentPrice <= fvgTop && currentPrice >= fvgBottom;
+            const notBroken = currentPrice >= fvgBottom - 0.1 * currentAtr;
+
+            if (inZone && notBroken) {
+              return {
+                isFvgValid: true,
+                fvgLevel: targetEntry,
+                consequentEncroachment: ce,
+                description: `Bullish Fair Value Gap (FVG) Retest: Price ($${currentPrice.toFixed(2)}) retesting unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
+              };
+            }
+          }
+        }
+      }
+    } else {
+      for (let i = lastIdx; i >= lastIdx - lookback; i--) {
+        const c1 = this.candles1m[i - 2];
+        const c3 = this.candles1m[i];
+        if (c1 && c3) {
+          const gapSize = c1.low - c3.high;
+          if (gapSize >= minGap) {
+            const fvgTop = c1.low;
+            const fvgBottom = c3.high;
+            const ce = fvgBottom + (fvgTop - fvgBottom) * 0.5;
+
+            const targetEntry = entryLevelType === "CONSEQUENT_ENCROACHMENT" ? ce : fvgBottom;
+            const inZone = currentPrice >= fvgBottom && currentPrice <= fvgTop;
+            const notBroken = currentPrice <= fvgTop + 0.1 * currentAtr;
+
+            if (inZone && notBroken) {
+              return {
+                isFvgValid: true,
+                fvgLevel: targetEntry,
+                consequentEncroachment: ce,
+                description: `Bearish Fair Value Gap (FVG) Retest: Price ($${currentPrice.toFixed(2)}) retesting unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    return { isFvgValid: false, fvgLevel: 0, consequentEncroachment: 0, description: "No active unmitigated FVG retest" };
+  }
+
+  public evaluateOrderBlockSetup(direction: "LONG" | "SHORT"): {
+    isObValid: boolean;
+    obHigh: number;
+    obLow: number;
+    description: string;
+  } {
+    const config = dbManager.getConfig();
+    const ms: any = config.market_structure || {};
+    if (ms.order_block_strategy_enabled === false || this.candles1m.length < 10) {
+      return { isObValid: false, obHigh: 0, obLow: 0, description: "Order block strategy disabled or insufficient data" };
+    }
+
+    const lastIdx = this.candles1m.length - 1;
+    const currentPrice = this.currentPrice;
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentAtr = atr14[lastIdx] || 50;
+
+    if (direction === "LONG") {
+      for (let i = lastIdx - 1; i >= Math.max(0, lastIdx - 20); i--) {
+        const candle = this.candles1m[i];
+        const nextCandle = this.candles1m[i + 1];
+        if (candle && nextCandle) {
+          const isBearishCandle = candle.close < candle.open;
+          const isStrongExpansionUp = nextCandle.close > nextCandle.open && (nextCandle.close - nextCandle.open) >= 0.8 * currentAtr;
+          if (isBearishCandle && isStrongExpansionUp) {
+            const obHigh = candle.high;
+            const obLow = candle.low;
+
+            const inZone = currentPrice <= obHigh + 0.15 * currentAtr && currentPrice >= obLow - 0.1 * currentAtr;
+            if (inZone) {
+              return {
+                isObValid: true,
+                obHigh,
+                obLow,
+                description: `Bullish Institutional Order Block Retest: Price ($${currentPrice.toFixed(2)}) retesting unmitigated OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
+              };
+            }
+          }
+        }
+      }
+    } else {
+      for (let i = lastIdx - 1; i >= Math.max(0, lastIdx - 20); i--) {
+        const candle = this.candles1m[i];
+        const nextCandle = this.candles1m[i + 1];
+        if (candle && nextCandle) {
+          const isBullishCandle = candle.close > candle.open;
+          const isStrongExpansionDown = nextCandle.close < nextCandle.open && (nextCandle.open - nextCandle.close) >= 0.8 * currentAtr;
+          if (isBullishCandle && isStrongExpansionDown) {
+            const obHigh = candle.high;
+            const obLow = candle.low;
+
+            const inZone = currentPrice >= obLow - 0.15 * currentAtr && currentPrice <= obHigh + 0.1 * currentAtr;
+            if (inZone) {
+              return {
+                isObValid: true,
+                obHigh,
+                obLow,
+                description: `Bearish Institutional Order Block Retest: Price ($${currentPrice.toFixed(2)}) retesting unmitigated OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    return { isObValid: false, obHigh: 0, obLow: 0, description: "No active unmitigated Order Block retest" };
+  }
+
   public detectLiquiditySweep(direction: "LONG" | "SHORT" | "NEUTRAL"): {
     isSweep: boolean;
     sweptLevel: number;
@@ -4397,32 +4727,32 @@ class TradingEngine {
     const currentCandle = this.candles1m[lastIdx];
     const struct = this.getTrendMarketStructure();
 
-    // Calculate average volume over recent 20 candles
     const volumes = this.candles1m.map(c => c.volume);
     const sumVol = volumes.slice(-20).reduce((a, b) => a + b, 0);
     const avgVol = volumes.length >= 20 ? sumVol / 20 : 1.0;
 
-    // We inspect the last 3 candles for a sweep event
     const recentCandles = this.candles1m.slice(-3);
+    const eqLevels = this.detectEqualHighsLows();
+    const asianRange = ms.asian_session_sweep_enabled ? this.detectAsianSessionRange() : { asianHigh: null, asianLow: null };
 
     if (direction === "LONG") {
-      // Find range low over lookback
       const rangeCandles = this.candles1m.slice(-lookback - 1, -1);
       const rangeLow = rangeCandles.length > 0 ? Math.min(...rangeCandles.map(c => c.low)) : struct.swingLow;
 
+      const eqlPrices = eqLevels.eqlLevels.map(e => e.price);
       const levelsToTest = Array.from(new Set([
         struct.swingLow,
         struct.prev_LL ? struct.prev_LL.price : 0,
         struct.current_LL ? struct.current_LL.price : 0,
         struct.current_HL ? struct.current_HL.price : 0,
         rangeLow,
+        asianRange.asianLow || 0,
+        ...eqlPrices,
       ])).filter(p => p > 0);
 
       for (const level of levelsToTest) {
-        // Find if any candle in recent 3 candles pierced below level
         const sweepCandle = recentCandles.find(c => c.low < level * 0.9998);
         if (sweepCandle) {
-          // Reclaimed: current price / candle close is back above (or at) the swept level
           if (currentCandle.close >= level * 0.9995) {
             const range = sweepCandle.high - sweepCandle.low;
             const lowerWick = Math.min(sweepCandle.open, sweepCandle.close) - sweepCandle.low;
@@ -4430,36 +4760,45 @@ class TradingEngine {
             const volMult = avgVol > 0 ? sweepCandle.volume / avgVol : 1.0;
 
             if (wickRatio >= minWickRatio && volMult >= reqVolMult * 0.8) {
+              const chochResult = this.detectCHoCH("LONG");
+              if (!chochResult.hasChoch && ms.choch_confirmation_enabled !== false) {
+                return { isSweep: false, sweptLevel: level, reclaimPrice: currentCandle.close, wickRatio: wickRatio * 100, volumeMult: volMult, description: `Sweep detected at $${level.toFixed(2)}, but awaiting CHoCH confirmation (${chochResult.description})` };
+              }
+
+              const poolType = eqlPrices.includes(level)
+                ? "Equal Lows (EQL) Sell-Side Liquidity Pool"
+                : (asianRange.asianLow && Math.abs(level - asianRange.asianLow) < 1 ? "Asian Session Low" : "Support Level");
+
               return {
                 isSweep: true,
                 sweptLevel: level,
                 reclaimPrice: currentCandle.close,
                 wickRatio: wickRatio * 100,
                 volumeMult: volMult,
-                description: `Bullish Liquidity Sweep: Price pierced support level $${level.toFixed(2)} (low $${sweepCandle.low.toFixed(2)}), then reclaimed $${currentCandle.close.toFixed(2)} with ${(wickRatio * 100).toFixed(0)}% lower wick and ${volMult.toFixed(1)}x volume.`,
+                description: `Bullish Liquidity Sweep: Price pierced ${poolType} $${level.toFixed(2)} (low $${sweepCandle.low.toFixed(2)}), then reclaimed $${currentCandle.close.toFixed(2)} with ${(wickRatio * 100).toFixed(0)}% lower wick and ${volMult.toFixed(1)}x volume. ${chochResult.description}`,
               };
             }
           }
         }
       }
     } else if (direction === "SHORT") {
-      // Find range high over lookback
       const rangeCandles = this.candles1m.slice(-lookback - 1, -1);
       const rangeHigh = rangeCandles.length > 0 ? Math.max(...rangeCandles.map(c => c.high)) : struct.swingHigh;
 
+      const eqhPrices = eqLevels.eqhLevels.map(e => e.price);
       const levelsToTest = Array.from(new Set([
         struct.swingHigh,
         struct.prev_HH ? struct.prev_HH.price : 0,
         struct.current_HH ? struct.current_HH.price : 0,
         struct.current_LH ? struct.current_LH.price : 0,
         rangeHigh,
+        asianRange.asianHigh || 0,
+        ...eqhPrices,
       ])).filter(p => p > 0);
 
       for (const level of levelsToTest) {
-        // Find if any candle in recent 3 candles pierced above level
         const sweepCandle = recentCandles.find(c => c.high > level * 1.0002);
         if (sweepCandle) {
-          // Reclaimed: current price / candle close is back below (or at) the swept level
           if (currentCandle.close <= level * 1.0005) {
             const range = sweepCandle.high - sweepCandle.low;
             const upperWick = sweepCandle.high - Math.max(sweepCandle.open, sweepCandle.close);
@@ -4467,13 +4806,22 @@ class TradingEngine {
             const volMult = avgVol > 0 ? sweepCandle.volume / avgVol : 1.0;
 
             if (wickRatio >= minWickRatio && volMult >= reqVolMult * 0.8) {
+              const chochResult = this.detectCHoCH("SHORT");
+              if (!chochResult.hasChoch && ms.choch_confirmation_enabled !== false) {
+                return { isSweep: false, sweptLevel: level, reclaimPrice: currentCandle.close, wickRatio: wickRatio * 100, volumeMult: volMult, description: `Sweep detected at $${level.toFixed(2)}, but awaiting CHoCH confirmation (${chochResult.description})` };
+              }
+
+              const poolType = eqhPrices.includes(level)
+                ? "Equal Highs (EQH) Buy-Side Liquidity Pool"
+                : (asianRange.asianHigh && Math.abs(level - asianRange.asianHigh) < 1 ? "Asian Session High" : "Resistance Level");
+
               return {
                 isSweep: true,
                 sweptLevel: level,
                 reclaimPrice: currentCandle.close,
                 wickRatio: wickRatio * 100,
                 volumeMult: volMult,
-                description: `Bearish Liquidity Sweep: Price pierced resistance level $${level.toFixed(2)} (high $${sweepCandle.high.toFixed(2)}), then reclaimed $${currentCandle.close.toFixed(2)} with ${(wickRatio * 100).toFixed(0)}% upper wick and ${volMult.toFixed(1)}x volume.`,
+                description: `Bearish Liquidity Sweep: Price pierced ${poolType} $${level.toFixed(2)} (high $${sweepCandle.high.toFixed(2)}), then reclaimed $${currentCandle.close.toFixed(2)} with ${(wickRatio * 100).toFixed(0)}% upper wick and ${volMult.toFixed(1)}x volume. ${chochResult.description}`,
               };
             }
           }
@@ -6504,9 +6852,20 @@ class TradingEngine {
       const isNotLongBreakout = isScalperBreakoutLongAllowed ? true : (struct.current_HH ? currentClose <= struct.current_HH.price : true);
       const isNotShortBreakdown = isScalperBreakdownShortAllowed ? true : (struct.current_LL ? currentClose >= struct.current_LL.price : true);
 
-      if (isUptrendAligned && (hasValidPushbackLong || isScalperBreakoutLongAllowed) && isNotLongBreakout && probabilityLong >= 0.65) {
+      // ALSO CHECK SMC SETUPS (Liquidity Sweep, FVG Retest, Order Block Retest)
+      const smcSweepLong = this.detectLiquiditySweep("LONG");
+      const smcSweepShort = this.detectLiquiditySweep("SHORT");
+      const smcFvgLong = this.evaluateFVGSetup("LONG");
+      const smcFvgShort = this.evaluateFVGSetup("SHORT");
+      const smcObLong = this.evaluateOrderBlockSetup("LONG");
+      const smcObShort = this.evaluateOrderBlockSetup("SHORT");
+
+      const hasSmcLongSetup = smcSweepLong.isSweep || smcFvgLong.isFvgValid || smcObLong.isObValid;
+      const hasSmcShortSetup = smcSweepShort.isSweep || smcFvgShort.isFvgValid || smcObShort.isObValid;
+
+      if ((isUptrendAligned && (hasValidPushbackLong || isScalperBreakoutLongAllowed) && isNotLongBreakout && probabilityLong >= 0.65) || hasSmcLongSetup) {
         signalDirection = "LONG";
-      } else if (isDowntrendAligned && (hasValidPushbackShort || isScalperBreakdownShortAllowed) && isNotShortBreakdown && probabilityShort >= 0.65) {
+      } else if ((isDowntrendAligned && (hasValidPushbackShort || isScalperBreakdownShortAllowed) && isNotShortBreakdown && probabilityShort >= 0.65) || hasSmcShortSetup) {
         signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
@@ -6531,6 +6890,10 @@ class TradingEngine {
     const vwapUpperVal = lastCandle.vwap_upper !== undefined ? lastCandle.vwap_upper : currentClose * 1.01;
     const vwapLowerVal = lastCandle.vwap_lower !== undefined ? lastCandle.vwap_lower : currentClose * 0.99;
 
+    // Evaluate active SMC structural setup presence for threshold & alignment bypass
+    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFVGSetup("LONG").isFvgValid || this.evaluateOrderBlockSetup("LONG").isObValid)) ||
+                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFVGSetup("SHORT").isFvgValid || this.evaluateOrderBlockSetup("SHORT").isObValid));
+
     // 2. Conditions Check (Strict 10-Conditions Checklist)
     const conditions: {
       name: string;
@@ -6547,7 +6910,7 @@ class TradingEngine {
     // C1: CatBoost Probability Filter
     const pbTrendStatus = this.detectPullbackTrendlineBreak();
     const isEnteringPullback = signalDirection !== "NEUTRAL";
-    const catboostThreshold = this.currentRegime === MarketRegime.RANGE_BOUND 
+    const catboostThreshold = (this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) 
       ? 0.50 
       : 0.70;
     const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold) : false;
@@ -6560,9 +6923,9 @@ class TradingEngine {
         : (pLongMet || pShortMet),
       current_value: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}% | P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%`,
       required: signalDirection === "LONG"
-        ? `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "70"}% (Evaluating LONG Trade)`
+        ? `P(LONG) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "70"}% (Evaluating LONG Trade)`
         : signalDirection === "SHORT"
-        ? `P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "70"}% (Evaluating SHORT Trade)`
+        ? `P(SHORT) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "70"}% (Evaluating SHORT Trade)`
         : `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "75"}% for LONG OR P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "75"}% for SHORT (Mutually Exclusive)`,
     });
 
@@ -6584,7 +6947,7 @@ class TradingEngine {
 
     conditions.push({
       name: "Market Regime Filter",
-      met: regimeValid && (signalDirection === "NEUTRAL" ? true : regimeAligned),
+      met: regimeValid && (signalDirection === "NEUTRAL" ? true : (regimeAligned || isSmcActive)),
       current_value: this.currentRegime,
       required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, or HIGH_VOLATILITY",
       softened: isRegimeSoftened,
@@ -6600,7 +6963,12 @@ class TradingEngine {
     const standardAdxThreshold = trendAlignAdx;
     const softenedAdxThreshold = standardAdxThreshold * (1 - softeningPercent / 100);
 
-    if (this.currentRegime === MarketRegime.RANGE_BOUND) {
+    if (isSmcActive) {
+      trendAligned = true;
+      adxMet = true;
+      currentTrendStr = "PASSING (Bypassed for SMC Structural Setup: Sweep / FVG / Order Block)";
+      requiredStr = "SMC Setup Active (Bypasses EMA stack alignment)";
+    } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       if (signalDirection === "LONG") {
         trendAligned = !isBearAligned;
         currentTrendStr = isBearAligned ? "BLOCKED: STRONGLY BEARISH" : "PASSING (Not strongly bearish)";

@@ -104,6 +104,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     cooldown_minutes: 30,
     max_trades_per_day: 8,
     is_paper_trading: true,
+    invert_confirmed_trades: false,
     skipped_gates: [],
     required_gates: [
       "catboost", "regime", "trend", "volume", "limit", "adx", "equity", "credentials",

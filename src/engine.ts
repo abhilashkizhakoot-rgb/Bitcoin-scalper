@@ -7691,7 +7691,16 @@ class TradingEngine {
       return;
     }
 
-    this.log(`🚀 SIGNAL TRIGGERED! Entering Delta Exchange ${direction} position...`);
+    const isInverted = config.general.invert_confirmed_trades === true;
+    const execDirection: "LONG" | "SHORT" = isInverted
+      ? (direction === "LONG" ? "SHORT" : "LONG")
+      : direction;
+
+    if (isInverted) {
+      this.log(`🔁 [REVERSE TRADING MODE ACTIVE] Engine confirmed ${direction} signal -> Inverting execution to ${execDirection} trade position!`);
+    } else {
+      this.log(`🚀 SIGNAL TRIGGERED! Entering Delta Exchange ${direction} position...`);
+    }
 
     // Dynamically calculate dynamic Stop Loss, Take Profit, and Confluence of Extremes (Exhaustion + Overextension)
     const closes = this.candles1m.map((c) => c.close);
@@ -7711,13 +7720,13 @@ class TradingEngine {
     const rawImbalance = this.orderBookStats.imbalanceRatio;
     const takerRatio = this.orderFlowStats.takerBuyRatio;
 
-    // Condition A (Order Flow Climax): Raw Imbalance > 85% or Taker ratio > 90% in direction of trade
-    const isConditionA = direction === "LONG"
+    // Condition A (Order Flow Climax): Raw Imbalance > 85% or Taker ratio > 90% in direction of executed trade
+    const isConditionA = execDirection === "LONG"
       ? (rawImbalance > 0.85 || takerRatio > 0.90)
       : (rawImbalance < -0.85 || takerRatio < 0.10);
 
     // Condition B (Physical Overextension): Entry Price physically outside Bollinger Bands OR distance to EMA 9 > 1.5 * ATR_14
-    const isOutsideBB = direction === "LONG" ? (currentPrice > bb.upper) : (currentPrice < bb.lower);
+    const isOutsideBB = execDirection === "LONG" ? (currentPrice > bb.upper) : (currentPrice < bb.lower);
     const distEma9 = Math.abs(currentPrice - ema9Val);
     const isEmaOverextended = distEma9 > 1.5 * lastAtr;
     const isConditionB = isOutsideBB || isEmaOverextended;
@@ -7766,14 +7775,14 @@ class TradingEngine {
     const leverage = config.risk_management.leverage || 20;
 
     // Respect the ATR-based stop loss distance directly as configured by the user, bounded only by the minimum floor.
-    const stopLossPrice = direction === "LONG" ? currentPrice - stopLossDistance : currentPrice + stopLossDistance;
+    const stopLossPrice = execDirection === "LONG" ? currentPrice - stopLossDistance : currentPrice + stopLossDistance;
 
     const actualSLDistance = Math.abs(currentPrice - stopLossPrice);
     const takeProfitDistance = actualSLDistance * config.risk_management.take_profit_ratio;
-    const takeProfitPrice = direction === "LONG" ? currentPrice + takeProfitDistance : currentPrice - takeProfitDistance;
+    const takeProfitPrice = execDirection === "LONG" ? currentPrice + takeProfitDistance : currentPrice - takeProfitDistance;
 
     this.log(
-      `Computed Execution Parameters: Entry=$${currentPrice.toFixed(2)}, StopLoss=$${stopLossPrice.toFixed(2)} (Dist: $${actualSLDistance.toFixed(
+      `Computed Execution Parameters (${execDirection}${isInverted ? " - INVERTED" : ""}): Entry=$${currentPrice.toFixed(2)}, StopLoss=$${stopLossPrice.toFixed(2)} (Dist: $${actualSLDistance.toFixed(
         2
       )}), TakeProfit=$${takeProfitPrice.toFixed(2)} (Dist: $${takeProfitDistance.toFixed(
         2
@@ -7784,7 +7793,7 @@ class TradingEngine {
     const newTrade: Trade = dbManager.addTrade({
       entry_timestamp: new Date().toISOString(),
       exit_timestamp: null,
-      direction: direction === "LONG" ? TradeDirection.LONG : TradeDirection.SHORT,
+      direction: execDirection === "LONG" ? TradeDirection.LONG : TradeDirection.SHORT,
       entry_price: currentPrice,
       exit_price: null,
       quantity_btc: positionQtyBtc,
@@ -7809,6 +7818,7 @@ class TradingEngine {
         average_sentiment: sentiment,
         stop_loss_price: stopLossPrice,
         take_profit_price: takeProfitPrice,
+        inverted_from_signal: isInverted ? direction : undefined,
       },
     });
 
@@ -7822,12 +7832,12 @@ class TradingEngine {
       signals[sigIdx].executed = true;
     }
 
-    this.log(`SUCCESS! Trade entry confirmed. Transaction ID: ${newTrade.id}`);
+    this.log(`SUCCESS! Trade entry confirmed (${execDirection}). Transaction ID: ${newTrade.id}`);
     this.logTradeToFile(newTrade, this.getCurrentCheckpoints());
 
     // If live account mode is enabled, execute real-time order placement on Delta Exchange!
     if (!dbManager.isPaperMode()) {
-      const side = direction === "LONG" ? "buy" : "sell";
+      const side = execDirection === "LONG" ? "buy" : "sell";
       this.log(`📡 Dispatching real market order to Delta Exchange REST API...`);
       placeDeltaMarketOrder(creds, "BTCUSD", side, positionQtyBtc).then((res) => {
         if (res.success) {

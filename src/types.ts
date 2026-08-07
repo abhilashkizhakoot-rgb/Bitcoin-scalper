@@ -168,6 +168,7 @@ export interface StrategyConfig {
     cooldown_minutes: number;
     max_trades_per_day: number;
     is_paper_trading: boolean;
+    invert_confirmed_trades?: boolean;
     skipped_gates?: string[];
     required_gates?: string[];
     mandatory_gates?: string[];

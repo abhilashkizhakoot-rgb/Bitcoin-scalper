@@ -839,6 +839,43 @@ export default function ConfigPage({
               </div>
             </div>
 
+            {/* Section 1b: Reverse Trading / Invert Direction Mode */}
+            <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
+              <div className="max-w-xl">
+                <h4 className="text-xs font-bold font-sans text-slate-700 flex items-center gap-1.5 uppercase">
+                  <ArrowLeftRight className="w-4 h-4 text-purple-500" />
+                  Reverse Trading Mode (Invert Confirmed Signals)
+                </h4>
+                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                  When enabled, trades will automatically be executed in the opposite direction of the engine's confirmed signal. If the engine confirms a <strong className="text-emerald-600 font-bold">LONG</strong> setup, it will execute a <strong className="text-rose-600 font-bold">SHORT</strong> position (and vice versa). Useful for contrarian fading during choppy regimes.
+                </p>
+              </div>
+              <div className="flex gap-2 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setGeneralConfig({ ...generalConfig, invert_confirmed_trades: false })}
+                  className={`px-4 py-2 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
+                    !generalConfig.invert_confirmed_trades
+                      ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                      : "bg-white border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  Standard Direction
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGeneralConfig({ ...generalConfig, invert_confirmed_trades: true })}
+                  className={`px-4 py-2 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
+                    generalConfig.invert_confirmed_trades
+                      ? "bg-purple-600 border-purple-600 text-white shadow-sm font-bold"
+                      : "bg-white border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  Invert Direction (Reverse)
+                </button>
+              </div>
+            </div>
+
             {/* Section 2: Feed & Timeframe */}
             <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm">
               <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans border-b border-slate-100 pb-2">

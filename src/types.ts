@@ -286,6 +286,10 @@ export interface StrategyConfig {
     crossover_only_lookback_candles?: number; // Max lookback candles for crossover event check (default: 5)
     timeframe_minutes?: number; // Market Structure Timeframe in minutes (default: 5)
     very_high_probability_threshold?: number; // Probability threshold above which direct breakouts are traded, otherwise waiting for pullback (default: 0.82)
+    liquidity_sweep_enabled?: boolean; // Enable Liquidity Sweep Strategy (Setup 3) (default: true)
+    liquidity_sweep_lookback_candles?: number; // Lookback candles to identify liquidity pools (default: 20)
+    liquidity_sweep_min_wick_ratio?: number; // Minimum wick ratio for sweep candle (default: 0.35)
+    liquidity_sweep_volume_mult?: number; // Minimum volume multiplier for liquidity sweep (default: 1.0)
   };
   gate_scoring?: {
     enabled: boolean;
@@ -311,20 +315,32 @@ export interface StrategyConfig {
         trend_alignment_weight_boost: number;
         catboost_weight_boost: number;
         volume_profile_weight_boost?: number;
+        adx_strength_weight_boost?: number;
+        order_flow_weight_boost?: number;
+        squeeze_filter_weight_reduction?: number;
       };
       ranging: {
         order_flow_weight_boost: number;
         trend_alignment_weight_reduction: number;
         volume_profile_weight_boost?: number;
+        overextension_weight_boost?: number;
+        order_book_weight_boost?: number;
+        adx_strength_weight_reduction?: number;
       };
       high_volatility: {
         relative_volume_weight_boost: number;
         overextension_weight_boost: number;
         volume_profile_weight_boost?: number;
+        order_book_weight_boost?: number;
+        order_flow_weight_boost?: number;
+        trend_alignment_weight_reduction?: number;
       };
       low_volatility: {
         squeeze_filter_weight_boost: number;
         volume_profile_weight_boost?: number;
+        wedge_filter_weight_boost?: number;
+        relative_volume_weight_reduction?: number;
+        order_flow_weight_boost?: number;
       };
     };
   };

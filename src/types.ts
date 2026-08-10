@@ -190,6 +190,10 @@ export interface StrategyConfig {
     regime_macro_slope_threshold?: number;
     regime_ribbon_compression_threshold?: number;
     require_volume_profile_in_ranging?: boolean;
+    enable_choppy_market_filter?: boolean;
+    max_allowed_chop_index?: number;
+    min_allowed_efficiency_ratio?: number;
+    max_allowed_wick_ratio?: number;
     regime_adaptive_gates_enabled?: boolean;
     regime_adaptive_preset?: "BALANCED_ADAPTIVE" | "DEFENSIVE_STRICT" | "AGGRESSIVE_TREND" | "CUSTOM";
     regime_gate_overrides?: Record<string, {

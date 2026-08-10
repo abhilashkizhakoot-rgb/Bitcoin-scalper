@@ -957,6 +957,75 @@ export default function ConfigPage({
                   </p>
                 </div>
 
+                {/* Choppy Market Avoidance Controls */}
+                <div className="md:col-span-2 border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 font-sans block">Choppy Market & Whip-Saw Avoidance Filter</span>
+                      <span className="text-[10px] text-slate-500">Filters out consolidation zones, low directional displacement, and wick-heavy whipsaw candle action.</span>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={generalConfig.enable_choppy_market_filter !== false}
+                        onChange={(e) => setGeneralConfig({ ...generalConfig, enable_choppy_market_filter: e.target.checked })}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
+                        id="config-enable-choppy-filter"
+                      />
+                      <span className="text-xs font-semibold text-slate-700">Active</span>
+                    </label>
+                  </div>
+
+                  {generalConfig.enable_choppy_market_filter !== false && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-semibold text-slate-700">Max Choppiness Index (CHOP)</label>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="0"
+                          max="100"
+                          value={generalConfig.max_allowed_chop_index !== undefined ? generalConfig.max_allowed_chop_index : 58.0}
+                          onChange={(e) => setGeneralConfig({ ...generalConfig, max_allowed_chop_index: parseInputNumber(e.target.value, true) })}
+                          className="w-full text-xs rounded border border-slate-300 px-3 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white font-mono"
+                          id="config-max-allowed-chop-index"
+                        />
+                        <p className="text-[9px] text-slate-400">Values &gt; 58 indicate sideways consolidation/chop. Trades block above this limit.</p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-semibold text-slate-700">Min Efficiency Ratio (KER)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.0"
+                          max="1.0"
+                          value={generalConfig.min_allowed_efficiency_ratio !== undefined ? generalConfig.min_allowed_efficiency_ratio : 0.22}
+                          onChange={(e) => setGeneralConfig({ ...generalConfig, min_allowed_efficiency_ratio: parseInputNumber(e.target.value, true) })}
+                          className="w-full text-xs rounded border border-slate-300 px-3 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white font-mono"
+                          id="config-min-allowed-efficiency-ratio"
+                        />
+                        <p className="text-[9px] text-slate-400">Kaufman Efficiency Ratio. Values &lt; 0.22 indicate high noise/low net displacement.</p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-semibold text-slate-700">Max Wick-to-Range Ratio (%)</label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0.0"
+                          max="1.0"
+                          value={generalConfig.max_allowed_wick_ratio !== undefined ? generalConfig.max_allowed_wick_ratio : 0.60}
+                          onChange={(e) => setGeneralConfig({ ...generalConfig, max_allowed_wick_ratio: parseInputNumber(e.target.value, true) })}
+                          className="w-full text-xs rounded border border-slate-300 px-3 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white font-mono"
+                          id="config-max-allowed-wick-ratio"
+                        />
+                        <p className="text-[9px] text-slate-400">Ratio of candle wicks to total range. Values &gt; 0.60 indicate aggressive whipsaw noise.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-1.5">
                   <label className="text-xs font-mono text-slate-400 uppercase">Regime Macro Slope Lookback</label>
                   <input

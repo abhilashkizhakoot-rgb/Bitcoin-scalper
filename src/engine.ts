@@ -391,6 +391,7 @@ class TradingEngine {
     if (n.includes("atr")) return "atr";
     if (n.includes("volume profiling") || n.includes("volume_profile")) return "volume_profile";
     if (n.includes("structure")) return "structure";
+    if (n.includes("choppy") || n.includes("whip-saw")) return "choppy";
     return n;
   }
 
@@ -1934,6 +1935,46 @@ class TradingEngine {
       priority: "CRITICAL",
     });
 
+    // Choppy Market & Whip-Saw Avoidance Gate
+    const choppyFilterEnabled = config.general.enable_choppy_market_filter !== false;
+    const maxChopAllowed = config.general.max_allowed_chop_index !== undefined ? config.general.max_allowed_chop_index : 58.0;
+    const minKerAllowed = config.general.min_allowed_efficiency_ratio !== undefined ? config.general.min_allowed_efficiency_ratio : 0.22;
+    const maxWickRatioAllowed = config.general.max_allowed_wick_ratio !== undefined ? config.general.max_allowed_wick_ratio : 0.60;
+
+    const chopIndex = this.calculateChoppinessIndex(this.candles1m, 14);
+    const kerValue = this.calculateEfficiencyRatio(this.candles1m, 10);
+    const avgWickRatio = this.calculateAverageWickRatio(this.candles1m, 10);
+
+    const isChopExceeded = chopIndex > maxChopAllowed;
+    const isKerDeficient = kerValue < minKerAllowed;
+    const isWickExcessive = avgWickRatio > maxWickRatioAllowed;
+
+    let choppyGateMet = true;
+    let choppyValStr = `CHOP: ${chopIndex.toFixed(1)} | Efficiency (KER): ${kerValue.toFixed(2)} | Wick Ratio: ${(avgWickRatio * 100).toFixed(0)}%`;
+    let choppyReqStr = `CHOP <= ${maxChopAllowed.toFixed(1)}, KER >= ${minKerAllowed.toFixed(2)}, Wick Ratio <= ${(maxWickRatioAllowed * 100).toFixed(0)}%`;
+
+    if (choppyFilterEnabled && signalDirection !== "NEUTRAL") {
+      if (isChopExceeded || isKerDeficient || isWickExcessive) {
+        choppyGateMet = false;
+        const reasons: string[] = [];
+        if (isChopExceeded) reasons.push(`High CHOP (${chopIndex.toFixed(1)} > ${maxChopAllowed.toFixed(1)})`);
+        if (isKerDeficient) reasons.push(`Low Efficiency KER (${kerValue.toFixed(2)} < ${minKerAllowed.toFixed(2)})`);
+        if (isWickExcessive) reasons.push(`Excessive Wicks (${(avgWickRatio * 100).toFixed(0)}% > ${(maxWickRatioAllowed * 100).toFixed(0)}%)`);
+        choppyValStr = `CHOPPY / WHIP-SAW MARKET DETECTED - BLOCKED (${reasons.join(", ")})`;
+      } else {
+        choppyValStr = `PASSING CLEAR TREND / CONVICTION (${choppyValStr})`;
+      }
+    }
+
+    conditions.push({
+      name: "Choppy Market Whip-Saw Filter",
+      met: choppyGateMet,
+      current_value: choppyValStr,
+      required: choppyReqStr,
+      description: "Blocks trade entry signals if price action is in a choppy consolidation zone (high Choppiness Index), exhibits low net directional displacement (low Kaufman Efficiency Ratio), or is dominated by wicks.",
+      priority: "CRITICAL",
+    });
+
     // Apply bypassed/skipped gates
     for (const c of conditions) {
       if (!this.isGateActive(config, c.name)) {
@@ -2902,6 +2943,57 @@ class TradingEngine {
 
     this.indicatorCache.adx.set(key, adx);
     return adx;
+  }
+
+  // Calculates the 14-period Choppiness Index (CHOP)
+  private calculateChoppinessIndex(candles: Candlestick[], period = 14): number {
+    if (candles.length < period) return 50.0;
+    const slice = candles.slice(-period);
+    let sumTR = 0;
+    for (let i = 0; i < slice.length; i++) {
+      const high = slice[i].high;
+      const low = slice[i].low;
+      const prevClose = i > 0 ? slice[i - 1].close : slice[i].open;
+      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+      sumTR += tr;
+    }
+    const maxHigh = Math.max(...slice.map(c => c.high));
+    const minLow = Math.min(...slice.map(c => c.low));
+    const range = maxHigh - minLow;
+    if (range <= 0) return 100.0;
+    const chop = 100 * (Math.log10(sumTR / range) / Math.log10(period));
+    return Math.max(0, Math.min(100, Number(chop.toFixed(2))));
+  }
+
+  // Calculates Kaufman Efficiency Ratio (KER) across lookback period
+  private calculateEfficiencyRatio(candles: Candlestick[], period = 10): number {
+    if (candles.length <= period) return 1.0;
+    const slice = candles.slice(-period - 1);
+    const netChange = Math.abs(slice[slice.length - 1].close - slice[0].close);
+    let sumPath = 0;
+    for (let i = 1; i < slice.length; i++) {
+      sumPath += Math.abs(slice[i].close - slice[i - 1].close);
+    }
+    if (sumPath === 0) return 0.0;
+    return Number((netChange / sumPath).toFixed(3));
+  }
+
+  // Calculates average candle wick-to-range ratio across recent candles
+  private calculateAverageWickRatio(candles: Candlestick[], period = 10): number {
+    if (candles.length < period) return 0.5;
+    const slice = candles.slice(-period);
+    let totalWickRatio = 0;
+    for (const c of slice) {
+      const range = c.high - c.low;
+      if (range <= 0) {
+        totalWickRatio += 1.0;
+        continue;
+      }
+      const body = Math.abs(c.close - c.open);
+      const wick = range - body;
+      totalWickRatio += wick / range;
+    }
+    return Number((totalWickRatio / slice.length).toFixed(3));
   }
 
   public detectWedgePattern(): {

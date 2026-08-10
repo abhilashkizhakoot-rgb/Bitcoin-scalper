@@ -109,10 +109,10 @@ const DEFAULT_CONFIG: StrategyConfig = {
     required_gates: [
       "catboost", "regime", "trend", "volume", "limit", "adx", "equity", "credentials",
       "cooldown", "timing", "vwap", "wedge", "ema100", "structure", "orderflow", "squeeze",
-      "orderbook", "volume_profile", "atr", "regime_cooldown"
+      "orderbook", "volume_profile", "atr", "regime_cooldown", "choppy"
     ],
     mandatory_gates: [
-      "limit", "equity", "credentials", "cooldown", "timing", "structure", "atr", "regime_cooldown"
+      "limit", "equity", "credentials", "cooldown", "timing", "structure", "atr", "regime_cooldown", "choppy"
     ],
     weighted_gates: [
       "catboost", "regime", "trend", "volume", "vwap", "wedge", "orderflow", "squeeze", "orderbook", "volume_profile", "adx", "ema100"
@@ -134,6 +134,10 @@ const DEFAULT_CONFIG: StrategyConfig = {
     regime_macro_slope_threshold: 0.0005,
     regime_ribbon_compression_threshold: 0.0015,
     require_volume_profile_in_ranging: true,
+    enable_choppy_market_filter: true,
+    max_allowed_chop_index: 58.0,
+    min_allowed_efficiency_ratio: 0.22,
+    max_allowed_wick_ratio: 0.60,
     regime_adaptive_gates_enabled: true,
     regime_adaptive_preset: "BALANCED_ADAPTIVE",
     regime_gate_overrides: {},

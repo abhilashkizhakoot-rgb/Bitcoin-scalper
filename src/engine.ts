@@ -1695,9 +1695,10 @@ class TradingEngine {
     // Normalized Composite Z-Score Distance (Z_dist)
     const zDist = 0.45 * zVwap + 0.35 * zEma + 0.20 * zChase;
 
-    // Dynamic Z_dist Threshold based on Regime and Pressure
-    const baseZLimit = isTrending ? 2.20 : 2.00;
-    const maxZLimit = (isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure) ? 3.20 : baseZLimit;
+    // Dynamic Z_dist Threshold based on Regime and Pressure capped by configured max_allowed_z_dist
+    const userMaxZCap = rm.max_allowed_z_dist !== undefined ? rm.max_allowed_z_dist : 2.20;
+    const baseZLimit = Math.min(isTrending ? 2.20 : 2.00, userMaxZCap);
+    const maxZLimit = Math.min((isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure) ? 3.20 : baseZLimit, userMaxZCap);
 
     let isValueExtensionMet = true;
     let isValueExtensionSoftened = false;

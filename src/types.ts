@@ -256,6 +256,7 @@ export interface StrategyConfig {
     overextension_ema_ranging_threshold?: number; // EMA overextension threshold in ranging/other markets (default: 1.2)
     overextension_vwap_trending_multiplier?: number; // VWAP band multiplier in trending markets (default: 1.5)
     overextension_vwap_ranging_multiplier?: number; // VWAP band multiplier in ranging/other markets (default: 1.0)
+    max_allowed_z_dist?: number; // Maximum allowed composite Z-score distance (|Z_dist|) cap (default: 2.20)
   };
   market_structure: {
     min_breakout_body_ratio: number; // e.g. 0.22 (22% body ratio)

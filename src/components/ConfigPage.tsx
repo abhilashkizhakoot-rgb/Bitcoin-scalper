@@ -2018,6 +2018,23 @@ export default function ConfigPage({
                     Multiplier for VWAP standard deviation bands in range-bound environments. Set to 1.0 to block trades near outer range boundaries (Default: 1.0).
                   </p>
                 </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Max Allowed Z-Score Cap (Z_dist Cap)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="1.0"
+                    max="5.0"
+                    value={riskConfig.max_allowed_z_dist !== undefined ? riskConfig.max_allowed_z_dist : 2.20}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, max_allowed_z_dist: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    id="config-max-allowed-z-dist"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Absolute hard cap on composite Z-score overextension distance (|Z_dist|). Setting to 2.20 strictly blocks purchases or sales at extreme exhaustion levels regardless of momentum soft-gates.
+                  </p>
+                </div>
               </div>
             </div>
 

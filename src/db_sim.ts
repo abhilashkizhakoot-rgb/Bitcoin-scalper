@@ -216,6 +216,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     overextension_ema_ranging_threshold: 1.2,
     overextension_vwap_trending_multiplier: 1.5,
     overextension_vwap_ranging_multiplier: 1.0,
+    max_allowed_z_dist: 2.20,
   },
   market_structure: {
     min_breakout_body_ratio: 0.22,
@@ -1115,6 +1116,10 @@ class DatabaseManager {
       }
       if (this.cache.config.risk_management.overextension_vwap_ranging_multiplier === undefined) {
         this.cache.config.risk_management.overextension_vwap_ranging_multiplier = 1.0;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.max_allowed_z_dist === undefined) {
+        this.cache.config.risk_management.max_allowed_z_dist = 2.20;
         changed = true;
       }
     }

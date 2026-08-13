@@ -203,6 +203,9 @@ export interface StrategyConfig {
       weighted_gates?: string[];
       bypassed_gates?: string[];
     }>;
+    enable_ranging_extreme_rsi_bypass?: boolean;
+    ranging_rsi_overbought_threshold?: number;
+    ranging_rsi_oversold_threshold?: number;
   };
   ml_settings: {
     entry_threshold_long: number; // e.g. 0.80

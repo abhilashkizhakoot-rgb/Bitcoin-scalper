@@ -143,6 +143,9 @@ const DEFAULT_CONFIG: StrategyConfig = {
     regime_adaptive_gates_enabled: true,
     regime_adaptive_preset: "BALANCED_ADAPTIVE",
     regime_gate_overrides: {},
+    enable_ranging_extreme_rsi_bypass: false,
+    ranging_rsi_overbought_threshold: 75.0,
+    ranging_rsi_oversold_threshold: 25.0,
   },
   ml_settings: {
     entry_threshold_long: 0.80,
@@ -1030,6 +1033,18 @@ class DatabaseManager {
       }
       if (!this.cache.config.general.regime_gate_overrides) {
         this.cache.config.general.regime_gate_overrides = {};
+        changed = true;
+      }
+      if (this.cache.config.general.enable_ranging_extreme_rsi_bypass === undefined) {
+        this.cache.config.general.enable_ranging_extreme_rsi_bypass = false;
+        changed = true;
+      }
+      if (this.cache.config.general.ranging_rsi_overbought_threshold === undefined) {
+        this.cache.config.general.ranging_rsi_overbought_threshold = 75.0;
+        changed = true;
+      }
+      if (this.cache.config.general.ranging_rsi_oversold_threshold === undefined) {
+        this.cache.config.general.ranging_rsi_oversold_threshold = 25.0;
         changed = true;
       }
     }

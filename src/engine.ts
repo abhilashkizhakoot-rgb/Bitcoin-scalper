@@ -1531,15 +1531,35 @@ class TradingEngine {
       currentTrendStr = "PASSING (Bypassed via Liquidity Sweep Reversal Setup 3)";
       requiredStr = "Liquidity Sweep Setup Active";
     } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
+      const isRsiBypassEnabled = config.general.enable_ranging_extreme_rsi_bypass ?? false;
+      const overboughtThresh = config.general.ranging_rsi_overbought_threshold ?? 75.0;
+      const oversoldThresh = config.general.ranging_rsi_oversold_threshold ?? 25.0;
+      const isExtremeOverbought = currentRsi >= overboughtThresh;
+      const isExtremeOversold = currentRsi <= oversoldThresh;
+
       if (signalDirection === "LONG") {
         trendAligned = !isBearAligned;
-        currentTrendStr = isBearAligned ? "BLOCKED: STRONGLY BEARISH" : "PASSING (Not strongly bearish)";
+        if (!trendAligned && isRsiBypassEnabled && isExtremeOversold) {
+          trendAligned = true;
+          currentTrendStr = `PASSING (Bypassed via Extreme Oversold RSI ${currentRsi.toFixed(1)} <= ${oversoldThresh})`;
+        } else if (!trendAligned) {
+          currentTrendStr = "BLOCKED: STRONGLY BEARISH";
+        } else {
+          currentTrendStr = "PASSING (Not strongly bearish)";
+        }
       } else {
         trendAligned = !isBullAligned;
-        currentTrendStr = isBullAligned ? "BLOCKED: STRONGLY BULLISH" : "PASSING (Not strongly bullish)";
+        if (!trendAligned && isRsiBypassEnabled && isExtremeOverbought) {
+          trendAligned = true;
+          currentTrendStr = `PASSING (Bypassed via Extreme Overbought RSI ${currentRsi.toFixed(1)} >= ${overboughtThresh})`;
+        } else if (!trendAligned) {
+          currentTrendStr = "BLOCKED: STRONGLY BULLISH";
+        } else {
+          currentTrendStr = "PASSING (Not strongly bullish)";
+        }
       }
       adxMet = adxValue >= minRangingAdx;
-      requiredStr = `LONG: Not strongly bearish (isBearAligned), SHORT: Not strongly bullish (isBullAligned) | Ranging ADX >= ${minRangingAdx.toFixed(1)}`;
+      requiredStr = `LONG: Not strongly bearish (isBearAligned) ${isRsiBypassEnabled ? `or RSI <= ${oversoldThresh}` : ''}, SHORT: Not strongly bullish (isBullAligned) ${isRsiBypassEnabled ? `or RSI >= ${overboughtThresh}` : ''} | Ranging ADX >= ${minRangingAdx.toFixed(1)}`;
     } else {
       if (hasExtremeRealtimePressure) {
         const fastEma = ms.fast_ema_period || 20;

@@ -119,6 +119,8 @@ const DEFAULT_CONFIG: StrategyConfig = {
     ],
     relative_volume_threshold: 1.3,
     adx_threshold: 22.0,
+    min_ranging_adx_threshold: 22.0,
+    min_adx_hard_floor: 20.0,
     timing_windows: DEFAULT_TIMING_WINDOWS,
     regime_candle_interval_minutes: 3,
     data_feed_source: "BINANCE",

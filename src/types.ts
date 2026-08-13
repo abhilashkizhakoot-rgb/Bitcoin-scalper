@@ -175,6 +175,8 @@ export interface StrategyConfig {
     weighted_gates?: string[];
     relative_volume_threshold?: number;
     adx_threshold?: number;
+    min_ranging_adx_threshold?: number;
+    min_adx_hard_floor?: number;
     timing_windows?: TimingWindow[];
     regime_candle_interval_minutes?: number;
     data_feed_source?: "BINANCE" | "DELTA_EXCHANGE";

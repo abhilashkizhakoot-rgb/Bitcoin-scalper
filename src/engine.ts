@@ -1280,7 +1280,9 @@ class TradingEngine {
 
     const probabilityShort = Number((1 - probabilityLong).toFixed(4));
 
-    const trendAlignAdx = ms.trend_alignment_adx_threshold || 30;
+    const trendAlignAdx = config.general.adx_threshold !== undefined ? config.general.adx_threshold : (ms.trend_alignment_adx_threshold || 22.0);
+    const minRangingAdx = config.general.min_ranging_adx_threshold !== undefined ? config.general.min_ranging_adx_threshold : 22.0;
+    const hardFloorAdx = config.general.min_adx_hard_floor !== undefined ? config.general.min_adx_hard_floor : 20.0;
     const superTrendAdx = ms.super_trend_adx_threshold || 35;
 
     let isUptrendAligned = ema20Val > ema50Val && ema50Val > ema200Val && adxValue >= trendAlignAdx && this.currentRegime === MarketRegime.STRONG_UPTREND;
@@ -1519,13 +1521,13 @@ class TradingEngine {
 
     const softeningPercent = config.general.orderflow_softening_percent !== undefined ? config.general.orderflow_softening_percent : 10;
     const standardAdxThreshold = trendAlignAdx;
-    const softenedAdxThreshold = standardAdxThreshold * (1 - softeningPercent / 100);
+    const softenedAdxThreshold = Math.max(hardFloorAdx, standardAdxThreshold * (1 - softeningPercent / 100));
 
     const activeSweepSignal = this.detectLiquiditySweep(signalDirection);
 
     if (activeSweepSignal.isSweep) {
       trendAligned = true;
-      adxMet = true;
+      adxMet = adxValue >= hardFloorAdx;
       currentTrendStr = "PASSING (Bypassed via Liquidity Sweep Reversal Setup 3)";
       requiredStr = "Liquidity Sweep Setup Active";
     } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
@@ -1536,8 +1538,8 @@ class TradingEngine {
         trendAligned = !isBullAligned;
         currentTrendStr = isBullAligned ? "BLOCKED: STRONGLY BULLISH" : "PASSING (Not strongly bullish)";
       }
-      adxMet = true; // Bypassed in RANGE_BOUND
-      requiredStr = "LONG: Not strongly bearish (isBearAligned), SHORT: Not strongly bullish (isBullAligned)";
+      adxMet = adxValue >= minRangingAdx;
+      requiredStr = `LONG: Not strongly bearish (isBearAligned), SHORT: Not strongly bullish (isBullAligned) | Ranging ADX >= ${minRangingAdx.toFixed(1)}`;
     } else {
       if (hasExtremeRealtimePressure) {
         const fastEma = ms.fast_ema_period || 20;
@@ -1553,8 +1555,13 @@ class TradingEngine {
         trendAligned = (signalDirection === "LONG" && isUptrendAligned) || (signalDirection === "SHORT" && isDowntrendAligned);
         adxMet = adxValue >= standardAdxThreshold;
         currentTrendStr = `EMA Structure: ${isUptrendAligned ? "BULLISH_TREND" : isDowntrendAligned ? "BEARISH_TREND" : "MIXED/FLAT"}`;
-        requiredStr = `LONG: EMA${fastEma} > EMA${medEma} > EMA${slowEma} & ADX >= ${standardAdxThreshold} & STRONG_UPTREND, SHORT: EMA${fastEma} < EMA${medEma} < EMA${slowEma} & ADX >= ${standardAdxThreshold} & STRONG_DOWNTREND`;
+        requiredStr = `LONG: EMA${fastEma} > EMA${medEma} > EMA${slowEma} & ADX >= ${standardAdxThreshold.toFixed(1)} & STRONG_UPTREND, SHORT: EMA${fastEma} < EMA${medEma} < EMA${slowEma} & ADX >= ${standardAdxThreshold.toFixed(1)} & STRONG_DOWNTREND`;
       }
+    }
+
+    // Absolute Hard Floor Enforcer: If ADX < hardFloorAdx (20.0), ADX gate fails unconditionally
+    if (adxValue < hardFloorAdx) {
+      adxMet = false;
     }
 
     const fastEma = ms.fast_ema_period || 20;
@@ -1577,12 +1584,23 @@ class TradingEngine {
       softened: isTrendSoftened,
     });
 
+    let adxValDisplay = `ADX: ${adxValue.toFixed(1)}`;
+    if (adxValue < hardFloorAdx) {
+      adxValDisplay = `ADX BELOW HARD FLOOR - BLOCKED (${adxValue.toFixed(1)} < ${hardFloorAdx.toFixed(1)})`;
+    } else if (this.currentRegime === MarketRegime.RANGE_BOUND && adxValue < minRangingAdx) {
+      adxValDisplay = `RANGE-BOUND ADX BELOW FLOOR - BLOCKED (${adxValue.toFixed(1)} < ${minRangingAdx.toFixed(1)})`;
+    }
+
+    const adxReqDisplay = this.currentRegime === MarketRegime.RANGE_BOUND
+      ? `ADX >= ${minRangingAdx.toFixed(1)} (Range-Bound Floor, Hard Floor >= ${hardFloorAdx.toFixed(1)})`
+      : `ADX >= ${(hasExtremeRealtimePressure ? softenedAdxThreshold : standardAdxThreshold).toFixed(1)} (Hard Floor >= ${hardFloorAdx.toFixed(1)})`;
+
     conditions.push({
       name: "ADX Trend Strength Filter",
       met: adxMet,
-      current_value: `ADX: ${adxValue.toFixed(1)}`,
-      required: `ADX >= ${hasExtremeRealtimePressure ? softenedAdxThreshold.toFixed(1) : standardAdxThreshold.toFixed(1)}`,
-      description: `Confirms strong trend velocity/momentum (ADX >= ${trendAlignAdx}).`,
+      current_value: adxValDisplay,
+      required: adxReqDisplay,
+      description: `Confirms sufficient trend momentum/velocity. Hard floor blocks all entries if ADX < ${hardFloorAdx.toFixed(1)}, and range-bound regimes enforce ADX >= ${minRangingAdx.toFixed(1)}.`,
       priority: "HIGH",
       softened: isTrendSoftened,
     });

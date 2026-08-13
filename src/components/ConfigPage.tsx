@@ -947,13 +947,47 @@ export default function ConfigPage({
                     step="0.5"
                     min="0.0"
                     max="100.0"
-                    value={generalConfig.adx_threshold}
+                    value={generalConfig.adx_threshold !== undefined ? generalConfig.adx_threshold : 22.0}
                     onChange={(e) => setGeneralConfig({ ...generalConfig, adx_threshold: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                     id="config-adx-threshold"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Minimum value of the 14-period Average Directional Index (ADX) required to verify a solid structural trend. Values above 22 confirm sufficient macro-momentum to support break-out trades.
+                    Standard 14-period Average Directional Index (ADX) required for trend alignment verification.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Range-Bound Regime ADX Floor</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0.0"
+                    max="100.0"
+                    value={generalConfig.min_ranging_adx_threshold !== undefined ? generalConfig.min_ranging_adx_threshold : 22.0}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, min_ranging_adx_threshold: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    id="config-min-ranging-adx-threshold"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Minimum ADX floor enforced during Range-Bound regimes (Standard: 22.0). Range mean-reversion trades block if ADX &lt; 22.0.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Absolute Hard Floor ADX (All Regimes)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0.0"
+                    max="100.0"
+                    value={generalConfig.min_adx_hard_floor !== undefined ? generalConfig.min_adx_hard_floor : 20.0}
+                    onChange={(e) => setGeneralConfig({ ...generalConfig, min_adx_hard_floor: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    id="config-min-adx-hard-floor"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Absolute hard floor for ADX across all market regimes (Standard: 20.0). Blocks ALL trade entries unconditionally when ADX &lt; 20.0.
                   </p>
                 </div>
 

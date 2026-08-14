@@ -3493,6 +3493,43 @@ export default function ConfigPage({
                   <p className="text-[10px] text-slate-400">Dynamically sets Take Profit at opposing unmitigated liquidity pools.</p>
                 </div>
               </div>
+
+              {/* Grid 4: Candlestick Reversal & Pin Bar 2-Candle Confirmation */}
+              <div className="border-t border-slate-100 pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Require 2-Candle Confirmation for Pin Bars</span>
+                    <p className="text-[10px] text-slate-400">Prevents premature entry on 1-candle wicks by demanding follow-through close in the reversal direction.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, pinbar_two_candle_confirmation_enabled: !msConfig.pinbar_two_candle_confirmation_enabled })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.pinbar_two_candle_confirmation_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.pinbar_two_candle_confirmation_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Min Pin Bar Wick Ratio</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0.30"
+                    max="0.80"
+                    value={msConfig.pinbar_min_wick_ratio || 0.50}
+                    onChange={(e) => setMsConfig({ ...msConfig, pinbar_min_wick_ratio: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400">Minimum proportion of total candle range that must be rejection wick to qualify as a Pin Bar (Standard: 0.50 / 50%).</p>
+                </div>
+              </div>
             </div>
 
             {/* Commit Button */}

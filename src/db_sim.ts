@@ -270,6 +270,8 @@ const DEFAULT_CONFIG: StrategyConfig = {
     order_block_strategy_enabled: true,
     asian_session_sweep_enabled: true,
     smc_tp_targeting_enabled: true,
+    pinbar_two_candle_confirmation_enabled: true,
+    pinbar_min_wick_ratio: 0.50,
   },
   gate_scoring: {
     enabled: true,
@@ -1184,6 +1186,8 @@ class DatabaseManager {
       if (ms.liquidity_sweep_lookback_candles === undefined) { ms.liquidity_sweep_lookback_candles = def.liquidity_sweep_lookback_candles || 20; changed = true; }
       if (ms.liquidity_sweep_min_wick_ratio === undefined) { ms.liquidity_sweep_min_wick_ratio = def.liquidity_sweep_min_wick_ratio || 0.35; changed = true; }
       if (ms.liquidity_sweep_volume_mult === undefined) { ms.liquidity_sweep_volume_mult = def.liquidity_sweep_volume_mult || 1.0; changed = true; }
+      if (ms.pinbar_two_candle_confirmation_enabled === undefined) { ms.pinbar_two_candle_confirmation_enabled = def.pinbar_two_candle_confirmation_enabled !== undefined ? def.pinbar_two_candle_confirmation_enabled : true; changed = true; }
+      if (ms.pinbar_min_wick_ratio === undefined) { ms.pinbar_min_wick_ratio = def.pinbar_min_wick_ratio || 0.50; changed = true; }
     }
 
     if (!this.cache?.config?.gate_scoring) {

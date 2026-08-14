@@ -310,6 +310,8 @@ export interface StrategyConfig {
     order_block_strategy_enabled?: boolean; // Enable Institutional Order Block (OB) Retest Strategy
     asian_session_sweep_enabled?: boolean; // Enable Asian Session High/Low Sweep Strategy
     smc_tp_targeting_enabled?: boolean; // Enable SMC Dynamic Take-Profit targeting opposing liquidity
+    pinbar_two_candle_confirmation_enabled?: boolean; // Require 2-candle confirmation for Pin Bars / Rejection Wicks (default: true)
+    pinbar_min_wick_ratio?: number; // Minimum wick ratio to qualify as a pin bar (default: 0.50)
   };
   gate_scoring?: {
     enabled: boolean;

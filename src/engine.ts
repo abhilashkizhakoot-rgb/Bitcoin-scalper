@@ -1992,7 +1992,7 @@ class TradingEngine {
     let choppyValStr = `CHOP: ${chopIndex.toFixed(1)} | Efficiency (KER): ${kerValue.toFixed(2)} | Wick Ratio: ${(avgWickRatio * 100).toFixed(0)}%`;
     let choppyReqStr = `CHOP <= ${maxChopAllowed.toFixed(1)}, KER >= ${minKerAllowed.toFixed(2)}, Wick Ratio <= ${(maxWickRatioAllowed * 100).toFixed(0)}%`;
 
-    if (choppyFilterEnabled && signalDirection !== "NEUTRAL") {
+    if (choppyFilterEnabled) {
       if (isChopExceeded || isKerDeficient || isWickExcessive) {
         choppyGateMet = false;
         const reasons: string[] = [];
@@ -5232,18 +5232,15 @@ class TradingEngine {
     
     // --- 2. Multiple Reversal & Entry Confirmations ---
     
-    // CONFIRMATION A: Standard Candlestick Reversal Pattern
+    // CONFIRMATION A: Candlestick Reversal Pattern (Evaluates 2-candle confirmed rejections on current candle)
     const rejectionCheckLong = this.isMultiCandleLongRejection(lastIdx, currentAtr);
     const rejectionCheckShort = this.isMultiCandleShortRejection(lastIdx, currentAtr);
     
-    const prevRejectionCheckLong = lastIdx >= 1 ? this.isMultiCandleLongRejection(lastIdx - 1, currentAtr) : { confirmed: false, type: "" };
-    const prevRejectionCheckShort = lastIdx >= 1 ? this.isMultiCandleShortRejection(lastIdx - 1, currentAtr) : { confirmed: false, type: "" };
+    const isCandleReversalBullish = rejectionCheckLong.confirmed;
+    const isCandleReversalBearish = rejectionCheckShort.confirmed;
     
-    const isCandleReversalBullish = rejectionCheckLong.confirmed || prevRejectionCheckLong.confirmed;
-    const isCandleReversalBearish = rejectionCheckShort.confirmed || prevRejectionCheckShort.confirmed;
-    
-    const candlePatternTypeLong = rejectionCheckLong.confirmed ? rejectionCheckLong.type : prevRejectionCheckLong.type;
-    const candlePatternTypeShort = rejectionCheckShort.confirmed ? rejectionCheckShort.type : prevRejectionCheckShort.type;
+    const candlePatternTypeLong = rejectionCheckLong.type;
+    const candlePatternTypeShort = rejectionCheckShort.type;
     
     // CONFIRMATION B: Standard Green/Red Candle Close
     const isCurrentCandleGreen = currentCandle.close > currentCandle.open;
@@ -5351,6 +5348,10 @@ class TradingEngine {
 
   private isMultiCandleLongRejection(lastIdx: number, currentAtr: number): { confirmed: boolean; type: string } {
     if (lastIdx < 0) return { confirmed: false, type: "" };
+    const config = dbManager.getConfig();
+    const requirePinBarConfirmation = config.market_structure.pinbar_two_candle_confirmation_enabled !== false;
+    const minWickRatio = config.market_structure.pinbar_min_wick_ratio || 0.50;
+
     const currentCandle = this.candles1m[lastIdx];
     const range = currentCandle.high - currentCandle.low;
     const body = Math.abs(currentCandle.close - currentCandle.open);
@@ -5359,12 +5360,41 @@ class TradingEngine {
     const isBullish = currentCandle.close > currentCandle.open;
     const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
 
-    // Single Candle Patterns
-    const isPinBar = range > 0 && lowerWick >= 0.5 * range && upperWick <= 0.25 * range;
+    // Single Candle Patterns (Baseline)
+    const isPinBar = range > 0 && lowerWick >= minWickRatio * range && upperWick <= 0.25 * range;
     const isMajorWickRejection = range > 0 && lowerWick >= 0.65 * range;
     const hasStrongClose = range > 0 && (currentCandle.close - currentCandle.low) / range >= 0.70;
     const isMomentumCandle = isBullish && body >= 0.7 * currentAtr;
     const isIndecision = range > 0 && (body / range < 0.15) && !isPinBar && !isMajorWickRejection;
+
+    // 2-Candle Confirmed Bullish Pin Bar / Major Wick Rejection:
+    // Candle 0 (prevCandle) forms the rejection wick, and Candle 1 (currentCandle) confirms with bullish follow-through
+    let isConfirmedBullishPinBar = false;
+    let isConfirmedMajorWickRejection = false;
+    if (prevCandle) {
+      const prevRange = prevCandle.high - prevCandle.low;
+      const prevLowerWick = Math.min(prevCandle.open, prevCandle.close) - prevCandle.low;
+      const prevUpperWick = prevCandle.high - Math.max(prevCandle.open, prevCandle.close);
+      const prevIsPinBar = prevRange > 0 && prevLowerWick >= minWickRatio * prevRange && prevUpperWick <= 0.30 * prevRange;
+      const prevIsMajorWick = prevRange > 0 && prevLowerWick >= 0.65 * prevRange;
+
+      // Confirmation Criteria on currentCandle:
+      // 1. Current candle must be green/bullish
+      const isConfirmGreen = currentCandle.close > currentCandle.open;
+      // 2. Current candle must hold the Pin Bar's low without sweeping/breaking it
+      const holdsPinLow = currentCandle.low >= prevCandle.low - 0.05 * currentAtr;
+      // 3. Current candle must show positive displacement (breaks above 50% of the pin range or exceeds pin high)
+      const breaksPinUpper = currentCandle.close >= (prevCandle.low + prevRange * 0.50) || currentCandle.close >= prevCandle.high;
+      // 4. Current close is higher than previous close
+      const hasUpwardFollowThrough = currentCandle.close > prevCandle.close;
+
+      if (prevIsPinBar && isConfirmGreen && holdsPinLow && (breaksPinUpper || hasUpwardFollowThrough)) {
+        isConfirmedBullishPinBar = true;
+      }
+      if (prevIsMajorWick && isConfirmGreen && holdsPinLow && (breaksPinUpper || hasUpwardFollowThrough)) {
+        isConfirmedMajorWickRejection = true;
+      }
+    }
 
     // Two-Candle Patterns
     const isBullishEngulfing = prevCandle && 
@@ -5452,8 +5482,9 @@ class TradingEngine {
       }
     }
 
-    if (isPinBar) return { confirmed: !isIndecision, type: "Bullish Pin Bar" };
-    if (isMajorWickRejection) return { confirmed: true, type: "65%+ Wick-to-Range Lower Rejection" };
+    // Priority Check
+    if (isConfirmedBullishPinBar) return { confirmed: true, type: "2-Candle Confirmed Bullish Pin Bar" };
+    if (isConfirmedMajorWickRejection) return { confirmed: true, type: "2-Candle Confirmed 65%+ Lower Wick Rejection" };
     if (isBullishEngulfing) return { confirmed: !isIndecision, type: "Bullish Engulfing Pattern" };
     if (hasMultiWickRejection) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
     if (isTweezerBottom) return { confirmed: !isIndecision, type: "Tweezer Bottom Reversal Pattern" };
@@ -5463,11 +5494,21 @@ class TradingEngine {
     if (isMomentumCandle && hasStrongClose) return { confirmed: !isIndecision, type: "Bullish Momentum Candle" };
     if (hasStrongClose && (lowerWick > upperWick || isBullish)) return { confirmed: !isIndecision, type: "Strong Close Support Rejection" };
 
+    // If 2-candle confirmation is DISABLED, allow legacy immediate 1-candle entry
+    if (!requirePinBarConfirmation) {
+      if (isPinBar) return { confirmed: !isIndecision, type: "Bullish Pin Bar (Legacy 1-Candle)" };
+      if (isMajorWickRejection) return { confirmed: true, type: "65%+ Wick-to-Range Lower Rejection (Legacy 1-Candle)" };
+    }
+
     return { confirmed: false, type: "" };
   }
 
   private isMultiCandleShortRejection(lastIdx: number, currentAtr: number): { confirmed: boolean; type: string } {
     if (lastIdx < 0) return { confirmed: false, type: "" };
+    const config = dbManager.getConfig();
+    const requirePinBarConfirmation = config.market_structure.pinbar_two_candle_confirmation_enabled !== false;
+    const minWickRatio = config.market_structure.pinbar_min_wick_ratio || 0.50;
+
     const currentCandle = this.candles1m[lastIdx];
     const range = currentCandle.high - currentCandle.low;
     const body = Math.abs(currentCandle.close - currentCandle.open);
@@ -5477,11 +5518,40 @@ class TradingEngine {
     const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : null;
 
     // Single Candle Patterns
-    const isPinBar = range > 0 && upperWick >= 0.5 * range && lowerWick <= 0.25 * range;
+    const isPinBar = range > 0 && upperWick >= minWickRatio * range && lowerWick <= 0.25 * range;
     const isMajorWickRejection = range > 0 && upperWick >= 0.65 * range;
     const hasStrongClose = range > 0 && (currentCandle.high - currentCandle.close) / range >= 0.70;
     const isMomentumCandle = isBearish && body >= 0.7 * currentAtr;
     const isIndecision = range > 0 && (body / range < 0.15) && !isPinBar && !isMajorWickRejection;
+
+    // 2-Candle Confirmed Bearish Pin Bar / Major Wick Rejection:
+    // Candle 0 (prevCandle) forms the rejection wick, and Candle 1 (currentCandle) confirms with bearish follow-through
+    let isConfirmedBearishPinBar = false;
+    let isConfirmedMajorWickRejection = false;
+    if (prevCandle) {
+      const prevRange = prevCandle.high - prevCandle.low;
+      const prevUpperWick = prevCandle.high - Math.max(prevCandle.open, prevCandle.close);
+      const prevLowerWick = Math.min(prevCandle.open, prevCandle.close) - prevCandle.low;
+      const prevIsPinBar = prevRange > 0 && prevUpperWick >= minWickRatio * prevRange && prevLowerWick <= 0.30 * prevRange;
+      const prevIsMajorWick = prevRange > 0 && prevUpperWick >= 0.65 * prevRange;
+
+      // Confirmation Criteria on currentCandle:
+      // 1. Current candle must be red/bearish
+      const isConfirmRed = currentCandle.close < currentCandle.open;
+      // 2. Current candle must hold the Pin Bar's high without sweeping/breaking it
+      const holdsPinHigh = currentCandle.high <= prevCandle.high + 0.05 * currentAtr;
+      // 3. Current candle must show downward displacement (breaks below 50% of the pin range or exceeds pin low)
+      const breaksPinLower = currentCandle.close <= (prevCandle.high - prevRange * 0.50) || currentCandle.close <= prevCandle.low;
+      // 4. Current close is lower than previous close
+      const hasDownwardFollowThrough = currentCandle.close < prevCandle.close;
+
+      if (prevIsPinBar && isConfirmRed && holdsPinHigh && (breaksPinLower || hasDownwardFollowThrough)) {
+        isConfirmedBearishPinBar = true;
+      }
+      if (prevIsMajorWick && isConfirmRed && holdsPinHigh && (breaksPinLower || hasDownwardFollowThrough)) {
+        isConfirmedMajorWickRejection = true;
+      }
+    }
 
     // Two-Candle Patterns
     const isBearishEngulfing = prevCandle && 
@@ -5569,8 +5639,9 @@ class TradingEngine {
       }
     }
 
-    if (isPinBar) return { confirmed: !isIndecision, type: "Bearish Pin Bar" };
-    if (isMajorWickRejection) return { confirmed: true, type: "65%+ Wick-to-Range Upper Rejection" };
+    // Priority Check
+    if (isConfirmedBearishPinBar) return { confirmed: true, type: "2-Candle Confirmed Bearish Pin Bar" };
+    if (isConfirmedMajorWickRejection) return { confirmed: true, type: "2-Candle Confirmed 65%+ Upper Wick Rejection" };
     if (isBearishEngulfing) return { confirmed: !isIndecision, type: "Bearish Engulfing Pattern" };
     if (hasMultiWickRejection) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
     if (isTweezerTop) return { confirmed: !isIndecision, type: "Tweezer Top Reversal Pattern" };
@@ -5579,6 +5650,12 @@ class TradingEngine {
     if (isThreeBlackCrows) return { confirmed: !isIndecision, type: "Three Black Crows Continuation Pattern" };
     if (isMomentumCandle && hasStrongClose) return { confirmed: !isIndecision, type: "Bearish Momentum Candle" };
     if (hasStrongClose && (upperWick > lowerWick || isBearish)) return { confirmed: !isIndecision, type: "Strong Close Resistance Rejection" };
+
+    // If 2-candle confirmation is DISABLED, allow legacy immediate 1-candle entry
+    if (!requirePinBarConfirmation) {
+      if (isPinBar) return { confirmed: !isIndecision, type: "Bearish Pin Bar (Legacy 1-Candle)" };
+      if (isMajorWickRejection) return { confirmed: true, type: "65%+ Wick-to-Range Upper Rejection (Legacy 1-Candle)" };
+    }
 
     return { confirmed: false, type: "" };
   }

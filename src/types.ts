@@ -305,6 +305,7 @@ export interface StrategyConfig {
     fvg_strategy_enabled?: boolean; // Enable Fair Value Gap (FVG) / Inefficiency Retest Strategy
     fvg_min_gap_atr_ratio?: number; // Minimum FVG gap size relative to ATR (default 0.12)
     fvg_entry_level?: "BOUNDARY" | "CONSEQUENT_ENCROACHMENT"; // Entry on FVG boundary or 50% midpoint (CE)
+    fvg_require_candlestick_rejection?: boolean; // Require Rejection Candlestick Pattern on FVG Retest (default: true)
     eqh_eql_detection_enabled?: boolean; // Enable Equal Highs / Equal Lows Liquidity Pool Detector
     eqh_eql_tolerance_pct?: number; // Tolerance % for EQH/EQL touches (default 0.08%)
     order_block_strategy_enabled?: boolean; // Enable Institutional Order Block (OB) Retest Strategy

@@ -3429,6 +3429,26 @@ export default function ConfigPage({
                   />
                   <p className="text-[10px] text-slate-400">Minimum gap size expressed as a fraction of ATR (Standard: 0.12).</p>
                 </div>
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Require Rejection Candlestick on FVG Retest</span>
+                    <p className="text-[10px] text-slate-400">Demands a confirmed rejection candlestick pattern (e.g. Pin Bar, Engulfing, Hammer) inside the FVG zone before market execution.</p>
+                  </div>
+                  <button
+                    id="fvg_require_candlestick_rejection_toggle"
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, fvg_require_candlestick_rejection: msConfig.fvg_require_candlestick_rejection === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.fvg_require_candlestick_rejection !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.fvg_require_candlestick_rejection !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
 
               {/* Grid 3: EQH/EQL, Asian Session Range, and SMC TP */}

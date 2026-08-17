@@ -3833,6 +3833,8 @@ class TradingEngine {
           `[Setup 4 - Fair Value Gap Retest Confirmed] ${fvgResult.description}`
         );
       }
+    } else if (fvgResult.description.includes("Awaiting") || fvgResult.description.includes("awaiting")) {
+      condDict["Fair Value Gap Retest Setup (Setup 4)"] = { status: "FAIL", reason: fvgResult.description };
     }
 
     // --- FEATURE 7: Institutional Order Block (OB) Retest Setup (Setup 5) Check ---
@@ -4699,11 +4701,18 @@ class TradingEngine {
     const currentAtr = atr14[lastIdx] || 50;
     const minGap = (ms.fvg_min_gap_atr_ratio || 0.12) * currentAtr;
     const entryLevelType = ms.fvg_entry_level || "CONSEQUENT_ENCROACHMENT";
+    const requireRejection = ms.fvg_require_candlestick_rejection !== false;
 
     const lookback = Math.min(15, this.candles1m.length - 2);
     const currentPrice = this.currentPrice;
+    const closedIdx = (lastIdx === this.candles1m.length - 1 && this.candles1m.length >= 2) ? lastIdx - 1 : lastIdx;
+    const setupIdx = closedIdx >= 1 ? closedIdx - 1 : closedIdx;
+    const confirmCandle = this.candles1m[closedIdx];
+    const setupCandle = this.candles1m[setupIdx];
 
     if (direction === "LONG") {
+      const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtr);
+
       for (let i = lastIdx; i >= lastIdx - lookback; i--) {
         const c1 = this.candles1m[i - 2];
         const c3 = this.candles1m[i];
@@ -4715,21 +4724,61 @@ class TradingEngine {
             const ce = fvgBottom + (fvgTop - fvgBottom) * 0.5;
 
             const targetEntry = entryLevelType === "CONSEQUENT_ENCROACHMENT" ? ce : fvgTop;
-            const inZone = currentPrice <= fvgTop && currentPrice >= fvgBottom;
-            const notBroken = currentPrice >= fvgBottom - 0.1 * currentAtr;
+            const postFvgCandles = this.candles1m.slice(i + 1);
+            
+            // Check if price touched into the FVG zone
+            const hasTouchedFvg = (postFvgCandles.some(c => c.low <= fvgTop && c.low >= fvgBottom - 0.15 * currentAtr)) ||
+                                  (currentPrice <= fvgTop && currentPrice >= fvgBottom - 0.15 * currentAtr);
+            
+            // Check if FVG was completely broken/invalidated
+            const isBroken = postFvgCandles.some(c => c.close < fvgBottom - 0.15 * currentAtr) || (currentPrice < fvgBottom - 0.15 * currentAtr);
 
-            if (inZone && notBroken) {
-              return {
-                isFvgValid: true,
-                fvgLevel: targetEntry,
-                consequentEncroachment: ce,
-                description: `Bullish Fair Value Gap (FVG) Retest: Price ($${currentPrice.toFixed(2)}) retesting unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
-              };
+            if (hasTouchedFvg && !isBroken) {
+              if (requireRejection) {
+                // Verify that the rejection pattern candle(s) wicked into / tested the FVG zone
+                const isRejectionAtFvg = confirmCandle && setupCandle && (
+                  (confirmCandle.low <= fvgTop + 0.10 * currentAtr && confirmCandle.high >= fvgBottom - 0.10 * currentAtr) ||
+                  (setupCandle.low <= fvgTop + 0.10 * currentAtr && setupCandle.high >= fvgBottom - 0.10 * currentAtr)
+                );
+
+                if (rejectionCheck.confirmed && isRejectionAtFvg) {
+                  return {
+                    isFvgValid: true,
+                    fvgLevel: targetEntry,
+                    consequentEncroachment: ce,
+                    description: `Bullish Fair Value Gap (FVG) Retest Confirmed via [${rejectionCheck.type}]: Price ($${currentPrice.toFixed(2)}) rejected and holding unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
+                  };
+                } else if (rejectionCheck.confirmed && !isRejectionAtFvg) {
+                  return {
+                    isFvgValid: false,
+                    fvgLevel: targetEntry,
+                    consequentEncroachment: ce,
+                    description: `Awaiting FVG Zone Rejection: Rejection pattern formed away from FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}).`,
+                  };
+                } else {
+                  return {
+                    isFvgValid: false,
+                    fvgLevel: targetEntry,
+                    consequentEncroachment: ce,
+                    description: `Awaiting Bullish Rejection: Price ($${currentPrice.toFixed(2)}) retested FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) — awaiting confirmed bullish rejection candlestick pattern (e.g. Pin Bar, Bullish Engulfing, Hammer).`,
+                  };
+                }
+              } else {
+                // Direct entry without rejection pattern requirement
+                return {
+                  isFvgValid: true,
+                  fvgLevel: targetEntry,
+                  consequentEncroachment: ce,
+                  description: `Bullish Fair Value Gap (FVG) Retest: Price ($${currentPrice.toFixed(2)}) retesting unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
+                };
+              }
             }
           }
         }
       }
     } else {
+      const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtr);
+
       for (let i = lastIdx; i >= lastIdx - lookback; i--) {
         const c1 = this.candles1m[i - 2];
         const c3 = this.candles1m[i];
@@ -4741,16 +4790,54 @@ class TradingEngine {
             const ce = fvgBottom + (fvgTop - fvgBottom) * 0.5;
 
             const targetEntry = entryLevelType === "CONSEQUENT_ENCROACHMENT" ? ce : fvgBottom;
-            const inZone = currentPrice >= fvgBottom && currentPrice <= fvgTop;
-            const notBroken = currentPrice <= fvgTop + 0.1 * currentAtr;
+            const postFvgCandles = this.candles1m.slice(i + 1);
 
-            if (inZone && notBroken) {
-              return {
-                isFvgValid: true,
-                fvgLevel: targetEntry,
-                consequentEncroachment: ce,
-                description: `Bearish Fair Value Gap (FVG) Retest: Price ($${currentPrice.toFixed(2)}) retesting unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
-              };
+            // Check if price touched into the FVG zone
+            const hasTouchedFvg = (postFvgCandles.some(c => c.high >= fvgBottom && c.high <= fvgTop + 0.15 * currentAtr)) ||
+                                  (currentPrice >= fvgBottom && currentPrice <= fvgTop + 0.15 * currentAtr);
+
+            // Check if FVG was completely broken/invalidated
+            const isBroken = postFvgCandles.some(c => c.close > fvgTop + 0.15 * currentAtr) || (currentPrice > fvgTop + 0.15 * currentAtr);
+
+            if (hasTouchedFvg && !isBroken) {
+              if (requireRejection) {
+                // Verify that the rejection pattern candle(s) wicked into / tested the FVG zone
+                const isRejectionAtFvg = confirmCandle && setupCandle && (
+                  (confirmCandle.high >= fvgBottom - 0.10 * currentAtr && confirmCandle.low <= fvgTop + 0.10 * currentAtr) ||
+                  (setupCandle.high >= fvgBottom - 0.10 * currentAtr && setupCandle.low <= fvgTop + 0.10 * currentAtr)
+                );
+
+                if (rejectionCheck.confirmed && isRejectionAtFvg) {
+                  return {
+                    isFvgValid: true,
+                    fvgLevel: targetEntry,
+                    consequentEncroachment: ce,
+                    description: `Bearish Fair Value Gap (FVG) Retest Confirmed via [${rejectionCheck.type}]: Price ($${currentPrice.toFixed(2)}) rejected and holding unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
+                  };
+                } else if (rejectionCheck.confirmed && !isRejectionAtFvg) {
+                  return {
+                    isFvgValid: false,
+                    fvgLevel: targetEntry,
+                    consequentEncroachment: ce,
+                    description: `Awaiting FVG Zone Rejection: Rejection pattern formed away from FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}).`,
+                  };
+                } else {
+                  return {
+                    isFvgValid: false,
+                    fvgLevel: targetEntry,
+                    consequentEncroachment: ce,
+                    description: `Awaiting Bearish Rejection: Price ($${currentPrice.toFixed(2)}) retested FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) — awaiting confirmed bearish rejection candlestick pattern (e.g. Pin Bar, Bearish Engulfing, Shooting Star).`,
+                  };
+                }
+              } else {
+                // Direct entry without rejection pattern requirement
+                return {
+                  isFvgValid: true,
+                  fvgLevel: targetEntry,
+                  consequentEncroachment: ce,
+                  description: `Bearish Fair Value Gap (FVG) Retest: Price ($${currentPrice.toFixed(2)}) retesting unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
+                };
+              }
             }
           }
         }

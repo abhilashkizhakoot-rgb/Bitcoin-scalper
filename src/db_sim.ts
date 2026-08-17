@@ -265,6 +265,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     fvg_strategy_enabled: true,
     fvg_min_gap_atr_ratio: 0.12,
     fvg_entry_level: "CONSEQUENT_ENCROACHMENT",
+    fvg_require_candlestick_rejection: true,
     eqh_eql_detection_enabled: true,
     eqh_eql_tolerance_pct: 0.08,
     order_block_strategy_enabled: true,

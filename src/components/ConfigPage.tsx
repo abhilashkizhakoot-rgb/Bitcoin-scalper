@@ -3432,7 +3432,7 @@ export default function ConfigPage({
                 <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
                   <div className="space-y-0.5">
                     <span className="text-xs font-sans font-semibold text-slate-800">Require Rejection Candlestick on FVG Retest</span>
-                    <p className="text-[10px] text-slate-400">Demands a confirmed rejection candlestick pattern (e.g. Pin Bar, Engulfing, Hammer) inside the FVG zone before market execution.</p>
+                    <p className="text-[10px] text-slate-400">Demands a confirmed rejection candlestick pattern (e.g. Pin Bar, Engulfing, Harami, Hammer) inside the FVG zone before market execution.</p>
                   </div>
                   <button
                     id="fvg_require_candlestick_rejection_toggle"

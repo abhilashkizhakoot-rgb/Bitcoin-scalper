@@ -4760,7 +4760,7 @@ class TradingEngine {
                     isFvgValid: false,
                     fvgLevel: targetEntry,
                     consequentEncroachment: ce,
-                    description: `Awaiting Bullish Rejection: Price ($${currentPrice.toFixed(2)}) retested FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) — awaiting confirmed bullish rejection candlestick pattern (e.g. Pin Bar, Bullish Engulfing, Hammer).`,
+                    description: `Awaiting Bullish Rejection: Price ($${currentPrice.toFixed(2)}) retested FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) — awaiting confirmed bullish rejection candlestick pattern (e.g. Pin Bar, Bullish Engulfing, Bullish Harami, Hammer).`,
                   };
                 }
               } else {
@@ -4826,7 +4826,7 @@ class TradingEngine {
                     isFvgValid: false,
                     fvgLevel: targetEntry,
                     consequentEncroachment: ce,
-                    description: `Awaiting Bearish Rejection: Price ($${currentPrice.toFixed(2)}) retested FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) — awaiting confirmed bearish rejection candlestick pattern (e.g. Pin Bar, Bearish Engulfing, Shooting Star).`,
+                    description: `Awaiting Bearish Rejection: Price ($${currentPrice.toFixed(2)}) retested FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) — awaiting confirmed bearish rejection candlestick pattern (e.g. Pin Bar, Bearish Engulfing, Bearish Harami, Shooting Star).`,
                   };
                 }
               } else {
@@ -5540,8 +5540,24 @@ class TradingEngine {
       }
     }
 
+    // 3. Bullish Harami (Two-candle Inside Bar Reversal)
+    let isBullishHarami = false;
+    if (setupCandle) {
+      const prevRange = setupCandle.high - setupCandle.low;
+      const prevBody = setupCandle.open - setupCandle.close;
+      const isPrevBearish = setupCandle.close < setupCandle.open && prevBody >= 0.25 * prevRange;
+      const opensInsideMotherBody = confirmCandle.open >= setupCandle.close - 0.05 * currentAtr;
+      const closesInsideMotherBody = confirmCandle.close <= setupCandle.open + 0.05 * currentAtr;
+      const isInsideMotherRange = confirmCandle.high <= setupCandle.high + 0.08 * currentAtr && confirmCandle.low >= setupCandle.low - 0.08 * currentAtr;
+      const hasPositiveDisplacement = isBullish && confirmBody >= 0.15 * confirmRange;
+
+      if (isPrevBearish && isBullish && opensInsideMotherBody && closesInsideMotherBody && isInsideMotherRange && hasPositiveDisplacement) {
+        isBullishHarami = true;
+      }
+    }
+
     // Three-Candle Patterns
-    // 3. Morning Star
+    // 4. Morning Star
     let isMorningStar = false;
     if (closedIdx >= 2) {
       const c2 = this.candles1m[closedIdx - 2];
@@ -5566,7 +5582,7 @@ class TradingEngine {
       }
     }
 
-    // 4. Three White Soldiers
+    // 5. Three White Soldiers
     let isThreeWhiteSoldiers = false;
     if (closedIdx >= 2) {
       const c2 = this.candles1m[closedIdx - 2];
@@ -5597,6 +5613,7 @@ class TradingEngine {
     if (hasMultiWickRejection) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
     if (isTweezerBottom) return { confirmed: !isIndecision, type: "Tweezer Bottom Reversal Pattern" };
     if (isPiercingLine) return { confirmed: !isIndecision, type: "Piercing Line Reversal Pattern" };
+    if (isBullishHarami) return { confirmed: !isIndecision, type: "Bullish Harami Reversal Pattern" };
     if (isMorningStar) return { confirmed: !isIndecision, type: "Morning Star Reversal Pattern" };
     if (isThreeWhiteSoldiers) return { confirmed: !isIndecision, type: "Three White Soldiers Continuation Pattern" };
     if (isMomentumCandle && hasStrongClose) return { confirmed: !isIndecision, type: "Bullish Momentum Candle" };
@@ -5713,8 +5730,24 @@ class TradingEngine {
       }
     }
 
+    // 3. Bearish Harami (Two-candle Inside Bar Reversal)
+    let isBearishHarami = false;
+    if (setupCandle) {
+      const prevRange = setupCandle.high - setupCandle.low;
+      const prevBody = setupCandle.close - setupCandle.open;
+      const isPrevBullish = setupCandle.close > setupCandle.open && prevBody >= 0.25 * prevRange;
+      const opensInsideMotherBody = confirmCandle.open <= setupCandle.close + 0.05 * currentAtr;
+      const closesInsideMotherBody = confirmCandle.close >= setupCandle.open - 0.05 * currentAtr;
+      const isInsideMotherRange = confirmCandle.high <= setupCandle.high + 0.08 * currentAtr && confirmCandle.low >= setupCandle.low - 0.08 * currentAtr;
+      const hasNegativeDisplacement = isBearish && confirmBody >= 0.15 * confirmRange;
+
+      if (isPrevBullish && isBearish && opensInsideMotherBody && closesInsideMotherBody && isInsideMotherRange && hasNegativeDisplacement) {
+        isBearishHarami = true;
+      }
+    }
+
     // Three-Candle Patterns
-    // 3. Evening Star
+    // 4. Evening Star
     let isEveningStar = false;
     if (closedIdx >= 2) {
       const c2 = this.candles1m[closedIdx - 2];
@@ -5739,7 +5772,7 @@ class TradingEngine {
       }
     }
 
-    // 4. Three Black Crows
+    // 5. Three Black Crows
     let isThreeBlackCrows = false;
     if (closedIdx >= 2) {
       const c2 = this.candles1m[closedIdx - 2];
@@ -5770,6 +5803,7 @@ class TradingEngine {
     if (hasMultiWickRejection) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
     if (isTweezerTop) return { confirmed: !isIndecision, type: "Tweezer Top Reversal Pattern" };
     if (isDarkCloudCover) return { confirmed: !isIndecision, type: "Dark Cloud Cover Reversal Pattern" };
+    if (isBearishHarami) return { confirmed: !isIndecision, type: "Bearish Harami Reversal Pattern" };
     if (isEveningStar) return { confirmed: !isIndecision, type: "Evening Star Reversal Pattern" };
     if (isThreeBlackCrows) return { confirmed: !isIndecision, type: "Three Black Crows Continuation Pattern" };
     if (isMomentumCandle && hasStrongClose) return { confirmed: !isIndecision, type: "Bearish Momentum Candle" };

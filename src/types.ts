@@ -309,6 +309,7 @@ export interface StrategyConfig {
     eqh_eql_detection_enabled?: boolean; // Enable Equal Highs / Equal Lows Liquidity Pool Detector
     eqh_eql_tolerance_pct?: number; // Tolerance % for EQH/EQL touches (default 0.08%)
     order_block_strategy_enabled?: boolean; // Enable Institutional Order Block (OB) Retest Strategy
+    order_block_require_candlestick_rejection?: boolean; // Require Rejection Candlestick Pattern on Order Block Retest (default: true)
     asian_session_sweep_enabled?: boolean; // Enable Asian Session High/Low Sweep Strategy
     smc_tp_targeting_enabled?: boolean; // Enable SMC Dynamic Take-Profit targeting opposing liquidity
     pinbar_two_candle_confirmation_enabled?: boolean; // Require 2-candle confirmation for Pin Bars / Rejection Wicks (default: true)

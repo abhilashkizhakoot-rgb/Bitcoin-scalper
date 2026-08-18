@@ -269,6 +269,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     eqh_eql_detection_enabled: true,
     eqh_eql_tolerance_pct: 0.08,
     order_block_strategy_enabled: true,
+    order_block_require_candlestick_rejection: true,
     asian_session_sweep_enabled: true,
     smc_tp_targeting_enabled: true,
     pinbar_two_candle_confirmation_enabled: true,

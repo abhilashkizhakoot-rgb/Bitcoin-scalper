@@ -6302,14 +6302,6 @@ class TradingEngine {
       let microTrendAligned = true;
       let microTrendDetails = "";
 
-      // Calculate Macro Trend EMAs (50 vs 200) for Regime Directional Anchoring (Fix 5)
-      const ema50List = this.calculateEMA(closes, Math.min(closes.length, 50));
-      const ema200List = this.calculateEMA(closes, Math.min(closes.length, 200));
-      const ema50Val = lastIdx >= 0 && ema50List.length > lastIdx ? ema50List[lastIdx] : currentPrice;
-      const ema200Val = lastIdx >= 0 && ema200List.length > lastIdx ? ema200List[lastIdx] : currentPrice;
-      const isMacroUptrend = ema50Val > ema200Val;
-      const isMacroDowntrend = ema50Val < ema200Val;
-
       if (ms.micro_trend_alignment_enabled !== false && hasEnoughCandles) {
         const microFastPeriod = ms.micro_trend_fast_period || 5;
         const microSlowPeriod = ms.micro_trend_slow_period || 15;
@@ -6334,16 +6326,6 @@ class TradingEngine {
 
       if (signalDirection === "LONG") {
         if (isRangeLongReversal) {
-          // Fix 5: Honor Macro Trend Direction - In macro downtrend, forbid buying support unless there is a confirmed Bullish CHoCH
-          const hasBullishChoch = struct.current_HH && currentPrice > struct.current_HH.price;
-          if (isMacroDowntrend && !hasBullishChoch) {
-            return {
-              confirmed: false,
-              message: `Range LONG Reversal Blocked: Macro Trend is Bearish (EMA 50 $${ema50Val.toFixed(2)} < EMA 200 $${ema200Val.toFixed(2)}). Buying support in a macro downtrend is forbidden without a confirmed Bullish CHoCH.`,
-              swingHigh: rangeHigh,
-              swingLow: rangeLow
-            };
-          }
           if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
             return {
               confirmed: false,
@@ -6414,16 +6396,6 @@ class TradingEngine {
         }
       } else if (signalDirection === "SHORT") {
         if (isRangeShortReversal) {
-          // Fix 5: Honor Macro Trend Direction - In macro uptrend, forbid fading resistance unless there is a confirmed Bearish CHoCH
-          const hasBearishChoch = struct.current_LL && currentPrice < struct.current_LL.price;
-          if (isMacroUptrend && !hasBearishChoch) {
-            return {
-              confirmed: false,
-              message: `Range SHORT Reversal Blocked: Macro Trend is Bullish (EMA 50 $${ema50Val.toFixed(2)} > EMA 200 $${ema200Val.toFixed(2)}). Fading resistance in a macro uptrend is forbidden without a confirmed Bearish CHoCH.`,
-              swingHigh: rangeHigh,
-              swingLow: rangeLow
-            };
-          }
           if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
             return {
               confirmed: false,

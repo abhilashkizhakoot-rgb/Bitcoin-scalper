@@ -1813,33 +1813,46 @@ class TradingEngine {
 
 
 
-    // C17: Binance Order Flow Confirmation
+    // C17: Binance Order Flow Confirmation (Hard Validation - No AI Softening)
     let ofMet = true;
     const flowRes = this.getOrderFlowScore(signalDirection);
     let ofVal = `Score: ${flowRes.score}/100 [${flowRes.label}] | Taker Buy: ${(flowRes.takerBuyRatio * 100).toFixed(1)}% | Imbalance: ${(flowRes.imbalanceRatio * 100).toFixed(1)}%`;
-    let ofReq = "Dynamic Score >= 45/100 (Softenable to 30/100 if CatBoost AI probability >= 85.0%)";
+    let ofReq = "Dynamic Score >= 35/100 & Directional Taker Vol >= 40.0% (Hard Gate - No AI Softening)";
 
-    const activeProb = signalDirection === "LONG" ? probabilityLong : probabilityShort;
-    const isExtremeAiConfidence = activeProb >= 0.85;
-    const hurdleScore = isExtremeAiConfidence ? 30 : 45;
-    ofMet = flowRes.score >= hurdleScore;
-    if (!ofMet) {
-      ofVal = `${ofVal} - BLOCKED (${flowRes.description})`;
-    } else {
-      const softState = flowRes.score < 45 ? " - SOFTENED BY AI" : "";
-      ofVal = `${ofVal} - PASSED${softState} (${flowRes.description})`;
+    if (signalDirection === "LONG") {
+      const hasMinTakerBuy = flowRes.takerBuyRatio >= 0.40;
+      const hasMinScore = flowRes.score >= 35;
+      ofMet = hasMinTakerBuy && hasMinScore;
+      if (!ofMet) {
+        const failReason = !hasMinTakerBuy 
+          ? `Taker Buy ${(flowRes.takerBuyRatio * 100).toFixed(1)}% < 40.0% minimum` 
+          : `Order Flow score ${flowRes.score}/100 < 35`;
+        ofVal = `${ofVal} - BLOCKED (${failReason}: ${flowRes.description})`;
+      } else {
+        ofVal = `${ofVal} - PASSED (Verified Institutional Buy Support)`;
+      }
+    } else if (signalDirection === "SHORT") {
+      const hasMinTakerSell = flowRes.takerBuyRatio <= 0.60; // Taker sell >= 40%
+      const hasMinScore = flowRes.score >= 35;
+      ofMet = hasMinTakerSell && hasMinScore;
+      if (!ofMet) {
+        const failReason = !hasMinTakerSell 
+          ? `Taker Sell ${((1 - flowRes.takerBuyRatio) * 100).toFixed(1)}% < 40.0% minimum` 
+          : `Order Flow score ${flowRes.score}/100 < 35`;
+        ofVal = `${ofVal} - BLOCKED (${failReason}: ${flowRes.description})`;
+      } else {
+        ofVal = `${ofVal} - PASSED (Verified Institutional Sell Pressure)`;
+      }
     }
-
-    const isOrderFlowSoftened = flowRes.score < 45 && flowRes.score >= 30;
 
     conditions.push({
       name: "Binance Order Flow Confirmation",
       met: ofMet,
       current_value: ofVal,
       required: ofReq,
-      description: "Applies a continuous fuzzy confluence score blending taker volume buy/sell ratio (70% weight) and order book bid/ask depth imbalance (30% weight) with adaptive soft-gates based on AI prediction confidence.",
+      description: "Applies a continuous fuzzy confluence score blending taker volume buy/sell ratio (70% weight) and order book bid/ask depth imbalance (30% weight) with hard floor validation to prevent fighting institutional flow.",
       priority: "HIGH",
-      softened: isOrderFlowSoftened,
+      softened: false,
     });
 
     // C18: Volatility Compression (Squeeze) Filter
@@ -5216,7 +5229,55 @@ class TradingEngine {
 
   private evaluateMarketStructureConfirmation(signalDirection: "LONG" | "SHORT" | "NEUTRAL", probabilityLong: number): MarketStructureConfirmationResult {
     const rawResult = this.evaluateMarketStructureConfirmationRaw(signalDirection, probabilityLong);
-    return this.applyEma200ProximityFilter(signalDirection, this.currentPrice, rawResult);
+    const emaFiltered = this.applyEma200ProximityFilter(signalDirection, this.currentPrice, rawResult);
+    return this.applyBollingerBandExhaustionGuard(signalDirection, this.currentPrice, emaFiltered);
+  }
+
+  /**
+   * Fix 3: Bollinger Band Exhaustion Guard
+   * Prevents buying/selling at outer band extremes when RSI confirms momentum exhaustion.
+   * Demands entries to pull back towards the mean.
+   */
+  private applyBollingerBandExhaustionGuard(
+    direction: "LONG" | "SHORT" | "NEUTRAL",
+    currentPrice: number,
+    result: MarketStructureConfirmationResult
+  ): MarketStructureConfirmationResult {
+    if (!result.confirmed || direction === "NEUTRAL") {
+      return result;
+    }
+
+    const closes = this.candles1m.map(c => c.close);
+    if (closes.length < 20) return result;
+
+    const lastIdx = closes.length - 1;
+    const bb = this.calculateBollingerBands(closes, 20, 2);
+    const rsi14 = this.calculateRSI(closes, 14);
+    const currentRsi = lastIdx >= 0 && rsi14.length > lastIdx ? rsi14[lastIdx] : 50;
+    const bandWidth = bb.upper - bb.lower || 1;
+    const devPos = (currentPrice - bb.lower) / bandWidth;
+
+    if (direction === "LONG") {
+      // Long trend-following/breakout exhaustion: Dev position > 0.75 and RSI > 65
+      if (devPos > 0.75 && currentRsi > 65) {
+        return {
+          ...result,
+          confirmed: false,
+          message: `Bollinger Band Exhaustion Guard: Blocked LONG entry at band upper extreme (Dev Position: ${devPos.toFixed(2)} > 0.75, RSI: ${currentRsi.toFixed(1)} > 65). Pullback to mean required (Dev Position 0.20 - 0.65).`
+        };
+      }
+    } else if (direction === "SHORT") {
+      // Short trend-following/breakdown exhaustion: Dev position < 0.25 and RSI < 35
+      if (devPos < 0.25 && currentRsi < 35) {
+        return {
+          ...result,
+          confirmed: false,
+          message: `Bollinger Band Exhaustion Guard: Blocked SHORT entry at band lower extreme (Dev Position: ${devPos.toFixed(2)} < 0.25, RSI: ${currentRsi.toFixed(1)} < 35). Pullback to mean required (Dev Position 0.35 - 0.80).`
+        };
+      }
+    }
+
+    return result;
   }
 
   private applyEma200ProximityFilter(
@@ -6241,6 +6302,14 @@ class TradingEngine {
       let microTrendAligned = true;
       let microTrendDetails = "";
 
+      // Calculate Macro Trend EMAs (50 vs 200) for Regime Directional Anchoring (Fix 5)
+      const ema50List = this.calculateEMA(closes, Math.min(closes.length, 50));
+      const ema200List = this.calculateEMA(closes, Math.min(closes.length, 200));
+      const ema50Val = lastIdx >= 0 && ema50List.length > lastIdx ? ema50List[lastIdx] : currentPrice;
+      const ema200Val = lastIdx >= 0 && ema200List.length > lastIdx ? ema200List[lastIdx] : currentPrice;
+      const isMacroUptrend = ema50Val > ema200Val;
+      const isMacroDowntrend = ema50Val < ema200Val;
+
       if (ms.micro_trend_alignment_enabled !== false && hasEnoughCandles) {
         const microFastPeriod = ms.micro_trend_fast_period || 5;
         const microSlowPeriod = ms.micro_trend_slow_period || 15;
@@ -6265,6 +6334,16 @@ class TradingEngine {
 
       if (signalDirection === "LONG") {
         if (isRangeLongReversal) {
+          // Fix 5: Honor Macro Trend Direction - In macro downtrend, forbid buying support unless there is a confirmed Bullish CHoCH
+          const hasBullishChoch = struct.current_HH && currentPrice > struct.current_HH.price;
+          if (isMacroDowntrend && !hasBullishChoch) {
+            return {
+              confirmed: false,
+              message: `Range LONG Reversal Blocked: Macro Trend is Bearish (EMA 50 $${ema50Val.toFixed(2)} < EMA 200 $${ema200Val.toFixed(2)}). Buying support in a macro downtrend is forbidden without a confirmed Bullish CHoCH.`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
             return {
               confirmed: false,
@@ -6335,6 +6414,16 @@ class TradingEngine {
         }
       } else if (signalDirection === "SHORT") {
         if (isRangeShortReversal) {
+          // Fix 5: Honor Macro Trend Direction - In macro uptrend, forbid fading resistance unless there is a confirmed Bearish CHoCH
+          const hasBearishChoch = struct.current_LL && currentPrice < struct.current_LL.price;
+          if (isMacroUptrend && !hasBearishChoch) {
+            return {
+              confirmed: false,
+              message: `Range SHORT Reversal Blocked: Macro Trend is Bullish (EMA 50 $${ema50Val.toFixed(2)} > EMA 200 $${ema200Val.toFixed(2)}). Fading resistance in a macro uptrend is forbidden without a confirmed Bearish CHoCH.`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
             return {
               confirmed: false,
@@ -7674,33 +7763,44 @@ class TradingEngine {
 
 
 
-    // C17: Binance Order Flow Confirmation
+    // C17: Binance Order Flow Confirmation (Hard Validation - No AI Softening)
     let ofMet = true;
     const flowRes = this.getOrderFlowScore(signalDirection);
     let ofVal = `Score: ${flowRes.score}/100 [${flowRes.label}] | Taker Buy: ${(flowRes.takerBuyRatio * 100).toFixed(1)}% | Imbalance: ${(flowRes.imbalanceRatio * 100).toFixed(1)}%`;
-    let ofReq = "Dynamic Score >= 45/100 (Softenable to 30/100 if CatBoost AI probability >= 85.0%)";
+    let ofReq = "Dynamic Score >= 35/100 & Directional Taker Vol >= 40.0% (Hard Gate - No AI Softening)";
 
-    if (signalDirection !== "NEUTRAL") {
-      const activeProb = signalDirection === "LONG" ? probabilityLong : probabilityShort;
-      const isExtremeAiConfidence = activeProb >= 0.85;
-      const hurdleScore = isExtremeAiConfidence ? 30 : 45;
-      ofMet = flowRes.score >= hurdleScore;
+    if (signalDirection === "LONG") {
+      const hasMinTakerBuy = flowRes.takerBuyRatio >= 0.40;
+      const hasMinScore = flowRes.score >= 35;
+      ofMet = hasMinTakerBuy && hasMinScore;
       if (!ofMet) {
-        ofVal = `${ofVal} - BLOCKED (${flowRes.description})`;
+        const failReason = !hasMinTakerBuy 
+          ? `Taker Buy ${(flowRes.takerBuyRatio * 100).toFixed(1)}% < 40.0% minimum` 
+          : `Order Flow score ${flowRes.score}/100 < 35`;
+        ofVal = `${ofVal} - BLOCKED (${failReason}: ${flowRes.description})`;
       } else {
-        const softState = flowRes.score < 45 ? " - SOFTENED BY AI" : "";
-        ofVal = `${ofVal} - PASSED${softState} (${flowRes.description})`;
+        ofVal = `${ofVal} - PASSED (Verified Institutional Buy Support)`;
+      }
+    } else if (signalDirection === "SHORT") {
+      const hasMinTakerSell = flowRes.takerBuyRatio <= 0.60; // Taker sell >= 40%
+      const hasMinScore = flowRes.score >= 35;
+      ofMet = hasMinTakerSell && hasMinScore;
+      if (!ofMet) {
+        const failReason = !hasMinTakerSell 
+          ? `Taker Sell ${((1 - flowRes.takerBuyRatio) * 100).toFixed(1)}% < 40.0% minimum` 
+          : `Order Flow score ${flowRes.score}/100 < 35`;
+        ofVal = `${ofVal} - BLOCKED (${failReason}: ${flowRes.description})`;
+      } else {
+        ofVal = `${ofVal} - PASSED (Verified Institutional Sell Pressure)`;
       }
     }
-
-    const isOrderFlowSoftened = signalDirection !== "NEUTRAL" && flowRes.score < 45 && flowRes.score >= 30;
 
     conditions.push({
       name: "Binance Order Flow Confirmation",
       met: ofMet,
       current_value: ofVal,
       required: ofReq,
-      softened: isOrderFlowSoftened,
+      softened: false,
     });
 
     // C18: Volatility Compression (Squeeze) Filter
@@ -8451,16 +8551,9 @@ class TradingEngine {
       reason = ExitReason.TAKE_PROFIT;
     }
 
-    // Trailing Stop Loss logic:
+    // Fix 1: Structural Trailing Stop Anchoring (Stops Premature Choking)
     let finalStopLossPrice = stopLossPrice;
     if (config.risk_management.trailing_stop_loss_enabled) {
-      const usdFloor = config.risk_management.min_stop_loss_distance_usd !== undefined ? config.risk_management.min_stop_loss_distance_usd : 80;
-      const pctFloorVal = config.risk_management.min_stop_loss_distance_pct !== undefined ? config.risk_management.min_stop_loss_distance_pct : 0.12;
-      const minSlDistance = Math.max(usdFloor, entryPrice * (pctFloorVal / 100));
-      const tsldistance = Math.max(
-        lastAtr * (config.risk_management.trailing_stop_loss_distance_atr || 1.3),
-        minSlDistance
-      );
       if (!this.activeTrade.feature_snapshot) {
         this.activeTrade.feature_snapshot = {};
       }
@@ -8470,6 +8563,10 @@ class TradingEngine {
         : 1.2;
       
       let trailingActivated = this.activeTrade.feature_snapshot.trailing_activated === true;
+      const struct = this.getTrendMarketStructure();
+      
+      // Get the last 3 closed 1-minute candles for structural swing trailing
+      const closedCandles = this.candles1m.slice(-4, -1);
       
       if (direction === TradeDirection.LONG) {
         // Track maximum price observed since entry
@@ -8479,8 +8576,21 @@ class TradingEngine {
         );
         this.activeTrade.feature_snapshot.peak_price = peakPrice;
         
-        // Trailing Stop Loss is placed distance below peakPrice
-        const trailingSl = peakPrice - tsldistance;
+        // 1. Calculate structural anchor: lowest low of last 3 closed candles (or Higher Low swing)
+        const lowestOf3Candles = closedCandles.length > 0
+          ? Math.min(...closedCandles.map(c => c.low))
+          : entryPrice;
+        const structuralAnchor = struct.current_HL?.price
+          ? Math.max(lowestOf3Candles, struct.current_HL.price)
+          : lowestOf3Candles;
+          
+        // 2. Anti-Choking Hard Floor: Never place trailing stop closer than 1.2 * ATR from current market price
+        const maxAllowedTrailingSl = currentPrice - 1.2 * lastAtr;
+        const candidateTrailingSl = Math.min(structuralAnchor, maxAllowedTrailingSl);
+        
+        // 3. Monotonic ratcheting: Trailing stop must never move backward
+        const previousTrailingSl = this.activeTrade.feature_snapshot.trailing_stop_loss_price || stopLossPrice;
+        const trailingSl = Math.max(previousTrailingSl, candidateTrailingSl);
         this.activeTrade.feature_snapshot.trailing_stop_loss_price = trailingSl;
         
         // Check activation condition if not already activated
@@ -8489,7 +8599,7 @@ class TradingEngine {
           if (reachedTarget) {
             trailingActivated = true;
             this.activeTrade.feature_snapshot.trailing_activated = true;
-            this.log(`📈 Trailing Stop Loss ACTIVATED for trade ${this.activeTrade.id}! Peak profit reached ${activationRatio}x of risk threshold ($${(stopLossDistance * activationRatio).toFixed(2)} USD in profit).`);
+            this.log(`📈 Structural Trailing Stop Loss ACTIVATED for trade ${this.activeTrade.id}! Peak profit reached ${activationRatio}x of risk threshold ($${(stopLossDistance * activationRatio).toFixed(2)} USD in profit).`);
           }
         }
         
@@ -8507,8 +8617,21 @@ class TradingEngine {
         );
         this.activeTrade.feature_snapshot.valley_price = valleyPrice;
         
-        // Trailing Stop Loss is placed distance above valleyPrice
-        const trailingSl = valleyPrice + tsldistance;
+        // 1. Calculate structural anchor: highest high of last 3 closed candles (or Lower High swing)
+        const highestOf3Candles = closedCandles.length > 0
+          ? Math.max(...closedCandles.map(c => c.high))
+          : entryPrice;
+        const structuralAnchor = struct.current_LH?.price
+          ? Math.min(highestOf3Candles, struct.current_LH.price)
+          : highestOf3Candles;
+          
+        // 2. Anti-Choking Hard Floor: Never place trailing stop closer than 1.2 * ATR from current market price
+        const minAllowedTrailingSl = currentPrice + 1.2 * lastAtr;
+        const candidateTrailingSl = Math.max(structuralAnchor, minAllowedTrailingSl);
+        
+        // 3. Monotonic ratcheting: Trailing stop must never move backward
+        const previousTrailingSl = this.activeTrade.feature_snapshot.trailing_stop_loss_price || stopLossPrice;
+        const trailingSl = Math.min(previousTrailingSl, candidateTrailingSl);
         this.activeTrade.feature_snapshot.trailing_stop_loss_price = trailingSl;
         
         // Check activation condition if not already activated
@@ -8517,7 +8640,7 @@ class TradingEngine {
           if (reachedTarget) {
             trailingActivated = true;
             this.activeTrade.feature_snapshot.trailing_activated = true;
-            this.log(`📉 Trailing Stop Loss ACTIVATED for trade ${this.activeTrade.id}! Peak profit reached ${activationRatio}x of risk threshold ($${(stopLossDistance * activationRatio).toFixed(2)} USD in profit).`);
+            this.log(`📉 Structural Trailing Stop Loss ACTIVATED for trade ${this.activeTrade.id}! Peak profit reached ${activationRatio}x of risk threshold ($${(stopLossDistance * activationRatio).toFixed(2)} USD in profit).`);
           }
         }
         

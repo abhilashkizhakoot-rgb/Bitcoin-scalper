@@ -4885,6 +4885,13 @@ class TradingEngine {
     const confirmCandle = this.candles1m[closedIdx];
     const setupCandle = this.candles1m[setupIdx];
 
+    // SMC Market Structure Anchors for Premium vs Discount Zone evaluation
+    const struct = this.getTrendMarketStructure();
+    const swingHigh = struct.current_HH ? struct.current_HH.price : struct.swingHigh;
+    const swingLow = struct.current_HL ? struct.current_HL.price : (struct.current_LL ? struct.current_LL.price : struct.swingLow);
+    const hasValidRange = swingHigh > swingLow && (swingHigh - swingLow) >= 1.0 * currentAtr;
+    const equilibrium = hasValidRange ? (swingHigh + swingLow) / 2 : 0;
+
     if (direction === "LONG") {
       const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtr);
 
@@ -4897,6 +4904,19 @@ class TradingEngine {
           if (isBearishCandle && isStrongExpansionUp) {
             const obHigh = candle.high;
             const obLow = candle.low;
+
+            // SMC Guard 1: Reject candidate OB if it sits right at the Swing High ceiling (< 0.75 * ATR from HH)
+            if (swingHigh > 0 && obHigh >= swingHigh - 0.75 * currentAtr) {
+              continue; // Skip candles at the top peak of the rally
+            }
+
+            // SMC Guard 2: Discount Zone Requirement (Bullish OB origin must not be in extreme Premium > 60% of swing range)
+            if (hasValidRange && equilibrium > 0) {
+              const premiumLimit = equilibrium + 0.20 * (swingHigh - equilibrium); // Max 60% from bottom
+              if (obLow > premiumLimit) {
+                continue; // Skip OBs forming at the overextended premium top
+              }
+            }
 
             const postObCandles = this.candles1m.slice(i + 2);
             const hasTouchedOb = (postObCandles.some(c => c.low <= obHigh + 0.15 * currentAtr && c.low >= obLow - 0.15 * currentAtr)) ||
@@ -4957,6 +4977,19 @@ class TradingEngine {
           if (isBullishCandle && isStrongExpansionDown) {
             const obHigh = candle.high;
             const obLow = candle.low;
+
+            // SMC Guard 1: Reject candidate Bearish OB if it sits right at the Swing Low floor (< 0.75 * ATR from LL)
+            if (swingLow > 0 && obLow <= swingLow + 0.75 * currentAtr) {
+              continue; // Skip candles at the bottom floor of the sell-off
+            }
+
+            // SMC Guard 2: Premium Zone Requirement (Bearish OB origin must not be in extreme Discount < 40% from bottom of swing range)
+            if (hasValidRange && equilibrium > 0) {
+              const discountLimit = equilibrium - 0.20 * (equilibrium - swingLow); // Min 40% from bottom
+              if (obHigh < discountLimit) {
+                continue; // Skip OBs forming at the overextended discount bottom
+              }
+            }
 
             const postObCandles = this.candles1m.slice(i + 2);
             const hasTouchedOb = (postObCandles.some(c => c.high >= obLow - 0.15 * currentAtr && c.high <= obHigh + 0.15 * currentAtr)) ||

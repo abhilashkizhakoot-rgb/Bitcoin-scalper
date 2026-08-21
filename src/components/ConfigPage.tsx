@@ -241,8 +241,11 @@ export default function ConfigPage({
         risk_per_trade_pct: 0.5,
         max_risk_per_trade_pct: 1.0,
         leverage: 20,
-        stop_loss_atr_multiplier: 2.2,
-        take_profit_ratio: 2.5,
+        stop_loss_atr_multiplier: 1.8,
+        take_profit_ratio: 1.5,
+        take_profit_atr_multiplier: 1.35,
+        take_profit_mode: "ATR_SCALP",
+        breakeven_trigger_atr: 1.0,
         min_stop_loss_distance_usd: 80,
         min_stop_loss_distance_pct: 0.12,
         static_stop_loss_value_usd: 150,
@@ -1782,7 +1785,55 @@ export default function ConfigPage({
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Take Profit Reward Ratio</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Take Profit Mode</label>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-200">
+                      {riskConfig.take_profit_mode === "RR_RATIO" ? "R:R Ratio" : "ATR Scalp (Fix 1 Active)"}
+                    </span>
+                  </div>
+                  <select
+                    value={riskConfig.take_profit_mode || "ATR_SCALP"}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, take_profit_mode: e.target.value as "ATR_SCALP" | "RR_RATIO" })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  >
+                    <option value="ATR_SCALP">Direct ATR Scalp (1.2x - 1.5x ATR - High Win Rate)</option>
+                    <option value="RR_RATIO">Risk-to-Reward Multiple (R:R Ratio)</option>
+                  </select>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Selects how profit targets are computed. "Direct ATR Scalp" anchors TP to the single-impulse volatility horizon ($1.2\times - 1.5\times$ ATR), capturing wins before intermediate pullbacks.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Scalp Take Profit ATR Multiplier</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={riskConfig.take_profit_atr_multiplier ?? 1.35}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, take_profit_atr_multiplier: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Direct multiplier applied to current 14-period ATR for Take Profit placement (Recommended: 1.25 - 1.50x ATR). Captures momentum swings before counter-trend pullbacks.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Breakeven Lock Trigger (ATR)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={riskConfig.breakeven_trigger_atr ?? 1.0}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, breakeven_trigger_atr: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Peak ATR gain required to lock Stop Loss to Breakeven + Fees. Protects trades from multi-wave reversals once in solid profit (Default: 1.0x ATR).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Take Profit Reward Ratio (Fallback)</label>
                   <input
                     type="number"
                     step="0.1"
@@ -1791,7 +1842,7 @@ export default function ConfigPage({
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Target Risk-to-Reward ratio (e.g., 3.5 means the profit target is set 3.5 times further than the stop loss distance). Ratios of 3.0+ are recommended to comfortably exceed exchange commissions and preserve positive expected return.
+                    Target Risk-to-Reward ratio used when Take Profit Mode is set to "R:R Ratio".
                   </p>
                 </div>
 

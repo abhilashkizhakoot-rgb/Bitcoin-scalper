@@ -233,6 +233,9 @@ export interface StrategyConfig {
     max_risk_per_trade_pct: number; // e.g. 1.0
     stop_loss_atr_multiplier: number; // e.g. 1.3
     take_profit_ratio: number; // e.g. 2.0 (1:2 R:R)
+    take_profit_atr_multiplier?: number; // Direct ATR multiplier for Take Profit (e.g. 1.35x ATR for high win-rate scalping)
+    take_profit_mode?: "ATR_SCALP" | "RR_RATIO"; // Target mode: "ATR_SCALP" (direct 1.35x ATR target) or "RR_RATIO" (R:R multiple)
+    breakeven_trigger_atr?: number; // ATR gain threshold to lock stop-loss to Breakeven + Fees (e.g. 1.0x ATR)
     max_consecutive_losses: number; // e.g. 3
     consecutive_losses_cooldown_minutes: number; // e.g. 30
     daily_loss_limit_pct: number; // e.g. 2.0

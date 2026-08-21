@@ -8329,9 +8329,17 @@ class TradingEngine {
 
     // Respect the ATR-based stop loss distance directly as configured by the user, bounded only by the minimum floor.
     const stopLossPrice = execDirection === "LONG" ? currentPrice - stopLossDistance : currentPrice + stopLossDistance;
-
     const actualSLDistance = Math.abs(currentPrice - stopLossPrice);
-    const takeProfitDistance = actualSLDistance * config.risk_management.take_profit_ratio;
+
+    // Fix 1: Scalp Take-Profit Calibration (1.2x - 1.5x ATR Horizon)
+    // Directly targets the natural 1-minute single-impulse horizon to secure high win-rate profits before counter-trend pullbacks
+    const tpAtrMult = config.risk_management.take_profit_atr_multiplier !== undefined
+      ? config.risk_management.take_profit_atr_multiplier
+      : 1.35;
+    const isAtrScalpMode = config.risk_management.take_profit_mode !== "RR_RATIO";
+    const takeProfitDistance = isAtrScalpMode
+      ? Math.max(lastAtr * tpAtrMult, actualSLDistance * 0.8)
+      : actualSLDistance * config.risk_management.take_profit_ratio;
     const takeProfitPrice = execDirection === "LONG" ? currentPrice + takeProfitDistance : currentPrice - takeProfitDistance;
 
     this.log(
@@ -8339,7 +8347,7 @@ class TradingEngine {
         2
       )}), TakeProfit=$${takeProfitPrice.toFixed(2)} (Dist: $${takeProfitDistance.toFixed(
         2
-      )}), Qty=${positionQtyBtc} BTC, Leverage=${leverage}x`
+      )} [Mode: ${isAtrScalpMode ? `${tpAtrMult}x ATR Scalp` : `${config.risk_management.take_profit_ratio}x R:R`}]), Qty=${positionQtyBtc} BTC, Leverage=${leverage}x`
     );
 
     // Create the Trade record
@@ -8496,7 +8504,14 @@ class TradingEngine {
           stopLossAtr * config.risk_management.stop_loss_atr_multiplier,
           minSlDistance
         );
-    const takeProfitDistance = stopLossDistance * config.risk_management.take_profit_ratio;
+    // Fix 1: Scalp Take-Profit Calibration (1.2x - 1.5x ATR Horizon)
+    const tpAtrMult = config.risk_management.take_profit_atr_multiplier !== undefined
+      ? config.risk_management.take_profit_atr_multiplier
+      : 1.35;
+    const isAtrScalpMode = config.risk_management.take_profit_mode !== "RR_RATIO";
+    const takeProfitDistance = isAtrScalpMode
+      ? Math.max(lastAtr * tpAtrMult, stopLossDistance * 0.8)
+      : stopLossDistance * config.risk_management.take_profit_ratio;
 
     let stopLossPrice = direction === TradeDirection.LONG ? entryPrice - stopLossDistance : entryPrice + stopLossDistance;
     let takeProfitPrice = direction === TradeDirection.LONG ? entryPrice + takeProfitDistance : entryPrice - takeProfitDistance;
@@ -8614,6 +8629,16 @@ class TradingEngine {
         } else {
           finalStopLossPrice = stopLossPrice;
         }
+
+        // Dynamic Breakeven Floor: Once profit touches >= 1.0x ATR, lock SL to Entry + Fees
+        const beTriggerAtr = config.risk_management.breakeven_trigger_atr !== undefined
+          ? config.risk_management.breakeven_trigger_atr
+          : 1.0;
+        const entryFeeDist = (entryFee + exitFeeProj) / qty;
+        const beFloor = entryPrice + entryFeeDist + 2.0; // Breakeven + exchange fees + small positive buffer
+        if ((peakPrice - entryPrice) >= (lastAtr * beTriggerAtr)) {
+          finalStopLossPrice = Math.max(finalStopLossPrice, beFloor);
+        }
       } else {
         // Track minimum price observed since entry
         const valleyPrice = Math.min(
@@ -8654,6 +8679,16 @@ class TradingEngine {
           finalStopLossPrice = Math.min(stopLossPrice, trailingSl);
         } else {
           finalStopLossPrice = stopLossPrice;
+        }
+
+        // Dynamic Breakeven Floor: Once profit touches >= 1.0x ATR, lock SL to Entry - Fees
+        const beTriggerAtr = config.risk_management.breakeven_trigger_atr !== undefined
+          ? config.risk_management.breakeven_trigger_atr
+          : 1.0;
+        const entryFeeDist = (entryFee + exitFeeProj) / qty;
+        const beFloor = entryPrice - entryFeeDist - 2.0; // Breakeven - exchange fees - small positive buffer
+        if ((entryPrice - valleyPrice) >= (lastAtr * beTriggerAtr)) {
+          finalStopLossPrice = Math.min(finalStopLossPrice, beFloor);
         }
       }
       

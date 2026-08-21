@@ -191,8 +191,11 @@ const DEFAULT_CONFIG: StrategyConfig = {
   risk_management: {
     risk_per_trade_pct: 0.5,
     max_risk_per_trade_pct: 1.0,
-    stop_loss_atr_multiplier: 2.2,
-    take_profit_ratio: 2.5,
+    stop_loss_atr_multiplier: 1.8,
+    take_profit_ratio: 1.5,
+    take_profit_atr_multiplier: 1.35,
+    take_profit_mode: "ATR_SCALP",
+    breakeven_trigger_atr: 1.0,
     max_consecutive_losses: 3,
     consecutive_losses_cooldown_minutes: 30,
     daily_loss_limit_pct: 2.0,
@@ -1077,8 +1080,16 @@ class DatabaseManager {
         this.cache.config.risk_management.stop_loss_atr_multiplier = 2.2;
         changed = true;
       }
-      if (this.cache.config.risk_management.take_profit_ratio === undefined || this.cache.config.risk_management.take_profit_ratio > 3.0) {
-        this.cache.config.risk_management.take_profit_ratio = 2.5;
+      if (this.cache.config.risk_management.take_profit_atr_multiplier === undefined) {
+        this.cache.config.risk_management.take_profit_atr_multiplier = 1.35;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.take_profit_mode === undefined) {
+        this.cache.config.risk_management.take_profit_mode = "ATR_SCALP";
+        changed = true;
+      }
+      if (this.cache.config.risk_management.breakeven_trigger_atr === undefined) {
+        this.cache.config.risk_management.breakeven_trigger_atr = 1.0;
         changed = true;
       }
       if (this.cache.config.risk_management.default_order_execution === undefined) {

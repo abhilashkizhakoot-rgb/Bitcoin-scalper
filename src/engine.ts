@@ -4080,7 +4080,18 @@ class TradingEngine {
       // Parabolic Breakout Continuation: Allow high-ADX shallow consolidation entries on candle 2+
       const strongTrendAdx = ms.trend_alignment_adx_threshold || 28;
       const isHighAdxConsolidation = adxValue >= strongTrendAdx && postBreakoutCandles.length >= 1;
-      const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close >= reclaimThreshold);
+      
+      // Targeted Fix: Candle Direction & Reversal Confirmation Guard for High-ADX Parabolic Continuation
+      // Prevents entering longs during aggressive red dump candles. Requires bullish candle or lower wick >= 35%.
+      const isLongCandleStabilized = (() => {
+        if (!currentCandle) return false;
+        const isGreen = currentCandle.close > currentCandle.open;
+        const range = Math.max(0.001, currentCandle.high - currentCandle.low);
+        const lowerWick = Math.min(currentCandle.open, currentCandle.close) - currentCandle.low;
+        return isGreen || (lowerWick / range) >= 0.35;
+      })();
+
+      const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close >= reclaimThreshold) && isLongCandleStabilized;
 
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
@@ -4424,7 +4435,18 @@ class TradingEngine {
       // Parabolic Breakdown Continuation: Allow high-ADX shallow consolidation entries on candle 2+
       const strongTrendAdx = ms.trend_alignment_adx_threshold || 28;
       const isHighAdxConsolidation = adxValue >= strongTrendAdx && postBreakoutCandles.length >= 1;
-      const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close <= reclaimThreshold);
+      
+      // Targeted Fix: Candle Direction & Reversal Confirmation Guard for High-ADX Parabolic Continuation
+      // Prevents entering shorts into sharp V-shape green counter-trend bounces. Requires bearish candle or upper rejection wick >= 35%.
+      const isShortCandleStabilized = (() => {
+        if (!currentCandle) return false;
+        const isRed = currentCandle.close < currentCandle.open;
+        const range = Math.max(0.001, currentCandle.high - currentCandle.low);
+        const upperWick = currentCandle.high - Math.max(currentCandle.open, currentCandle.close);
+        return isRed || (upperWick / range) >= 0.35;
+      })();
+
+      const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close <= reclaimThreshold) && isShortCandleStabilized;
 
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";

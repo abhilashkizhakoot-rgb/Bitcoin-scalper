@@ -8668,14 +8668,21 @@ class TradingEngine {
           finalStopLossPrice = stopLossPrice;
         }
 
-        // Dynamic Breakeven Floor: Once profit touches >= 1.0x ATR, lock SL to Entry + Fees
+        // Dynamic Breakeven Floor: Once profit touches >= 1.0x ATR, lock SL to Entry + Fees (with strict safety limits)
         const beTriggerAtr = config.risk_management.breakeven_trigger_atr !== undefined
           ? config.risk_management.breakeven_trigger_atr
           : 1.0;
-        const entryFeeDist = (entryFee + exitFeeProj) / qty;
-        const beFloor = entryPrice + entryFeeDist + 2.0; // Breakeven + exchange fees + small positive buffer
         if ((peakPrice - entryPrice) >= (lastAtr * beTriggerAtr)) {
-          finalStopLossPrice = Math.max(finalStopLossPrice, beFloor);
+          // Standard round-trip taker fee buffer (~0.08% of notional)
+          const feeBufferUsd = Math.min(entryPrice * 0.0008, (entryFee + exitFeeProj) / (qty || 0.001));
+          const targetBe = entryPrice + feeBufferUsd + 1.0;
+          // Invariant Safety Guard: Breakeven SL must NEVER choke the active trade.
+          // It must stay at least 0.4 * ATR below current market price and not exceed peakPrice.
+          const maxAllowedBe = Math.min(currentPrice - 0.4 * lastAtr, peakPrice - 0.4 * lastAtr);
+          const safeBeFloor = Math.min(targetBe, maxAllowedBe);
+          if (safeBeFloor > stopLossPrice) {
+            finalStopLossPrice = Math.max(finalStopLossPrice, safeBeFloor);
+          }
         }
       } else {
         // Track minimum price observed since entry
@@ -8719,14 +8726,21 @@ class TradingEngine {
           finalStopLossPrice = stopLossPrice;
         }
 
-        // Dynamic Breakeven Floor: Once profit touches >= 1.0x ATR, lock SL to Entry - Fees
+        // Dynamic Breakeven Floor: Once profit touches >= 1.0x ATR, lock SL to Entry - Fees (with strict safety limits)
         const beTriggerAtr = config.risk_management.breakeven_trigger_atr !== undefined
           ? config.risk_management.breakeven_trigger_atr
           : 1.0;
-        const entryFeeDist = (entryFee + exitFeeProj) / qty;
-        const beFloor = entryPrice - entryFeeDist - 2.0; // Breakeven - exchange fees - small positive buffer
         if ((entryPrice - valleyPrice) >= (lastAtr * beTriggerAtr)) {
-          finalStopLossPrice = Math.min(finalStopLossPrice, beFloor);
+          // Standard round-trip taker fee buffer (~0.08% of notional)
+          const feeBufferUsd = Math.min(entryPrice * 0.0008, (entryFee + exitFeeProj) / (qty || 0.001));
+          const targetBe = entryPrice - feeBufferUsd - 1.0;
+          // Invariant Safety Guard: Breakeven SL must NEVER choke the active trade.
+          // It must stay at least 0.4 * ATR above current market price and not drop below valleyPrice.
+          const minAllowedBe = Math.max(currentPrice + 0.4 * lastAtr, valleyPrice + 0.4 * lastAtr);
+          const safeBeFloor = Math.max(targetBe, minAllowedBe);
+          if (safeBeFloor < stopLossPrice) {
+            finalStopLossPrice = Math.min(finalStopLossPrice, safeBeFloor);
+          }
         }
       }
       

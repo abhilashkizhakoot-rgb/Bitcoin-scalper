@@ -4077,9 +4077,11 @@ class TradingEngine {
       const recentPostBreakoutCandles = postBreakoutCandles.slice(-4);
       const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.low <= pullbackLimit);
       
-      // Parabolic Breakout Continuation: Allow high-ADX shallow consolidation entries on candle 2+
+      // Parabolic Breakout Continuation: Allow high-ADX shallow consolidation entries on recent candles (1 to 5) near breakout level (<= 2.0x ATR)
       const strongTrendAdx = ms.trend_alignment_adx_threshold || 28;
-      const isHighAdxConsolidation = adxValue >= strongTrendAdx && postBreakoutCandles.length >= 1;
+      const isRecentBreakout = postBreakoutCandles.length >= 1 && postBreakoutCandles.length <= 5;
+      const isNearBreakoutLevel = (currentPrice - breakoutLevel) <= 2.0 * currentAtr;
+      const isHighAdxConsolidation = adxValue >= strongTrendAdx && isRecentBreakout && isNearBreakoutLevel;
       
       // Targeted Fix: Candle Direction & Reversal Confirmation Guard for High-ADX Parabolic Continuation
       // Prevents entering longs during aggressive red dump candles. Requires bullish candle or lower wick >= 35%.
@@ -4432,9 +4434,11 @@ class TradingEngine {
       const recentPostBreakoutCandles = postBreakoutCandles.slice(-4);
       const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.high >= pullbackLimit);
       
-      // Parabolic Breakdown Continuation: Allow high-ADX shallow consolidation entries on candle 2+
+      // Parabolic Breakdown Continuation: Allow high-ADX shallow consolidation entries on recent candles (1 to 5) near breakdown level (<= 2.0x ATR)
       const strongTrendAdx = ms.trend_alignment_adx_threshold || 28;
-      const isHighAdxConsolidation = adxValue >= strongTrendAdx && postBreakoutCandles.length >= 1;
+      const isRecentBreakout = postBreakoutCandles.length >= 1 && postBreakoutCandles.length <= 5;
+      const isNearBreakoutLevel = (breakoutLevel - currentPrice) <= 2.0 * currentAtr;
+      const isHighAdxConsolidation = adxValue >= strongTrendAdx && isRecentBreakout && isNearBreakoutLevel;
       
       // Targeted Fix: Candle Direction & Reversal Confirmation Guard for High-ADX Parabolic Continuation
       // Prevents entering shorts into sharp V-shape green counter-trend bounces. Requires bearish candle or upper rejection wick >= 35%.

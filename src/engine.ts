@@ -4186,8 +4186,11 @@ class TradingEngine {
       }
 
       const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isLongRejectionConfirmed && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
-      const hasRetracedToEmaSinceBreakout = postBreakoutCandles.some(c => c.low <= emaRetraceThresholdFirst || c.low <= emaRetraceThresholdSecond);
-      const isFallbackEmaPushbackValid = isFallbackCrossoverBullish && (hasRetracedToEmaSinceBreakout || touchesFirstEma || touchesSecondEma);
+      // Ensure Fallback Micro EMA Momentum Bounce requires RECENT retracement and price proximity to the EMA zone
+      // (prevents taking late bounce entries when price has already drifted far above the EMA zone without candlestick rejection)
+      const maxEmaProximityAtr = (effectiveEmaMult || 0.40) + 0.40;
+      const isPriceNearEmaZone = (currentPrice - Math.min(firstEmaVal, secondEmaVal)) <= maxEmaProximityAtr * currentAtr;
+      const isFallbackEmaPushbackValid = isFallbackCrossoverBullish && isPriceNearEmaZone && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
 
       const isEmaPushbackValid = (isRegularEmaPushbackValid || isFallbackEmaPushbackValid) && !isSetup2Invalidated;
       let emaPushbackMessage = "";
@@ -4206,7 +4209,7 @@ class TradingEngine {
       } else {
         if (isSetup2Invalidated) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Blocked: Price broke below dynamic EMA invalidation floor $${emaInvalidationFloor.toFixed(2)}.` };
-        } else if (hasRetracedToEmaSinceBreakout || touchesFirstEma || touchesSecondEma) {
+        } else if (hasRetracedToEMA || touchesFirstEma || touchesSecondEma) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle or fallback micro EMA crossover/momentum bounce (${fallbackFastPeriod}/${fallbackSlowPeriod} EMA, +${bounceAtrFraction.toFixed(2)}xATR).` };
         } else {
           const thresholdVal = Math.max(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
@@ -4543,8 +4546,11 @@ class TradingEngine {
       }
 
       const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isShortRejectionConfirmed && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
-      const hasRetracedToEmaSinceBreakout = postBreakoutCandles.some(c => c.high >= emaRetraceThresholdFirst || c.high >= emaRetraceThresholdSecond);
-      const isFallbackEmaPushbackValid = isFallbackCrossoverBearish && (hasRetracedToEmaSinceBreakout || touchesFirstEma || touchesSecondEma);
+      // Ensure Fallback Micro EMA Momentum Bounce requires RECENT retracement and price proximity to the EMA zone
+      // (prevents taking late bounce entries when price has already drifted far below the EMA zone without candlestick rejection)
+      const maxEmaProximityAtr = (effectiveEmaMult || 0.40) + 0.40;
+      const isPriceNearEmaZone = (Math.max(firstEmaVal, secondEmaVal) - currentPrice) <= maxEmaProximityAtr * currentAtr;
+      const isFallbackEmaPushbackValid = isFallbackCrossoverBearish && isPriceNearEmaZone && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
 
       const isEmaPushbackValid = (isRegularEmaPushbackValid || isFallbackEmaPushbackValid) && !isSetup2Invalidated;
       let emaPushbackMessage = "";
@@ -4563,7 +4569,7 @@ class TradingEngine {
       } else {
         if (isSetup2Invalidated) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Blocked: Price broke above dynamic EMA invalidation ceiling $${emaInvalidationCeiling.toFixed(2)}.` };
-        } else if (hasRetracedToEmaSinceBreakout || touchesFirstEma || touchesSecondEma) {
+        } else if (hasRetracedToEMA || touchesFirstEma || touchesSecondEma) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle or fallback micro EMA crossover/momentum bounce (${fallbackFastPeriod}/${fallbackSlowPeriod} EMA, -${bounceAtrFraction.toFixed(2)}xATR).` };
         } else {
           const thresholdVal = Math.min(emaRetraceThresholdFirst, emaRetraceThresholdSecond);

@@ -5724,12 +5724,15 @@ class TradingEngine {
     }
 
     // Two-Candle Patterns (Evaluated on completed, closed candles)
+    const minEngulfBody = Math.max(0.35 * currentAtr, 0.35 * confirmRange);
+    const prevBody = setupCandle ? Math.abs(setupCandle.close - setupCandle.open) : 0;
     const isBullishEngulfing = setupCandle && 
       (setupCandle.close < setupCandle.open) && 
       isBullish && 
       (confirmCandle.close >= setupCandle.open) && 
       (confirmCandle.open <= setupCandle.close) &&
-      (confirmBody >= 0.30 * confirmRange);
+      (confirmBody >= minEngulfBody) &&
+      (prevBody >= 0.20 * currentAtr);
 
     const hasMultiWickRejection = setupCandle && 
       (confirmLowerWick >= 0.35 * confirmRange) && 
@@ -5914,12 +5917,15 @@ class TradingEngine {
     }
 
     // Two-Candle Patterns (Evaluated on completed, closed candles)
+    const minEngulfBody = Math.max(0.35 * currentAtr, 0.35 * confirmRange);
+    const prevBody = setupCandle ? Math.abs(setupCandle.close - setupCandle.open) : 0;
     const isBearishEngulfing = setupCandle && 
       (setupCandle.close > setupCandle.open) && 
       isBearish && 
       (confirmCandle.close <= setupCandle.open) && 
       (confirmCandle.open >= setupCandle.close) &&
-      (confirmBody >= 0.30 * confirmRange);
+      (confirmBody >= minEngulfBody) &&
+      (prevBody >= 0.20 * currentAtr);
 
     const hasMultiWickRejection = setupCandle && 
       (confirmUpperWick >= 0.35 * confirmRange) && 

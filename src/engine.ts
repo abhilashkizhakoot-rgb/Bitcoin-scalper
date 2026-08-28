@@ -1715,23 +1715,60 @@ class TradingEngine {
     // Normalized Composite Z-Score Distance (Z_dist)
     const zDist = 0.45 * zVwap + 0.35 * zEma + 0.20 * zChase;
 
+    // Hard ceiling on pure EMA50/EMA20 deviation (prevents selling bottoms or buying tops even if lookback paused)
+    const ema50DistAtr = Math.abs(currentPrice - ema50Val) / currentAtr;
+    const isEma50Overextended = ema50DistAtr > 3.0;
+
+    // Detect recent extreme absorption wick / selling climax within last 8 candles
+    const recentCandles8 = this.candles1m.slice(-8);
+    const hasRecentExhaustionLowerWick = recentCandles8.some(c => {
+      const range = c.high - c.low;
+      const lowerWick = Math.min(c.open, c.close) - c.low;
+      return range >= 0.8 * currentAtr && (lowerWick / range) >= 0.50 && c.volume > (this.candles1m.length > 20 ? (this.candles1m.slice(-20).reduce((s, v) => s + v.volume, 0) / 20) * 1.5 : 0);
+    });
+    const hasRecentExhaustionUpperWick = recentCandles8.some(c => {
+      const range = c.high - c.low;
+      const upperWick = c.high - Math.max(c.open, c.close);
+      return range >= 0.8 * currentAtr && (upperWick / range) >= 0.50 && c.volume > (this.candles1m.length > 20 ? (this.candles1m.slice(-20).reduce((s, v) => s + v.volume, 0) / 20) * 1.5 : 0);
+    });
+
     // Dynamic Z_dist Threshold based on Regime and Pressure capped by configured max_allowed_z_dist
     const userMaxZCap = rm.max_allowed_z_dist !== undefined ? rm.max_allowed_z_dist : 2.20;
     const baseZLimit = Math.min(isTrending ? 2.20 : 2.00, userMaxZCap);
-    const maxZLimit = Math.min((isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure) ? 3.20 : baseZLimit, userMaxZCap);
+    // Only permit momentum softening if price is within healthy proximity of the EMA zone (not overextended)
+    const isNearEmaForSoftening = ema50DistAtr <= 2.2;
+    const maxZLimit = Math.min(
+      ((isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure) && isNearEmaForSoftening) ? 3.20 : baseZLimit,
+      userMaxZCap
+    );
 
     let isValueExtensionMet = true;
     let isValueExtensionSoftened = false;
+    let extensionBlockReason = "";
 
     if (signalDirection === "LONG") {
       if (zDist > maxZLimit) {
         isValueExtensionMet = false;
+        extensionBlockReason = `Z_dist (${zDist.toFixed(2)}σ > ${maxZLimit.toFixed(2)}σ)`;
+      } else if (isEma50Overextended && currentPrice > ema50Val) {
+        isValueExtensionMet = false;
+        extensionBlockReason = `EMA50 Overextension (+${ema50DistAtr.toFixed(2)}x ATR from 50 EMA)`;
+      } else if (hasRecentExhaustionUpperWick && currentPrice < Math.max(...recentCandles8.map(c => c.high))) {
+        isValueExtensionMet = false;
+        extensionBlockReason = `Recent Buying Climax / Upper Absorption Wick detected within last 8 candles`;
       } else if (zDist > baseZLimit && zDist <= maxZLimit) {
         isValueExtensionSoftened = true;
       }
     } else if (signalDirection === "SHORT") {
       if (zDist < -maxZLimit) {
         isValueExtensionMet = false;
+        extensionBlockReason = `Z_dist (${zDist.toFixed(2)}σ < -${maxZLimit.toFixed(2)}σ)`;
+      } else if (isEma50Overextended && currentPrice < ema50Val) {
+        isValueExtensionMet = false;
+        extensionBlockReason = `EMA50 Overextension (-${ema50DistAtr.toFixed(2)}x ATR from 50 EMA)`;
+      } else if (hasRecentExhaustionLowerWick && currentPrice > Math.min(...recentCandles8.map(c => c.low))) {
+        isValueExtensionMet = false;
+        extensionBlockReason = `Recent Selling Climax / Lower Absorption Wick detected within last 8 candles`;
       } else if (zDist < -baseZLimit && zDist >= -maxZLimit) {
         isValueExtensionSoftened = true;
       }
@@ -1739,8 +1776,8 @@ class TradingEngine {
 
     const zDistFormatted = zDist >= 0 ? `+${zDist.toFixed(2)}` : zDist.toFixed(2);
     const valueExtensionValStr = isValueExtensionMet
-      ? `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}σ, EMA100: ${zEma.toFixed(2)}σ, Chase: ${zChase.toFixed(2)}σ) | Status: PASSED${isValueExtensionSoftened ? " (SOFTENED BY MOMENTUM)" : ""}`
-      : `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}σ, EMA100: ${zEma.toFixed(2)}σ, Chase: ${zChase.toFixed(2)}σ) | EXHAUSTION BLOCKED (|Z_dist| > ${maxZLimit.toFixed(2)})`;
+      ? `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}σ, EMA100: ${zEma.toFixed(2)}σ, Chase: ${zChase.toFixed(2)}σ, EMA50: ${ema50DistAtr.toFixed(1)}x ATR) | Status: PASSED${isValueExtensionSoftened ? " (SOFTENED BY MOMENTUM)" : ""}`
+      : `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}σ, EMA100: ${zEma.toFixed(2)}σ, Chase: ${zChase.toFixed(2)}σ) | EXHAUSTION BLOCKED: ${extensionBlockReason}`;
 
     conditions.push({
       name: "Unified Value Extension Anchor",

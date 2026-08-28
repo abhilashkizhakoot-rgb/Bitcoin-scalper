@@ -1715,60 +1715,23 @@ class TradingEngine {
     // Normalized Composite Z-Score Distance (Z_dist)
     const zDist = 0.45 * zVwap + 0.35 * zEma + 0.20 * zChase;
 
-    // Hard ceiling on pure EMA50/EMA20 deviation (prevents selling bottoms or buying tops even if lookback paused)
-    const ema50DistAtr = Math.abs(currentPrice - ema50Val) / currentAtr;
-    const isEma50Overextended = ema50DistAtr > 3.0;
-
-    // Detect recent extreme absorption wick / selling climax within last 8 candles
-    const recentCandles8 = this.candles1m.slice(-8);
-    const hasRecentExhaustionLowerWick = recentCandles8.some(c => {
-      const range = c.high - c.low;
-      const lowerWick = Math.min(c.open, c.close) - c.low;
-      return range >= 0.8 * currentAtr && (lowerWick / range) >= 0.50 && c.volume > (this.candles1m.length > 20 ? (this.candles1m.slice(-20).reduce((s, v) => s + v.volume, 0) / 20) * 1.5 : 0);
-    });
-    const hasRecentExhaustionUpperWick = recentCandles8.some(c => {
-      const range = c.high - c.low;
-      const upperWick = c.high - Math.max(c.open, c.close);
-      return range >= 0.8 * currentAtr && (upperWick / range) >= 0.50 && c.volume > (this.candles1m.length > 20 ? (this.candles1m.slice(-20).reduce((s, v) => s + v.volume, 0) / 20) * 1.5 : 0);
-    });
-
     // Dynamic Z_dist Threshold based on Regime and Pressure capped by configured max_allowed_z_dist
     const userMaxZCap = rm.max_allowed_z_dist !== undefined ? rm.max_allowed_z_dist : 2.20;
     const baseZLimit = Math.min(isTrending ? 2.20 : 2.00, userMaxZCap);
-    // Only permit momentum softening if price is within healthy proximity of the EMA zone (not overextended)
-    const isNearEmaForSoftening = ema50DistAtr <= 2.2;
-    const maxZLimit = Math.min(
-      ((isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure) && isNearEmaForSoftening) ? 3.20 : baseZLimit,
-      userMaxZCap
-    );
+    const maxZLimit = Math.min((isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure) ? 3.20 : baseZLimit, userMaxZCap);
 
     let isValueExtensionMet = true;
     let isValueExtensionSoftened = false;
-    let extensionBlockReason = "";
 
     if (signalDirection === "LONG") {
       if (zDist > maxZLimit) {
         isValueExtensionMet = false;
-        extensionBlockReason = `Z_dist (${zDist.toFixed(2)}σ > ${maxZLimit.toFixed(2)}σ)`;
-      } else if (isEma50Overextended && currentPrice > ema50Val) {
-        isValueExtensionMet = false;
-        extensionBlockReason = `EMA50 Overextension (+${ema50DistAtr.toFixed(2)}x ATR from 50 EMA)`;
-      } else if (hasRecentExhaustionUpperWick && currentPrice < Math.max(...recentCandles8.map(c => c.high))) {
-        isValueExtensionMet = false;
-        extensionBlockReason = `Recent Buying Climax / Upper Absorption Wick detected within last 8 candles`;
       } else if (zDist > baseZLimit && zDist <= maxZLimit) {
         isValueExtensionSoftened = true;
       }
     } else if (signalDirection === "SHORT") {
       if (zDist < -maxZLimit) {
         isValueExtensionMet = false;
-        extensionBlockReason = `Z_dist (${zDist.toFixed(2)}σ < -${maxZLimit.toFixed(2)}σ)`;
-      } else if (isEma50Overextended && currentPrice < ema50Val) {
-        isValueExtensionMet = false;
-        extensionBlockReason = `EMA50 Overextension (-${ema50DistAtr.toFixed(2)}x ATR from 50 EMA)`;
-      } else if (hasRecentExhaustionLowerWick && currentPrice > Math.min(...recentCandles8.map(c => c.low))) {
-        isValueExtensionMet = false;
-        extensionBlockReason = `Recent Selling Climax / Lower Absorption Wick detected within last 8 candles`;
       } else if (zDist < -baseZLimit && zDist >= -maxZLimit) {
         isValueExtensionSoftened = true;
       }
@@ -1776,8 +1739,8 @@ class TradingEngine {
 
     const zDistFormatted = zDist >= 0 ? `+${zDist.toFixed(2)}` : zDist.toFixed(2);
     const valueExtensionValStr = isValueExtensionMet
-      ? `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}σ, EMA100: ${zEma.toFixed(2)}σ, Chase: ${zChase.toFixed(2)}σ, EMA50: ${ema50DistAtr.toFixed(1)}x ATR) | Status: PASSED${isValueExtensionSoftened ? " (SOFTENED BY MOMENTUM)" : ""}`
-      : `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}σ, EMA100: ${zEma.toFixed(2)}σ, Chase: ${zChase.toFixed(2)}σ) | EXHAUSTION BLOCKED: ${extensionBlockReason}`;
+      ? `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}σ, EMA100: ${zEma.toFixed(2)}σ, Chase: ${zChase.toFixed(2)}σ) | Status: PASSED${isValueExtensionSoftened ? " (SOFTENED BY MOMENTUM)" : ""}`
+      : `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}σ, EMA100: ${zEma.toFixed(2)}σ, Chase: ${zChase.toFixed(2)}σ) | EXHAUSTION BLOCKED (|Z_dist| > ${maxZLimit.toFixed(2)})`;
 
     conditions.push({
       name: "Unified Value Extension Anchor",
@@ -1901,14 +1864,15 @@ class TradingEngine {
 
     let squeezeMet = true;
     let squeezeVal = `BB Width: $${sqBbWidth.toFixed(2)} (Keltner Width: $${sqKbWidth.toFixed(2)})`;
-    let squeezeReq = "Breakout volume (Rel Volume >= 1.40) required if Bollinger Bands are squeezed inside Keltner Channels";
+    let squeezeReq = "Breakout volume (Rel Volume >= 1.20) or directional order flow inflection required if Bollinger Bands are squeezed inside Keltner Channels";
 
     if (isSqueezed) {
-      squeezeMet = relVolume >= 1.40;
+      const earlySqueezeRelease = relVolume >= 1.20 || flowRes.score >= 60 || this.detectOrderFlowAbsorption(signalDirection).isAbsorption;
+      squeezeMet = earlySqueezeRelease;
       if (!squeezeMet) {
-        squeezeVal = `COMPRESSED SQUEEZE ACTIVE - BLOCKED (BB Width $${sqBbWidth.toFixed(2)} <= Keltner $${sqKbWidth.toFixed(2)} | Rel Volume ${relVolume.toFixed(2)} < 1.40)`;
+        squeezeVal = `COMPRESSED SQUEEZE ACTIVE - BLOCKED (BB Width $${sqBbWidth.toFixed(2)} <= Keltner $${sqKbWidth.toFixed(2)} | Awaiting directional breakout flow)`;
       } else {
-        squeezeVal = `COMPRESSED SQUEEZE ACTIVE - PASSED (High Breakout Volume: ${relVolume.toFixed(2)} >= 1.40)`;
+        squeezeVal = `COMPRESSED SQUEEZE ACTIVE - PASSED (Early Squeeze Inflection / Volume: ${relVolume.toFixed(2)})`;
       }
     } else {
       squeezeVal = `NO SQUEEZE - PASSING (BB Width $${sqBbWidth.toFixed(2)} > Keltner $${sqKbWidth.toFixed(2)})`;
@@ -3742,6 +3706,7 @@ class TradingEngine {
       "Liquidity Sweep Setup (Setup 3)": { status: "SKIP", reason: "Not evaluated." },
       "Fair Value Gap Retest Setup (Setup 4)": { status: "SKIP", reason: "Not evaluated." },
       "Institutional Order Block Setup (Setup 5)": { status: "SKIP", reason: "Not evaluated." },
+      "Volatility Squeeze Setup (Setup 6)": { status: "SKIP", reason: "Not evaluated." },
     };
 
     const getReturnObj = (confirmed: boolean, message: string) => {
@@ -3909,6 +3874,34 @@ class TradingEngine {
       }
     } else if (obResult.description.includes("Awaiting") || obResult.description.includes("awaiting")) {
       condDict["Institutional Order Block Setup (Setup 5)"] = { status: "FAIL", reason: obResult.description };
+    }
+
+    // --- FEATURE 8: Volatility Squeeze Breakout Setup (Setup 6) Check ---
+    const squeezeResult = this.evaluateVolatilitySqueeze();
+    const absorptionResult = this.detectOrderFlowAbsorption(direction);
+    const isSqueezeSetupValid = (squeezeResult.squeezeFired && squeezeResult.squeezeFiredDirection === direction) ||
+      (squeezeResult.isSqueezed && (hasHighHFPressure || absorptionResult.isAbsorption));
+
+    if (isSqueezeSetupValid) {
+      if (!isMtfAligned) {
+        condDict["Volatility Squeeze Setup (Setup 6)"] = { status: "FAIL", reason: "Blocked by 5m MTF Trend conflict." };
+      } else {
+        const sqDesc = squeezeResult.squeezeFired
+          ? `[Setup 6 - Volatility Squeeze Expansion Confirmed]: Momentum fired in direction of ${direction} from compressed Bollinger/Keltner base.`
+          : `[Setup 6 - Pre-Breakout Squeeze Accumulation Confirmed]: Volatility tightly coiled with institutional order flow absorption (${absorptionResult.type || "High HF Pressure"}).`;
+        condDict["Volatility Squeeze Setup (Setup 6)"] = { status: "PASS", reason: sqDesc };
+        condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Volatility Squeeze Expansion Setup" };
+        condDict["Breakout Level Confirmation"] = { status: "PASS", reason: "Squeeze release at compression origin" };
+        condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Squeeze expansion candle" };
+        condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Early squeeze entry" };
+        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "Compression baseline holding" };
+        condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Squeeze entry at inflection" };
+        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Squeeze breakout volume valid" };
+
+        return getReturnObj(true, sqDesc);
+      }
+    } else {
+      condDict["Volatility Squeeze Setup (Setup 6)"] = { status: "SKIP", reason: squeezeResult.description };
     }
 
     // Block standard trend setups if MTF trend alignment fails
@@ -4137,12 +4130,15 @@ class TradingEngine {
       if (breakoutIdx !== -1 && boBodyRatioMet && !isChasing && !isSetup1Invalidated && (hasPulledBackToZone || isShallowConsolidationHolding)) {
         const isRejection = isLongRejectionConfirmed;
         const isContinuation = currentCandle.close > currentCandle.open && (currentCandle.close >= breakoutLevel || isLongRejectionConfirmed);
-        if ((isRejection && isContinuation) || (isShallowConsolidationHolding && isContinuation)) {
+        const isEarlyRetestTouchHolding = hasPulledBackToZone && (isLongRejectionConfirmed || isLongCandleStabilized || absorptionResult.isAbsorption);
+        if ((isRejection && isContinuation) || (isShallowConsolidationHolding && isContinuation) || isEarlyRetestTouchHolding) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
             const setupLabel = isShallowConsolidationHolding && !hasPulledBackToZone
               ? `High-ADX Parabolic Continuation (${adxValue.toFixed(1)} ADX): Shallow consolidation held above $${breakoutLevel.toFixed(2)}`
-              : `Pullback & Retest setup confirmed via [${longRejectionType}]`;
+              : (isEarlyRetestTouchHolding && !isRejection
+                  ? `Early Retest Mitigation Confirmed at $${breakoutLevel.toFixed(2)}`
+                  : `Pullback & Retest setup confirmed via [${longRejectionType}]`);
             pullbackRetestMessage = `${setupLabel}${mtfMessage}: Price ${isShallowConsolidationHolding && !hasPulledBackToZone ? 'consolidated tightly above' : 'pulled back to'} broken HH level ($${breakoutLevel.toFixed(2)}) on healthy volume and resumed trend (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
             condDict["Pullback & Retest Setup (Setup 1)"] = { status: "PASS", reason: pullbackRetestMessage };
           } else {
@@ -4222,7 +4218,8 @@ class TradingEngine {
         }
       }
 
-      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isLongRejectionConfirmed && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
+      const isEarlyEmaTouchHolding = (touchesFirstEma || touchesSecondEma) && (isLongRejectionConfirmed || isLongCandleStabilized || isFallbackCrossoverBullish || absorptionResult.isAbsorption);
+      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && (isLongRejectionConfirmed || isEarlyEmaTouchHolding) && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
       // Ensure Fallback Micro EMA Momentum Bounce requires RECENT retracement and price proximity to the EMA zone
       // (prevents taking late bounce entries when price has already drifted far above the EMA zone without candlestick rejection)
       const maxEmaProximityAtr = (effectiveEmaMult || 0.40) + 0.40;
@@ -4497,12 +4494,15 @@ class TradingEngine {
       if (breakoutIdx !== -1 && boBodyRatioMet && !isChasing && !isSetup1Invalidated && (hasPulledBackToZone || isShallowConsolidationHolding)) {
         const isRejection = isShortRejectionConfirmed;
         const isContinuation = currentCandle.close < currentCandle.open && (currentCandle.close <= breakoutLevel || isShortRejectionConfirmed);
-        if ((isRejection && isContinuation) || (isShallowConsolidationHolding && isContinuation)) {
+        const isEarlyRetestTouchHolding = hasPulledBackToZone && (isShortRejectionConfirmed || isShortCandleStabilized || absorptionResult.isAbsorption);
+        if ((isRejection && isContinuation) || (isShallowConsolidationHolding && isContinuation) || isEarlyRetestTouchHolding) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
             const setupLabel = isShallowConsolidationHolding && !hasPulledBackToZone
               ? `High-ADX Parabolic Continuation (${adxValue.toFixed(1)} ADX): Shallow consolidation held below $${breakoutLevel.toFixed(2)}`
-              : `Pullback & Retest setup confirmed via [${shortRejectionType}]`;
+              : (isEarlyRetestTouchHolding && !isRejection
+                  ? `Early Retest Mitigation Confirmed at $${breakoutLevel.toFixed(2)}`
+                  : `Pullback & Retest setup confirmed via [${shortRejectionType}]`);
             pullbackRetestMessage = `${setupLabel}${mtfMessage}: Price ${isShallowConsolidationHolding && !hasPulledBackToZone ? 'consolidated tightly below' : 'pulled back to'} broken LL level ($${breakoutLevel.toFixed(2)}) on healthy volume and resumed trend (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
             condDict["Pullback & Retest Setup (Setup 1)"] = { status: "PASS", reason: pullbackRetestMessage };
           } else {
@@ -4582,7 +4582,8 @@ class TradingEngine {
         }
       }
 
-      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isShortRejectionConfirmed && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
+      const isEarlyEmaTouchHoldingShort = (touchesFirstEma || touchesSecondEma) && (isShortRejectionConfirmed || isShortCandleStabilized || isFallbackCrossoverBearish || absorptionResult.isAbsorption);
+      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && (isShortRejectionConfirmed || isEarlyEmaTouchHoldingShort) && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
       // Ensure Fallback Micro EMA Momentum Bounce requires RECENT retracement and price proximity to the EMA zone
       // (prevents taking late bounce entries when price has already drifted far below the EMA zone without candlestick rejection)
       const maxEmaProximityAtr = (effectiveEmaMult || 0.40) + 0.40;
@@ -5699,6 +5700,132 @@ class TradingEngine {
     };
   }
 
+  public detectOrderFlowAbsorption(direction: "LONG" | "SHORT"): {
+    isAbsorption: boolean;
+    type: string;
+    description: string;
+  } {
+    const lastIdx = this.candles1m.length - 1;
+    if (lastIdx < 1) return { isAbsorption: false, type: "", description: "Insufficient candle data" };
+    
+    const currentCandle = this.candles1m[lastIdx];
+    const prevCandle = this.candles1m[lastIdx - 1];
+
+    const candleRange = Math.max(0.001, currentCandle.high - currentCandle.low);
+    const candleBody = Math.abs(currentCandle.close - currentCandle.open);
+    const lowerWick = Math.min(currentCandle.open, currentCandle.close) - currentCandle.low;
+    const upperWick = currentCandle.high - Math.max(currentCandle.open, currentCandle.close);
+
+    const takerBuyRatio = this.orderFlowStats.takerBuyRatio;
+    const obImbalance = this.orderBookStats.imbalanceRatio;
+    const netCVD = this.orderFlowStats.netCVD;
+
+    if (direction === "LONG") {
+      // 1. Seller Exhaustion / Passive Buyer Absorption:
+      // Heavy seller aggressor volume (takerBuyRatio <= 0.46 or negative delta), but price refuses to break down
+      // and prints a lower wick >= 30% of range or stabilizes with small body at support.
+      const hasHeavySellAggression = takerBuyRatio <= 0.46 || obImbalance <= -0.25 || netCVD < 0;
+      const priceHoldingSupport = (lowerWick / candleRange >= 0.30) || (currentCandle.close >= prevCandle.low && candleBody <= 0.35 * candleRange);
+      const isReboundStarting = currentCandle.close >= currentCandle.open || (lowerWick >= candleBody);
+
+      if (hasHeavySellAggression && priceHoldingSupport && isReboundStarting) {
+        return {
+          isAbsorption: true,
+          type: "Bullish Passive Limit Absorption",
+          description: `Bullish Order Flow Absorption: Heavy market selling (Taker Buy ${(takerBuyRatio * 100).toFixed(0)}%, Imbalance ${(obImbalance * 100).toFixed(0)}%) absorbed by passive buyers at $${currentCandle.low.toFixed(2)} (Lower Wick: ${((lowerWick / candleRange) * 100).toFixed(0)}%).`
+        };
+      }
+
+      // 2. Aggressive Buyer Accumulation:
+      // Strong buyer takeover during compression or at support
+      const hasAggressiveBuying = takerBuyRatio >= 0.58 && obImbalance >= 0.20;
+      if (hasAggressiveBuying && lowerWick >= 0.20 * candleRange) {
+        return {
+          isAbsorption: true,
+          type: "Bullish Aggressive Accumulation",
+          description: `Bullish Accumulation Surge: Strong institutional taker flow (${(takerBuyRatio * 100).toFixed(0)}% buys, ${(obImbalance * 100).toFixed(0)}% bid wall) driving early inflection at $${this.currentPrice.toFixed(2)}.`
+        };
+      }
+    } else {
+      // SHORT
+      // 1. Buyer Exhaustion / Passive Seller Absorption:
+      // Heavy buyer aggressor volume (takerBuyRatio >= 0.54 or positive delta), but price stalls at resistance with upper wick >= 30%.
+      const hasHeavyBuyAggression = takerBuyRatio >= 0.54 || obImbalance >= 0.25 || netCVD > 0;
+      const priceHoldingResistance = (upperWick / candleRange >= 0.30) || (currentCandle.close <= prevCandle.high && candleBody <= 0.35 * candleRange);
+      const isReboundStarting = currentCandle.close <= currentCandle.open || (upperWick >= candleBody);
+
+      if (hasHeavyBuyAggression && priceHoldingResistance && isReboundStarting) {
+        return {
+          isAbsorption: true,
+          type: "Bearish Passive Limit Absorption",
+          description: `Bearish Order Flow Absorption: Heavy market buying (Taker Buy ${(takerBuyRatio * 100).toFixed(0)}%, Imbalance ${(obImbalance * 100).toFixed(0)}%) absorbed by passive sell limit walls at $${currentCandle.high.toFixed(2)} (Upper Wick: ${((upperWick / candleRange) * 100).toFixed(0)}%).`
+        };
+      }
+
+      // 2. Aggressive Seller Distribution:
+      const hasAggressiveSelling = takerBuyRatio <= 0.42 && obImbalance <= -0.20;
+      if (hasAggressiveSelling && upperWick >= 0.20 * candleRange) {
+        return {
+          isAbsorption: true,
+          type: "Bearish Aggressive Distribution",
+          description: `Bearish Distribution Surge: Strong institutional taker sell flow (${(takerBuyRatio * 100).toFixed(0)}% buys, ${(obImbalance * 100).toFixed(0)}% ask wall) driving early breakdown at $${this.currentPrice.toFixed(2)}.`
+        };
+      }
+    }
+
+    return { isAbsorption: false, type: "", description: "No order flow absorption detected" };
+  }
+
+  public evaluateVolatilitySqueeze(): {
+    isSqueezed: boolean;
+    squeezeFired: boolean;
+    squeezeFiredDirection: "LONG" | "SHORT" | "NONE";
+    bbWidth: number;
+    keltnerWidth: number;
+    description: string;
+  } {
+    const closes = this.candles1m.map(c => c.close);
+    const lastIdx = closes.length - 1;
+    if (lastIdx < 20) {
+      return { isSqueezed: false, squeezeFired: false, squeezeFiredDirection: "NONE", bbWidth: 0, keltnerWidth: 0, description: "Insufficient data" };
+    }
+
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentAtr = atr14[lastIdx] || 50;
+    const bb = this.calculateBollingerBands(closes, 20, 2);
+    const bbWidth = bb.upper - bb.lower;
+    const keltnerWidth = 2 * 1.5 * currentAtr;
+
+    const isSqueezed = bbWidth <= keltnerWidth;
+
+    // Check prior candle to see if squeeze just fired (compression release)
+    const prevCloses = closes.slice(0, -1);
+    const prevBb = this.calculateBollingerBands(prevCloses, 20, 2);
+    const prevAtr = (atr14[lastIdx - 1]) || currentAtr;
+    const prevBbWidth = prevBb.upper - prevBb.lower;
+    const prevKeltnerWidth = 2 * 1.5 * prevAtr;
+    const prevWasSqueezed = prevBbWidth <= prevKeltnerWidth;
+
+    const squeezeFired = prevWasSqueezed && !isSqueezed;
+    let squeezeFiredDirection: "LONG" | "SHORT" | "NONE" = "NONE";
+
+    if (squeezeFired || isSqueezed) {
+      const ema20Series = this.calculateEMA(closes, 20);
+      const ema20 = ema20Series[lastIdx] || this.currentPrice;
+      const momentum = this.currentPrice - ema20;
+      if (momentum > 0.10 * currentAtr) squeezeFiredDirection = "LONG";
+      else if (momentum < -0.10 * currentAtr) squeezeFiredDirection = "SHORT";
+    }
+
+    const desc = isSqueezed
+      ? `Volatility Squeeze Active (BB Width: $${bbWidth.toFixed(2)} <= Keltner: $${keltnerWidth.toFixed(2)})`
+      : squeezeFired
+        ? `Volatility Squeeze FIRED (${squeezeFiredDirection}): Momentum releasing from compression!`
+        : `Normal Volatility (BB Width: $${bbWidth.toFixed(2)} > Keltner: $${keltnerWidth.toFixed(2)})`;
+
+    return { isSqueezed, squeezeFired, squeezeFiredDirection, bbWidth, keltnerWidth, description: desc };
+  }
+
   private isMultiCandleLongRejection(lastIdx: number, currentAtr: number): { confirmed: boolean; type: string } {
     if (lastIdx < 0 || this.candles1m.length === 0) return { confirmed: false, type: "" };
     const config = dbManager.getConfig();
@@ -5868,6 +5995,16 @@ class TradingEngine {
       if (c2Bullish && c1Bullish && c0Bullish && ascendingCloses && healthyBodies) {
         isThreeWhiteSoldiers = true;
       }
+    }
+
+    // Institutional Order Flow Absorption and Early Wick Rejection Checks
+    const absorptionLong = this.detectOrderFlowAbsorption("LONG");
+    if (absorptionLong.isAbsorption) {
+      return { confirmed: true, type: absorptionLong.type };
+    }
+    const isEarlyWickAbsorption = confirmRange > 0 && (confirmLowerWick / confirmRange >= 0.38) && (confirmCandle.close >= confirmCandle.open - 0.15 * confirmRange);
+    if (isEarlyWickAbsorption && (confirmCandle.close >= confirmCandle.open || confirmBody <= 0.35 * confirmRange)) {
+      return { confirmed: true, type: "Early Lower Wick Absorption Support Rejection" };
     }
 
     // Priority Check
@@ -6061,6 +6198,16 @@ class TradingEngine {
       if (c2Bearish && c1Bearish && c0Bearish && descendingCloses && healthyBodies) {
         isThreeBlackCrows = true;
       }
+    }
+
+    // Institutional Order Flow Absorption and Early Wick Rejection Checks
+    const absorptionShort = this.detectOrderFlowAbsorption("SHORT");
+    if (absorptionShort.isAbsorption) {
+      return { confirmed: true, type: absorptionShort.type };
+    }
+    const isEarlyWickAbsorptionShort = confirmRange > 0 && (confirmUpperWick / confirmRange >= 0.38) && (confirmCandle.close <= confirmCandle.open + 0.15 * confirmRange);
+    if (isEarlyWickAbsorptionShort && (confirmCandle.close <= confirmCandle.open || confirmBody <= 0.35 * confirmRange)) {
+      return { confirmed: true, type: "Early Upper Wick Absorption Resistance Rejection" };
     }
 
     // Priority Check
@@ -7908,14 +8055,18 @@ class TradingEngine {
 
     let squeezeMet = true;
     let squeezeVal = `BB Width: $${sqBbWidth.toFixed(2)} (Keltner Width: $${sqKbWidth.toFixed(2)})`;
-    let squeezeReq = "Breakout volume (Rel Volume >= 1.40) required if Bollinger Bands are squeezed inside Keltner Channels";
+    let squeezeReq = "Breakout volume (Rel Volume >= 1.20) or directional order flow inflection required if Bollinger Bands are squeezed inside Keltner Channels";
 
     if (isSqueezed) {
-      squeezeMet = relVolume >= 1.40;
+      const absorption = signalDirection === "LONG" 
+        ? this.detectOrderFlowAbsorption("LONG").isAbsorption 
+        : (signalDirection === "SHORT" ? this.detectOrderFlowAbsorption("SHORT").isAbsorption : false);
+      const earlySqueezeRelease = relVolume >= 1.20 || hasExtremeRealtimePressure || flowRes.score >= 60 || absorption;
+      squeezeMet = earlySqueezeRelease;
       if (!squeezeMet) {
-        squeezeVal = `COMPRESSED SQUEEZE ACTIVE - BLOCKED (BB Width $${sqBbWidth.toFixed(2)} <= Keltner $${sqKbWidth.toFixed(2)} | Rel Volume ${relVolume.toFixed(2)} < 1.40)`;
+        squeezeVal = `COMPRESSED SQUEEZE ACTIVE - BLOCKED (BB Width $${sqBbWidth.toFixed(2)} <= Keltner $${sqKbWidth.toFixed(2)} | Awaiting directional breakout flow)`;
       } else {
-        squeezeVal = `COMPRESSED SQUEEZE ACTIVE - PASSED (High Breakout Volume: ${relVolume.toFixed(2)} >= 1.40)`;
+        squeezeVal = `COMPRESSED SQUEEZE ACTIVE - PASSED (Early Squeeze Inflection / Volume: ${relVolume.toFixed(2)})`;
       }
     } else {
       squeezeVal = `NO SQUEEZE - PASSING (BB Width $${sqBbWidth.toFixed(2)} > Keltner $${sqKbWidth.toFixed(2)})`;

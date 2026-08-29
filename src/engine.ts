@@ -1448,7 +1448,7 @@ class TradingEngine {
     const isEnteringPullback = true;
     const catboostThreshold = this.currentRegime === MarketRegime.RANGE_BOUND 
       ? 0.50 
-      : (isEnteringPullback ? 0.58 : 0.65);
+      : 0.55;
     const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold) : false;
     const pShortMet = signalDirection === "SHORT" ? (probabilityShort >= catboostThreshold) : false;
     conditions.push({
@@ -1456,8 +1456,8 @@ class TradingEngine {
       met: (pLongMet || pShortMet),
       current_value: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}% | P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%`,
       required: signalDirection === "LONG"
-        ? `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "58"}% (Evaluating LONG Trade)`
-        : `P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "58"}% (Evaluating SHORT Trade)`,
+        ? `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "55"}% (Evaluating LONG Trade)`
+        : `P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "55"}% (Evaluating SHORT Trade)`,
       description: "Uses pre-trained ensemble trees mapping momentum, EMA spreads, and ATR volatility expansion.",
       priority: "CRITICAL",
     });
@@ -1554,20 +1554,27 @@ class TradingEngine {
       }
     }
 
-    // Absolute Hard Floor Enforcer: If ADX < hardFloorAdx (20.0), ADX gate fails unconditionally
+    // Absolute Hard Floor Enforcer: If ADX < hardFloorAdx (20.0), ADX gate fails unless breakout volume expansion or squeeze release occurs
+    let isAdxSoftenedBySqueezeOrVolume = false;
     if (adxValue < hardFloorAdx) {
-      adxMet = false;
+      const isVolumeExpansion = relVolume >= 1.20 || this.orderFlowStats.takerBuyRatio >= 0.60 || this.orderFlowStats.takerBuyRatio <= 0.40;
+      if (isVolumeExpansion || hasExtremeRealtimePressure) {
+        adxMet = true;
+        isAdxSoftenedBySqueezeOrVolume = true;
+      } else {
+        adxMet = false;
+      }
     }
 
     const fastEma = ms.fast_ema_period || 20;
     const medEma = ms.medium_ema_period || 50;
     const slowEma = ms.slow_ema_period || 200;
 
-    const isTrendSoftened = (this.currentRegime !== MarketRegime.RANGE_BOUND) && hasExtremeRealtimePressure && (
+    const isTrendSoftened = ((this.currentRegime !== MarketRegime.RANGE_BOUND) && hasExtremeRealtimePressure && (
       (signalDirection === "LONG" && !isUptrendAligned) ||
       (signalDirection === "SHORT" && !isDowntrendAligned) ||
       (adxValue < standardAdxThreshold)
-    );
+    )) || isAdxSoftenedBySqueezeOrVolume;
 
     conditions.push({
       name: "Exponential Trend Alignment",
@@ -1580,7 +1587,9 @@ class TradingEngine {
     });
 
     let adxValDisplay = `ADX: ${adxValue.toFixed(1)}`;
-    if (adxValue < hardFloorAdx) {
+    if (isAdxSoftenedBySqueezeOrVolume) {
+      adxValDisplay = `ADX: ${adxValue.toFixed(1)} (SOFTENED: High Breakout Volume / Order Flow Expansion)`;
+    } else if (adxValue < hardFloorAdx) {
       adxValDisplay = `ADX BELOW HARD FLOOR - BLOCKED (${adxValue.toFixed(1)} < ${hardFloorAdx.toFixed(1)})`;
     } else if (this.currentRegime === MarketRegime.RANGE_BOUND && adxValue < minRangingAdx) {
       adxValDisplay = `RANGE-BOUND ADX BELOW FLOOR - BLOCKED (${adxValue.toFixed(1)} < ${minRangingAdx.toFixed(1)})`;
@@ -1659,13 +1668,19 @@ class TradingEngine {
 
     // C12: Optimal Session Timing Window Check (IST)
     const timingStatus = this.getISTTimingStatus();
+    const hasMomentumVolumeOverride = relVolume >= 1.20 || adxValue >= 28 || hasExtremeRealtimePressure;
+    const isTimingMet = timingStatus.met || hasMomentumVolumeOverride;
+    const isTimingSoftened = !timingStatus.met && hasMomentumVolumeOverride;
     conditions.push({
       name: "Optimal Session Timing Window Check (IST)",
-      met: timingStatus.met,
-      current_value: timingStatus.status,
-      required: "Avoid weekends & 2:00 AM - 8:00 AM IST",
+      met: isTimingMet,
+      current_value: isTimingSoftened
+        ? `${timingStatus.status} (PASS: High Breakout Volume / Momentum Override)`
+        : timingStatus.status,
+      required: "Trade during optimal liquidity sessions (or Volume >= 1.20x / Momentum Override)",
       description: timingStatus.description,
       priority: "HIGH",
+      softened: isTimingSoftened,
     });
 
     // Unified Value Extension Anchor (VWAP Bands + EMA 100 Distance + Chasing Lookback Velocity into normalized Z-score distance Z_dist)
@@ -1952,15 +1967,22 @@ class TradingEngine {
     // C20: Regime Transition Cooldown
     const regimeCooldown = this.getRegimeChangeCooldownStatus();
     const regimeCooldownMins = config.general.regime_change_cooldown_minutes !== undefined ? config.general.regime_change_cooldown_minutes : 15;
+    const isHighConvictionShift = (relVolume >= 1.20 || adxValue >= 26 || structCheck.confirmed || hasExtremeRealtimePressure);
+    const isCooldownBypassed = regimeCooldown.active && isHighConvictionShift;
+    const isRegimeCooldownMet = !regimeCooldown.active || isCooldownBypassed;
+
     conditions.push({
       name: "Regime Transition Cooldown",
-      met: !regimeCooldown.active,
+      met: isRegimeCooldownMet,
       current_value: regimeCooldown.active
-        ? `BLOCKED (Cooldown active: ${Math.ceil(regimeCooldown.remainingSeconds / 60)}m left)`
+        ? (isCooldownBypassed 
+            ? `PASSING (Bypassed: High Conviction Volume ${relVolume.toFixed(2)}x / Momentum Override)` 
+            : `BLOCKED (Cooldown active: ${Math.ceil(regimeCooldown.remainingSeconds / 60)}m left)`)
         : "PASSING (No recent regime shift)",
-      required: `No regime transitions within the last ${regimeCooldownMins} minutes`,
+      required: `No regime transitions within the last ${regimeCooldownMins} minutes (or Volume >= 1.2x / Momentum Override)`,
       description: "Applies a transition lock to entry signals whenever the dominant market regime shifts (e.g. from Strong Uptrend to Range Bound), protecting against high-frequency slippage and trend-reversal fakeouts during structural transitions.",
       priority: "CRITICAL",
+      softened: isCooldownBypassed,
     });
 
     // Choppy Market & Whip-Saw Avoidance Gate
@@ -1977,18 +1999,25 @@ class TradingEngine {
     const isKerDeficient = kerValue < minKerAllowed;
     const isWickExcessive = avgWickRatio > maxWickRatioAllowed;
 
+    const isBreakoutExpansion = (relVolume >= 1.20 || flowRes.score >= 58 || this.detectOrderFlowAbsorption(signalDirection).isAbsorption);
+
     let choppyGateMet = true;
     let choppyValStr = `CHOP: ${chopIndex.toFixed(1)} | Efficiency (KER): ${kerValue.toFixed(2)} | Wick Ratio: ${(avgWickRatio * 100).toFixed(0)}%`;
     let choppyReqStr = `CHOP <= ${maxChopAllowed.toFixed(1)}, KER >= ${minKerAllowed.toFixed(2)}, Wick Ratio <= ${(maxWickRatioAllowed * 100).toFixed(0)}%`;
 
     if (choppyFilterEnabled) {
       if (isChopExceeded || isKerDeficient || isWickExcessive) {
-        choppyGateMet = false;
-        const reasons: string[] = [];
-        if (isChopExceeded) reasons.push(`High CHOP (${chopIndex.toFixed(1)} > ${maxChopAllowed.toFixed(1)})`);
-        if (isKerDeficient) reasons.push(`Low Efficiency KER (${kerValue.toFixed(2)} < ${minKerAllowed.toFixed(2)})`);
-        if (isWickExcessive) reasons.push(`Excessive Wicks (${(avgWickRatio * 100).toFixed(0)}% > ${(maxWickRatioAllowed * 100).toFixed(0)}%)`);
-        choppyValStr = `CHOPPY / WHIP-SAW MARKET DETECTED - BLOCKED (${reasons.join(", ")})`;
+        if (isBreakoutExpansion) {
+          choppyGateMet = true;
+          choppyValStr = `PASSING EXPANSION (Bypassed via High Breakout Volume ${relVolume.toFixed(2)}x / Flow Score ${flowRes.score})`;
+        } else {
+          choppyGateMet = false;
+          const reasons: string[] = [];
+          if (isChopExceeded) reasons.push(`High CHOP (${chopIndex.toFixed(1)} > ${maxChopAllowed.toFixed(1)})`);
+          if (isKerDeficient) reasons.push(`Low Efficiency KER (${kerValue.toFixed(2)} < ${minKerAllowed.toFixed(2)})`);
+          if (isWickExcessive) reasons.push(`Excessive Wicks (${(avgWickRatio * 100).toFixed(0)}% > ${(maxWickRatioAllowed * 100).toFixed(0)}%)`);
+          choppyValStr = `CHOPPY / WHIP-SAW MARKET DETECTED - BLOCKED (${reasons.join(", ")})`;
+        }
       } else {
         choppyValStr = `PASSING CLEAR TREND / CONVICTION (${choppyValStr})`;
       }
@@ -3998,14 +4027,15 @@ class TradingEngine {
       }
 
       if (breakoutIdx === lastIdx) {
-        const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.82;
+        const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.60;
+        const currentRvol = this.calculateAccurateRelativeVolume();
         const hasHighProbability = probabilityLong >= veryHighProbThreshold;
-        const hasHighHFPressure = ms.allow_immediate_breakout && (adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long));
-        if (hasHighProbability && hasHighHFPressure) {
-          condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: `Immediate breakout entry allowed under high-frequency pressure with high probability (${(probabilityLong * 100).toFixed(1)}%).` };
+        const hasHighHFPressure = ms.allow_immediate_breakout && (adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long) || currentRvol >= 1.20);
+        if (hasHighProbability || hasHighHFPressure) {
+          condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: `Immediate breakout entry allowed under high-frequency pressure or probability (${(probabilityLong * 100).toFixed(1)}%).` };
           return getReturnObj(
             true,
-            `[HF Scalp Boost] Immediate Breakout Entry Confirmed! Price ($${currentPrice.toFixed(2)}) broke out above $${breakoutLevel.toFixed(2)} with very high probability (${(probabilityLong * 100).toFixed(1)}% >= ${(veryHighProbThreshold * 100).toFixed(0)}%) and high frequency momentum.`
+            `[HF Scalp Boost] Immediate Breakout Entry Confirmed! Price ($${currentPrice.toFixed(2)}) broke out above $${breakoutLevel.toFixed(2)} with momentum/volume confirmation.`
           );
         } else {
           const reasonMsg = !hasHighProbability
@@ -4361,15 +4391,16 @@ class TradingEngine {
       }
 
       if (breakoutIdx === lastIdx) {
-        const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.82;
+        const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.60;
+        const currentRvol = this.calculateAccurateRelativeVolume();
         const probabilityShort = 1 - probabilityLong;
         const hasHighProbability = probabilityShort >= veryHighProbThreshold;
-        const hasHighHFPressure = ms.allow_immediate_breakout && (adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short));
-        if (hasHighProbability && hasHighHFPressure) {
-          condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: `Immediate breakdown entry allowed under high-frequency pressure with high probability (${(probabilityShort * 100).toFixed(1)}%).` };
+        const hasHighHFPressure = ms.allow_immediate_breakout && (adxValue >= ms.hf_momentum_adx_threshold || (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short) || currentRvol >= 1.20);
+        if (hasHighProbability || hasHighHFPressure) {
+          condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: `Immediate breakdown entry allowed under high-frequency pressure or probability (${(probabilityShort * 100).toFixed(1)}%).` };
           return getReturnObj(
             true,
-            `[HF Scalp Boost] Immediate Breakdown Entry Confirmed! Price ($${currentPrice.toFixed(2)}) broke down below $${breakoutLevel.toFixed(2)} with very high probability (${(probabilityShort * 100).toFixed(1)}% >= ${(veryHighProbThreshold * 100).toFixed(0)}%) and high frequency momentum.`
+            `[HF Scalp Boost] Immediate Breakdown Entry Confirmed! Price ($${currentPrice.toFixed(2)}) broke down below $${breakoutLevel.toFixed(2)} with momentum/volume confirmation.`
           );
         } else {
           const reasonMsg = !hasHighProbability
@@ -5396,22 +5427,37 @@ class TradingEngine {
     const bandWidth = bb.upper - bb.lower || 1;
     const devPos = (currentPrice - bb.lower) / bandWidth;
 
+    // Check if this is an intentional Breakout, Squeeze, or Momentum setup that naturally rides outer bands
+    const isBreakoutOrSqueeze = result.message?.toLowerCase().includes("breakout") ||
+                                result.message?.toLowerCase().includes("squeeze") ||
+                                result.message?.toLowerCase().includes("momentum") ||
+                                result.message?.toLowerCase().includes("sweep") ||
+                                result.message?.toLowerCase().includes("isolated");
+
+    const relVolume = this.calculateAccurateRelativeVolume();
+    const hasBreakoutVolume = relVolume >= 1.15;
+
+    // If strong breakout/momentum is active with volume, outer band position is expected, not exhausted!
+    if (isBreakoutOrSqueeze || hasBreakoutVolume) {
+      return result;
+    }
+
     if (direction === "LONG") {
-      // Long trend-following/breakout exhaustion: Dev position > 0.75 and RSI > 65
-      if (devPos > 0.75 && currentRsi > 65) {
+      // For standard pullbacks without breakout volume, extreme upper band (> 0.88) and extreme RSI (> 75) indicates exhaustion
+      if (devPos > 0.88 && currentRsi > 75) {
         return {
           ...result,
           confirmed: false,
-          message: `Bollinger Band Exhaustion Guard: Blocked LONG entry at band upper extreme (Dev Position: ${devPos.toFixed(2)} > 0.75, RSI: ${currentRsi.toFixed(1)} > 65). Pullback to mean required (Dev Position 0.20 - 0.65).`
+          message: `Bollinger Band Exhaustion Guard: Blocked LONG entry at band upper extreme (Dev Position: ${devPos.toFixed(2)} > 0.88, RSI: ${currentRsi.toFixed(1)} > 75). Pullback to mean required.`
         };
       }
     } else if (direction === "SHORT") {
-      // Short trend-following/breakdown exhaustion: Dev position < 0.25 and RSI < 35
-      if (devPos < 0.25 && currentRsi < 35) {
+      // For standard pullbacks without breakdown volume, extreme lower band (< 0.12) and extreme RSI (< 25) indicates exhaustion
+      if (devPos < 0.12 && currentRsi < 25) {
         return {
           ...result,
           confirmed: false,
-          message: `Bollinger Band Exhaustion Guard: Blocked SHORT entry at band lower extreme (Dev Position: ${devPos.toFixed(2)} < 0.25, RSI: ${currentRsi.toFixed(1)} < 35). Pullback to mean required (Dev Position 0.35 - 0.80).`
+          message: `Bollinger Band Exhaustion Guard: Blocked SHORT entry at band lower extreme (Dev Position: ${devPos.toFixed(2)} < 0.12, RSI: ${currentRsi.toFixed(1)} < 25). Pullback to mean required.`
         };
       }
     }
@@ -6699,8 +6745,8 @@ class TradingEngine {
             swingLow: rangeLow
           };
         } else if (isRangeLongBreakout) {
-          const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.82;
-          if (probabilityLong < veryHighProbThreshold) {
+          const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.58;
+          if (probabilityLong < veryHighProbThreshold && relVolume < 1.15) {
             return {
               confirmed: false,
               message: `Range LONG Breakout Blocked: Breakout probability is not high enough (P(LONG) = ${(probabilityLong * 100).toFixed(1)}% < ${(veryHighProbThreshold * 100).toFixed(1)}%). Waiting for range breakout pullback.`,
@@ -6769,9 +6815,9 @@ class TradingEngine {
             swingLow: rangeLow
           };
         } else if (isRangeShortBreakdown) {
-          const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.82;
+          const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.58;
           const probabilityShort = 1 - probabilityLong;
-          if (probabilityShort < veryHighProbThreshold) {
+          if (probabilityShort < veryHighProbThreshold && relVolume < 1.15) {
             return {
               confirmed: false,
               message: `Range SHORT Breakdown Blocked: Breakdown probability is not high enough (P(SHORT) = ${(probabilityShort * 100).toFixed(1)}% < ${(veryHighProbThreshold * 100).toFixed(1)}%). Waiting for range breakdown pullback.`,

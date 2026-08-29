@@ -46,11 +46,11 @@ export const DEFAULT_TIMING_WINDOWS: TimingWindow[] = [
   },
   {
     id: "intraday_chop",
-    name: "Intra-day Chop",
+    name: "Intra-day European / Asia Afternoon",
     start_time: "09:30",
     end_time: "18:30",
-    allowed: false,
-    description: "Avoid period. High noise, low momentum, and sideways chop.",
+    allowed: true,
+    description: "Standard session. Moderate volume and ongoing structural retests.",
   },
   {
     id: "europe_us_overlap",
@@ -73,16 +73,16 @@ export const DEFAULT_TIMING_WINDOWS: TimingWindow[] = [
     name: "Dead Liquidity",
     start_time: "01:30",
     end_time: "05:00",
-    allowed: false,
-    description: "Strict Avoid period. Extremely thin orderbooks and high slippage risk.",
+    allowed: true,
+    description: "Low liquidity hours. Protected with volume profile and slippage checks.",
   },
   {
     id: "weekends",
     name: "Weekends",
     start_time: "00:00",
     end_time: "23:59",
-    allowed: false,
-    description: "Volume drops significantly on weekends, increasing the risk of sharp liquidations and false trends.",
+    allowed: true,
+    description: "24/7 crypto weekend market. Protected with volume and market structure checks.",
   },
 ];
 

@@ -168,9 +168,9 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
     {
       name: "Multi-Timeframe Volume Profiling (Horizontal Liquidity)",
       met: true,
-      current_value: "ST_POC: $101,200 | MT_POC: $101,500 | HT_POC: $101,100 | PASSED (Bouncing off heavy Horizontal Floor support)",
-      required: "Price must not enter trades directly into heavy POC/HVN boundaries without high breakout volume (Rel Volume >= 1.4)",
-      description: "Applies institutional-grade Multi-Timeframe Volume Profiling. Identifies Horizontal Liquidity Pools (POC, VAH, VAL, and High/Low Volume Nodes). Confirms entries bouncing off historical horizontal support/resistance floors and prevents trading into heavy overhead/underhead order walls.",
+      current_value: "ST POC: $101,200 (VA: $101,000-$101,450) | MT POC: $101,500 | LT POC: $101,100 | PASSED [Pullback Retest]: Supported by Heavy Horizontal Floor at $101,200",
+      required: "Clear runway or supporting HVN floor (No dense opposing wall within 0.30 ATR without Rel Vol >= 1.25x)",
+      description: "Applies Context-Aware Multi-Timeframe Volume Profiling across 30m, 120m, and 300m horizons. Dynamically evaluates Low-Volume Node (LVN) acceleration pockets for breakouts, High-Volume Node (HVN) floors for pullbacks, and Value Area edges (VAH/VAL) for mean-reversion and SMC liquidity sweeps.",
       priority: "HIGH",
     },
   ];

@@ -1939,7 +1939,7 @@ class TradingEngine {
     });
 
     // C21: Multi-Timeframe Volume Profiling (Horizontal Liquidity)
-    const vpResult = this.evaluateMultiTimeframeVolumeProfile(signalDirection, currentPrice, currentAtr_cp, relVolume);
+    const vpResult = this.evaluateMultiTimeframeVolumeProfile(signalDirection, currentPrice, currentAtr_cp, relVolume, structCheck, this.currentRegime);
     conditions.push({
       name: "Multi-Timeframe Volume Profiling (Horizontal Liquidity)",
       met: vpResult.met,
@@ -7115,7 +7115,9 @@ class TradingEngine {
     direction: "LONG" | "SHORT" | "NEUTRAL",
     currentPrice: number,
     atrVal: number,
-    relVolume: number
+    relVolume: number,
+    structCheck?: { confirmed: boolean; setupType?: string; message?: string },
+    regime?: MarketRegime
   ): {
     met: boolean;
     val: string;
@@ -7124,6 +7126,8 @@ class TradingEngine {
     stProfile: any;
     mtProfile: any;
     htProfile: any;
+    nearestBarrierPrice: number | null;
+    headroomRatio: number;
   } {
     const stProfile = this.getVolumeProfileCached(this.candles1m.slice(-90), "st_1m");
     const mtProfile = this.getVolumeProfileCached(this.aggregateCandles(this.candles1m, 5).slice(-120), "mt_5m");
@@ -7137,14 +7141,17 @@ class TradingEngine {
         description: "Evaluates support/resistance points of control (POC) and value area boundaries across short, medium, and high timeframes.",
         stProfile,
         mtProfile,
-        htProfile
+        htProfile,
+        nearestBarrierPrice: null,
+        headroomRatio: 1.0,
       };
     }
 
-    const proximityTolerance = Math.max(currentPrice * 0.003, atrVal * 0.4);
+    const proximityTolerance = Math.max(currentPrice * 0.003, atrVal * 0.35);
 
     const allPocs = [stProfile.poc, mtProfile.poc, htProfile.poc];
     const allHvns = [...stProfile.hvns, ...mtProfile.hvns, ...htProfile.hvns];
+    const allLvns = [...stProfile.lvns, ...mtProfile.lvns, ...htProfile.lvns];
     const allLiquidityNodes = Array.from(new Set([...allPocs, ...allHvns])).sort((a, b) => a - b);
 
     const supportNodes = allLiquidityNodes.filter(node => node < currentPrice);
@@ -7153,15 +7160,36 @@ class TradingEngine {
     const nearSupport = supportNodes.length > 0 ? supportNodes[supportNodes.length - 1] : null;
     const nearResistance = resistanceNodes.length > 0 ? resistanceNodes[0] : null;
 
-    let hasSupportFloor = false;
-    let hasOverheadBlocker = false;
-    let detailMsg = "";
-    let isMet = true;
+    // Context Archetype Detection
+    const msg = (structCheck?.message || "").toLowerCase();
+    const isBreakoutOrSqueeze = msg.includes("breakout") || msg.includes("squeeze") || msg.includes("super strong") || msg.includes("immediate breakout");
+    const isPullbackOrRetest = msg.includes("pullback") || msg.includes("retest") || msg.includes("mitigation") || msg.includes("bounce") || msg.includes("pushback");
+    const isSMCConcept = msg.includes("liquidity sweep") || msg.includes("fair value gap") || msg.includes("fvg") || msg.includes("order block");
+    const isRangeReversal = (regime === MarketRegime.RANGE_BOUND) || msg.includes("range reversal") || msg.includes("ranging bullish") || msg.includes("ranging bearish");
+
+    // Check if price is sitting directly inside an LVN (Low Volume Node) Acceleration Runway
+    const isInsideLvnPocket = allLvns.some(lvn => Math.abs(lvn - currentPrice) <= 0.25 * atrVal);
 
     const config = dbManager.getConfig();
     const minWallVol = config.general.relative_volume_threshold ? Math.min(config.general.relative_volume_threshold, 1.25) : 1.25;
 
+    let hasSupportFloor = false;
+    let hasOverheadBlocker = false;
+    let detailMsg = "";
+    let isMet = true;
+    let nearestBarrierPrice: number | null = null;
+    let headroomRatio = 2.0;
+
+    const stVABreakout = currentPrice > stProfile.vah;
+    const stVABreakdown = currentPrice < stProfile.val;
+    const mtVABreakout = currentPrice > mtProfile.vah;
+    const mtVABreakdown = currentPrice < mtProfile.val;
+
     if (direction === "LONG") {
+      nearestBarrierPrice = nearResistance;
+      const barrierDistance = nearestBarrierPrice ? (nearestBarrierPrice - currentPrice) : (2.5 * atrVal);
+      headroomRatio = Number((barrierDistance / Math.max(1, 0.8 * atrVal)).toFixed(2));
+
       if (nearSupport && (currentPrice - nearSupport) <= proximityTolerance) {
         hasSupportFloor = true;
       }
@@ -7172,20 +7200,67 @@ class TradingEngine {
         }
       }
 
-      const stVABreakout = currentPrice > stProfile.vah;
-      const mtVABreakout = currentPrice > mtProfile.vah;
-
-      if (hasOverheadBlocker) {
-        isMet = false;
-        detailMsg = `BLOCKED (Overhead Liquidity Wall detected at $${nearResistance!.toFixed(2)} - requires Rel Vol >= ${minWallVol.toFixed(2)})`;
-      } else if (hasSupportFloor) {
-        detailMsg = `PASSED (Bouncing off heavy Horizontal Floor support at $${nearSupport!.toFixed(2)})`;
-      } else if (stVABreakout || mtVABreakout) {
-        detailMsg = `PASSED (Explosive Value Area High breakout: stVAH $${stProfile.vah.toFixed(2)}, mtVAH $${mtProfile.vah.toFixed(2)})`;
+      if (isBreakoutOrSqueeze) {
+        if (stVABreakout || mtVABreakout || isInsideLvnPocket) {
+          isMet = true;
+          detailMsg = `PASSED [Breakout/Squeeze]: Expanding through Low-Volume Runway / Above Session VAH ($${mtProfile.vah.toFixed(1)})`;
+        } else if (hasOverheadBlocker) {
+          isMet = false;
+          detailMsg = `BLOCKED [Breakout]: Approaching dense Overhead HVN Wall at $${nearResistance!.toFixed(1)} without volume (${relVolume.toFixed(2)}x < ${minWallVol.toFixed(2)}x)`;
+        } else {
+          isMet = true;
+          detailMsg = `PASSED [Breakout]: Headroom clear to next target ($${(nearResistance || currentPrice + 2 * atrVal).toFixed(1)})`;
+        }
+      } else if (isPullbackOrRetest) {
+        if (hasSupportFloor) {
+          isMet = true;
+          detailMsg = `PASSED [Pullback Retest]: Supported by Heavy Horizontal Floor at $${nearSupport!.toFixed(1)}`;
+        } else if (nearResistance && (nearResistance - currentPrice) < 0.20 * atrVal) {
+          isMet = false;
+          detailMsg = `BLOCKED [Pullback]: Entry cramped directly under Overhead Resistance Wall at $${nearResistance.toFixed(1)}`;
+        } else {
+          isMet = true;
+          detailMsg = `PASSED [Pullback]: Sufficient runway ($${barrierDistance.toFixed(1)}) above structural base`;
+        }
+      } else if (isSMCConcept) {
+        if (stVABreakdown && currentPrice > stProfile.val - 0.5 * atrVal) {
+          isMet = true;
+          detailMsg = `PASSED [SMC Sweep]: Liquidity sweep outside Value Area Low ($${stProfile.val.toFixed(1)}) targeting POC ($${stProfile.poc.toFixed(1)})`;
+        } else if (hasOverheadBlocker) {
+          isMet = false;
+          detailMsg = `BLOCKED [SMC]: Entry into unmitigated overhead supply block at $${nearResistance!.toFixed(1)}`;
+        } else {
+          isMet = true;
+          detailMsg = `PASSED [SMC]: Balanced volume profile structure targeting Session POC ($${mtProfile.poc.toFixed(1)})`;
+        }
+      } else if (isRangeReversal) {
+        if (currentPrice <= mtProfile.val + 0.3 * atrVal) {
+          isMet = true;
+          detailMsg = `PASSED [Range Reversal]: Bouncing from Value Area Low ($${mtProfile.val.toFixed(1)}) targeting Session POC ($${mtProfile.poc.toFixed(1)})`;
+        } else if (nearResistance && (nearResistance - currentPrice) < 0.20 * atrVal) {
+          isMet = false;
+          detailMsg = `BLOCKED [Range Reversal]: Overhead resistance ceiling at $${nearResistance.toFixed(1)} limits upside`;
+        } else {
+          isMet = true;
+          detailMsg = `PASSED [Range]: Mean-reverting toward central value nodes`;
+        }
       } else {
-        detailMsg = `PASSED (Neutral range spacing; Near Floor: ${nearSupport ? "$" + nearSupport.toFixed(2) : "None"}, Near Wall: ${nearResistance ? "$" + nearResistance.toFixed(2) : "None"})`;
+        if (hasOverheadBlocker) {
+          isMet = false;
+          detailMsg = `BLOCKED (Overhead Liquidity Wall detected at $${nearResistance!.toFixed(1)} - requires Rel Vol >= ${minWallVol.toFixed(2)})`;
+        } else if (hasSupportFloor) {
+          detailMsg = `PASSED (Bouncing off heavy Horizontal Floor support at $${nearSupport!.toFixed(1)})`;
+        } else if (stVABreakout || mtVABreakout) {
+          detailMsg = `PASSED (Explosive Value Area High breakout: stVAH $${stProfile.vah.toFixed(1)}, mtVAH $${mtProfile.vah.toFixed(1)})`;
+        } else {
+          detailMsg = `PASSED (Neutral range spacing; Near Floor: ${nearSupport ? "$" + nearSupport.toFixed(1) : "None"}, Near Wall: ${nearResistance ? "$" + nearResistance.toFixed(1) : "None"})`;
+        }
       }
     } else {
+      nearestBarrierPrice = nearSupport;
+      const barrierDistance = nearestBarrierPrice ? (currentPrice - nearestBarrierPrice) : (2.5 * atrVal);
+      headroomRatio = Number((barrierDistance / Math.max(1, 0.8 * atrVal)).toFixed(2));
+
       if (nearResistance && (nearResistance - currentPrice) <= proximityTolerance) {
         hasSupportFloor = true;
       }
@@ -7196,32 +7271,77 @@ class TradingEngine {
         }
       }
 
-      const stVABreakdown = currentPrice < stProfile.val;
-      const mtVABreakdown = currentPrice < mtProfile.val;
-
-      if (hasOverheadBlocker) {
-        isMet = false;
-        detailMsg = `BLOCKED (Underhead Liquidity Support Floor detected at $${nearSupport!.toFixed(2)} - requires Rel Vol >= ${minWallVol.toFixed(2)})`;
-      } else if (hasSupportFloor) {
-        detailMsg = `PASSED (Retesting heavy dynamic resistance ceiling at $${nearResistance!.toFixed(2)})`;
-      } else if (stVABreakdown || mtVABreakdown) {
-        detailMsg = `PASSED (Explosive Value Area Low breakdown: stVAL $${stProfile.val.toFixed(2)}, mtVAL $${mtProfile.val.toFixed(2)})`;
+      if (isBreakoutOrSqueeze) {
+        if (stVABreakdown || mtVABreakdown || isInsideLvnPocket) {
+          isMet = true;
+          detailMsg = `PASSED [Breakdown/Squeeze]: Expanding through Low-Volume Runway / Below Session VAL ($${mtProfile.val.toFixed(1)})`;
+        } else if (hasOverheadBlocker) {
+          isMet = false;
+          detailMsg = `BLOCKED [Breakdown]: Approaching dense Underhead Support Floor at $${nearSupport!.toFixed(1)} without volume (${relVolume.toFixed(2)}x < ${minWallVol.toFixed(2)}x)`;
+        } else {
+          isMet = true;
+          detailMsg = `PASSED [Breakdown]: Downside runway clear to next target ($${(nearSupport || currentPrice - 2 * atrVal).toFixed(1)})`;
+        }
+      } else if (isPullbackOrRetest) {
+        if (hasSupportFloor) {
+          isMet = true;
+          detailMsg = `PASSED [Pullback Retest]: Protected by Heavy Horizontal Ceiling at $${nearResistance!.toFixed(1)}`;
+        } else if (nearSupport && (currentPrice - nearSupport) < 0.20 * atrVal) {
+          isMet = false;
+          detailMsg = `BLOCKED [Pullback]: Entry cramped directly above Underhead Support Floor at $${nearSupport.toFixed(1)}`;
+        } else {
+          isMet = true;
+          detailMsg = `PASSED [Pullback]: Sufficient downside runway ($${barrierDistance.toFixed(1)})`;
+        }
+      } else if (isSMCConcept) {
+        if (stVABreakout && currentPrice < stProfile.vah + 0.5 * atrVal) {
+          isMet = true;
+          detailMsg = `PASSED [SMC Sweep]: Liquidity sweep outside Value Area High ($${stProfile.vah.toFixed(1)}) targeting POC ($${stProfile.poc.toFixed(1)})`;
+        } else if (hasOverheadBlocker) {
+          isMet = false;
+          detailMsg = `BLOCKED [SMC]: Entry into unmitigated demand floor at $${nearSupport!.toFixed(1)}`;
+        } else {
+          isMet = true;
+          detailMsg = `PASSED [SMC]: Balanced volume profile structure targeting Session POC ($${mtProfile.poc.toFixed(1)})`;
+        }
+      } else if (isRangeReversal) {
+        if (currentPrice >= mtProfile.vah - 0.3 * atrVal) {
+          isMet = true;
+          detailMsg = `PASSED [Range Reversal]: Rejecting off Value Area High ($${mtProfile.vah.toFixed(1)}) targeting Session POC ($${mtProfile.poc.toFixed(1)})`;
+        } else if (nearSupport && (currentPrice - nearSupport) < 0.20 * atrVal) {
+          isMet = false;
+          detailMsg = `BLOCKED [Range Reversal]: Underhead support floor at $${nearSupport.toFixed(1)} limits downside`;
+        } else {
+          isMet = true;
+          detailMsg = `PASSED [Range]: Mean-reverting toward central value nodes`;
+        }
       } else {
-        detailMsg = `PASSED (Neutral range spacing; Near Floor: ${nearSupport ? "$" + nearSupport.toFixed(2) : "None"}, Near Wall: ${nearResistance ? "$" + nearResistance.toFixed(2) : "None"})`;
+        if (hasOverheadBlocker) {
+          isMet = false;
+          detailMsg = `BLOCKED (Underhead Liquidity Support Floor detected at $${nearSupport!.toFixed(1)} - requires Rel Vol >= ${minWallVol.toFixed(2)})`;
+        } else if (hasSupportFloor) {
+          detailMsg = `PASSED (Retesting heavy dynamic resistance ceiling at $${nearResistance!.toFixed(1)})`;
+        } else if (stVABreakdown || mtVABreakdown) {
+          detailMsg = `PASSED (Explosive Value Area Low breakdown: stVAL $${stProfile.val.toFixed(1)}, mtVAL $${mtProfile.val.toFixed(1)})`;
+        } else {
+          detailMsg = `PASSED (Neutral range spacing; Near Floor: ${nearSupport ? "$" + nearSupport.toFixed(1) : "None"}, Near Wall: ${nearResistance ? "$" + nearResistance.toFixed(1) : "None"})`;
+        }
       }
     }
 
-    const valueStr = `ST_POC: $${stProfile.poc.toFixed(1)} | MT_POC: $${mtProfile.poc.toFixed(1)} | HT_POC: $${htProfile.poc.toFixed(1)} | ${detailMsg}`;
-    const reqStr = `Price must not enter trades directly into heavy POC/HVN boundaries without high breakout volume (Rel Volume >= 1.4)`;
+    const valueStr = `ST_POC: $${stProfile.poc.toFixed(1)} (VA: $${stProfile.val.toFixed(0)}-$${stProfile.vah.toFixed(0)}) | MT_POC: $${mtProfile.poc.toFixed(1)} | HT_POC: $${htProfile.poc.toFixed(1)} | ${detailMsg}`;
+    const reqStr = `Price must not enter trades directly into heavy POC/HVN boundaries without high breakout volume (Rel Volume >= 1.25)`;
 
     return {
       met: isMet,
       val: valueStr,
       req: reqStr,
-      description: "Applies institutional-grade Multi-Timeframe Volume Profiling. Identifies Horizontal Liquidity Pools (POC, VAH, VAL, and High/Low Volume Nodes). Confirms entries bouncing off historical horizontal support/resistance floors and prevents trading into heavy overhead/underhead order walls.",
+      description: "Applies Context-Aware Multi-Timeframe Volume Profiling across 30m, 120m, and 300m horizons. Evaluates Low-Volume Node (LVN) acceleration pockets for breakouts, High-Volume Node (HVN) floors for pullbacks, and Value Area edges (VAH/VAL) for mean-reversion and SMC liquidity sweeps.",
       stProfile,
       mtProfile,
-      htProfile
+      htProfile,
+      nearestBarrierPrice,
+      headroomRatio,
     };
   }
 
@@ -8232,7 +8352,7 @@ class TradingEngine {
     });
 
     // C21: Multi-Timeframe Volume Profiling (Horizontal Liquidity)
-    const vpResult = this.evaluateMultiTimeframeVolumeProfile(signalDirection, currentClose, currentAtr, relVolume);
+    const vpResult = this.evaluateMultiTimeframeVolumeProfile(signalDirection, currentClose, currentAtr, relVolume, structCheck, this.currentRegime);
     conditions.push({
       name: "Multi-Timeframe Volume Profiling (Horizontal Liquidity)",
       met: vpResult.met,
@@ -8649,10 +8769,6 @@ class TradingEngine {
     const positionQtyBtc = Number((baseQty * sizeMultiplier).toFixed(5));
     const leverage = config.risk_management.leverage || 20;
 
-    // Respect the ATR-based stop loss distance directly as configured by the user, bounded only by the minimum floor.
-    const stopLossPrice = execDirection === "LONG" ? currentPrice - stopLossDistance : currentPrice + stopLossDistance;
-    const actualSLDistance = Math.abs(currentPrice - stopLossPrice);
-
     // Fix 1: Scalp Take-Profit Calibration (1.2x - 1.5x ATR Horizon)
     // Directly targets the natural 1-minute single-impulse horizon to secure high win-rate profits before counter-trend pullbacks
     const tpAtrMult = config.risk_management.take_profit_atr_multiplier !== undefined
@@ -8660,16 +8776,46 @@ class TradingEngine {
       : 1.35;
     const isAtrScalpMode = config.risk_management.take_profit_mode !== "RR_RATIO";
     const takeProfitDistance = isAtrScalpMode
-      ? Math.max(lastAtr * tpAtrMult, actualSLDistance * 0.8)
-      : actualSLDistance * config.risk_management.take_profit_ratio;
-    const takeProfitPrice = execDirection === "LONG" ? currentPrice + takeProfitDistance : currentPrice - takeProfitDistance;
+      ? Math.max(lastAtr * tpAtrMult, stopLossDistance * 0.8)
+      : stopLossDistance * config.risk_management.take_profit_ratio;
+
+    // --- CONTEXT-AWARE VOLUME PROFILE SL / TP TARGETING ---
+    // Align TP with next opposing High-Volume Node (POC/HVN) and SL behind local supporting Volume Node
+    let vpTargetTpDistance = takeProfitDistance;
+    let vpTargetSlDistance = stopLossDistance;
+
+    const vpCheck = this.evaluateMultiTimeframeVolumeProfile(
+      execDirection,
+      currentPrice,
+      lastAtr,
+      this.calculateAccurateRelativeVolume(),
+      { confirmed: true, message: `Setup execution: ${execDirection}` },
+      this.currentRegime
+    );
+
+    if (vpCheck.nearestBarrierPrice) {
+      const distToBarrier = Math.abs(vpCheck.nearestBarrierPrice - currentPrice);
+      // If opposing HVN barrier provides reasonable scalp room (between 0.9x ATR and 3.0x ATR), anchor TP right before the liquidity node
+      if (distToBarrier >= 0.9 * lastAtr && distToBarrier <= 3.0 * lastAtr) {
+        vpTargetTpDistance = distToBarrier;
+      }
+    }
+
+    const finalTpDistance = vpTargetTpDistance;
+    const finalSlDistance = vpTargetSlDistance;
+
+    const stopLossPrice = execDirection === "LONG" ? currentPrice - finalSlDistance : currentPrice + finalSlDistance;
+    const actualSLDistance = Math.abs(currentPrice - stopLossPrice);
+
+    const takeProfitPrice = execDirection === "LONG" ? currentPrice + finalTpDistance : currentPrice - finalTpDistance;
+    const actualTPDistance = Math.abs(currentPrice - takeProfitPrice);
 
     this.log(
       `Computed Execution Parameters (${execDirection}${isInverted ? " - INVERTED" : ""}): Entry=$${currentPrice.toFixed(2)}, StopLoss=$${stopLossPrice.toFixed(2)} (Dist: $${actualSLDistance.toFixed(
         2
-      )}), TakeProfit=$${takeProfitPrice.toFixed(2)} (Dist: $${takeProfitDistance.toFixed(
+      )}), TakeProfit=$${takeProfitPrice.toFixed(2)} (Dist: $${actualTPDistance.toFixed(
         2
-      )} [Mode: ${isAtrScalpMode ? `${tpAtrMult}x ATR Scalp` : `${config.risk_management.take_profit_ratio}x R:R`}]), Qty=${positionQtyBtc} BTC, Leverage=${leverage}x`
+      )} [Mode: ${isAtrScalpMode ? `${tpAtrMult}x ATR Scalp` : `${config.risk_management.take_profit_ratio}x R:R`} | VP Anchor: ${vpCheck.nearestBarrierPrice ? `$${vpCheck.nearestBarrierPrice.toFixed(0)}` : "Standard"}]), Qty=${positionQtyBtc} BTC, Leverage=${leverage}x`
     );
 
     // Create the Trade record

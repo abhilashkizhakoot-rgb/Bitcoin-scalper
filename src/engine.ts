@@ -799,20 +799,7 @@ class TradingEngine {
       const bb = this.calculateBollingerBands(closes, 20, 2);
       const struct = this.getTrendMarketStructure();
 
-      let relVolume = 1.0;
-      if (hasEnough && volumes.length >= 20) {
-        const lastIdx = closes.length - 1;
-        const currentVolume = volumes[lastIdx];
-        const startIdx = Math.max(0, lastIdx - 20);
-        const prevVolumes = volumes.slice(startIdx, lastIdx);
-        if (prevVolumes.length > 0) {
-          const sumPrevVolumes = prevVolumes.reduce((a, b) => a + b, 0);
-          const avgPrevVolume = sumPrevVolumes / prevVolumes.length;
-          relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
-        }
-      } else if (hasEnough) {
-        relVolume = 1.35;
-      }
+      const relVolume = this.calculateAccurateRelativeVolume();
 
       const logEntry =
         `[TRADE ENTRY] ${timestamp}\n` +
@@ -1186,19 +1173,7 @@ class TradingEngine {
     const adxValue = hasEnoughData ? adx14[lastIdx] : 25;
 
     const volumes = this.candles1m.map((c) => c.volume);
-    let relVolume = 1.0;
-    if (hasEnoughData && volumes.length >= 20) {
-      const currentVolume = volumes[lastIdx];
-      const startIdx = Math.max(0, lastIdx - 20);
-      const prevVolumes = volumes.slice(startIdx, lastIdx);
-      if (prevVolumes.length > 0) {
-        const sumPrevVolumes = prevVolumes.reduce((a, b) => a + b, 0);
-        const avgPrevVolume = sumPrevVolumes / prevVolumes.length;
-        relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
-      }
-    } else if (hasEnoughData) {
-      relVolume = 1.35;
-    }
+    const relVolume = this.calculateAccurateRelativeVolume();
 
     const isBullTrend1m = hasEnoughData ? ema21[lastIdx] > ema50[lastIdx] : true;
     const isBearTrend1m = hasEnoughData ? ema21[lastIdx] < ema50[lastIdx] : false;
@@ -1625,24 +1600,24 @@ class TradingEngine {
       softened: isTrendSoftened,
     });
 
-    // C5: Relative Volume Confirmation
-    const standardRelVolThreshold = relVolThreshold;
-    const softenedRelVolThreshold = standardRelVolThreshold * (1 - softeningPercent / 100);
-    const requiredRelVol = hasExtremeRealtimePressure 
-      ? softenedRelVolThreshold 
-      : standardRelVolThreshold;
-    const isRelVolumeSoftened = hasExtremeRealtimePressure && relVolume >= softenedRelVolThreshold && relVolume < standardRelVolThreshold;
+    // C5: Context-Aware Relative Volume (RVOL) Confirmation Matrix
+    const earlyStructCheck = this.evaluateMarketStructureConfirmation(signalDirection, probabilityLong);
+    const contextVolResult = this.evaluateContextAwareVolume(
+      signalDirection,
+      relVolume,
+      hasExtremeRealtimePressure,
+      this.currentRegime,
+      earlyStructCheck
+    );
 
     conditions.push({
       name: "Relative Volume Confirmation",
-      met: relVolume >= requiredRelVol,
-      current_value: `${relVolume.toFixed(2)}x` + (hasExtremeRealtimePressure ? " (SOFTENED VIA LEADING ORDER FLOW)" : ""),
-      required: `> ${requiredRelVol.toFixed(2)}x above 20-period MA`,
-      description: hasExtremeRealtimePressure
-        ? "Validates supporting transaction volume. (Threshold softened under extreme leading order flow pressure)."
-        : "Validates that trade has supporting transaction volume to avoid false breakups.",
+      met: contextVolResult.met,
+      current_value: contextVolResult.currentValue,
+      required: contextVolResult.requiredStr,
+      description: contextVolResult.description,
       priority: "MEDIUM",
-      softened: isRelVolumeSoftened,
+      softened: contextVolResult.softened,
     });
 
     // Consolidated Pre-Flight Account & Operational Safety Gate (Capital Balance, API Status, Daily Trade Limit, Loss Cooldown)
@@ -2193,7 +2168,7 @@ class TradingEngine {
       if ((regimeValid && regimeAligned) || !this.isGateActive(config, "Market Regime Filter")) entryScore += 20;
       if (trendAligned || !this.isGateActive(config, "Exponential Trend Alignment")) entryScore += 15;
       if (adxMet || !this.isGateActive(config, "ADX Trend Strength Filter")) entryScore += 15;
-      if (relVolume > requiredRelVol || !this.isGateActive(config, "Relative Volume Confirmation")) entryScore += 10;
+      if (contextVolResult.met || !this.isGateActive(config, "Relative Volume Confirmation")) entryScore += 10;
       allConditionsMet = conditions.every((c) => c.met);
       failedConditions = conditions.filter((c) => !c.met).map((c) => c.name);
     }
@@ -2996,6 +2971,47 @@ class TradingEngine {
 
     this.indicatorCache.adx.set(key, adx);
     return adx;
+  }
+
+  public calculateAccurateRelativeVolume(candles: Candlestick[] = this.candles1m): number {
+    if (!candles || candles.length < 2) return 1.0;
+    const lastIdx = candles.length - 1;
+    const currentCandle = candles[lastIdx];
+    const volumes = candles.map((c) => c.volume || 0);
+
+    // Lookback 20 completed periods before the current candle
+    const endPrevIdx = lastIdx;
+    const startPrevIdx = Math.max(0, endPrevIdx - 20);
+    const prevVolumes = volumes.slice(startPrevIdx, endPrevIdx);
+
+    if (prevVolumes.length === 0) return 1.0;
+    const sumPrevVolumes = prevVolumes.reduce((a, b) => a + b, 0);
+    const avgPrevVolume = sumPrevVolumes / prevVolumes.length;
+    if (avgPrevVolume <= 0) return 1.0;
+
+    // 1. Last completed closed candle relative volume
+    const lastClosedVol = volumes[lastIdx - 1] !== undefined ? volumes[lastIdx - 1] : volumes[lastIdx];
+    const lastClosedRelVol = lastClosedVol / avgPrevVolume;
+
+    // 2. Current in-progress candle normalized/projected relative volume based on elapsed seconds
+    const nowSecs = Math.floor(Date.now() / 1000);
+    const candleStartSecs = currentCandle.time || nowSecs;
+    const elapsedSeconds = Math.max(3, Math.min(60, nowSecs - candleStartSecs));
+    
+    // Extrapolate in-progress volume proportionally to full 60s minute
+    const paceMultiplier = 60 / elapsedSeconds;
+    const projectedCurrentVol = (currentCandle.volume || 0) * paceMultiplier;
+    const projectedRelVol = projectedCurrentVol / avgPrevVolume;
+
+    // 3. Raw current volume vs average
+    const rawCurrentRelVol = (currentCandle.volume || 0) / avgPrevVolume;
+
+    // The accurate relative volume represents the true volume pace:
+    // Take the maximum of the last closed candle's completed RVOL, the projected pacing RVOL, and the raw RVOL
+    const pacingRelVol = Math.min(4.0, Math.max(projectedRelVol, rawCurrentRelVol));
+    const effectiveRelVolume = Math.max(lastClosedRelVol, pacingRelVol);
+
+    return Number(Math.max(0.1, effectiveRelVolume).toFixed(2));
   }
 
   // Calculates the 14-period Choppiness Index (CHOP)
@@ -5292,8 +5308,10 @@ class TradingEngine {
       }
 
       // 2. Volume Expansion: Require strong volume for range breakouts
-      if (relVolume < 1.4) {
-        return { isValid: false, reason: `Insufficient relative volume (${relVolume.toFixed(2)}x < 1.4x).` };
+      const config = dbManager.getConfig();
+      const minBreakoutVol = config.general.relative_volume_threshold ? Math.min(config.general.relative_volume_threshold, 1.25) : 1.25;
+      if (relVolume < minBreakoutVol) {
+        return { isValid: false, reason: `Insufficient relative volume (${relVolume.toFixed(2)}x < ${minBreakoutVol.toFixed(2)}x).` };
       }
 
       // 3. Candle Body Ratio: At least 45% of the candle range should be body
@@ -5321,8 +5339,10 @@ class TradingEngine {
       }
 
       // 2. Volume Expansion
-      if (relVolume < 1.4) {
-        return { isValid: false, reason: `Insufficient relative volume (${relVolume.toFixed(2)}x < 1.4x).` };
+      const config = dbManager.getConfig();
+      const minBreakoutVol = config.general.relative_volume_threshold ? Math.min(config.general.relative_volume_threshold, 1.25) : 1.25;
+      if (relVolume < minBreakoutVol) {
+        return { isValid: false, reason: `Insufficient relative volume (${relVolume.toFixed(2)}x < ${minBreakoutVol.toFixed(2)}x).` };
       }
 
       // 3. Candle Body Ratio
@@ -5824,6 +5844,84 @@ class TradingEngine {
         : `Normal Volatility (BB Width: $${bbWidth.toFixed(2)} > Keltner: $${keltnerWidth.toFixed(2)})`;
 
     return { isSqueezed, squeezeFired, squeezeFiredDirection, bbWidth, keltnerWidth, description: desc };
+  }
+
+  public evaluateContextAwareVolume(
+    direction: "LONG" | "SHORT" | "NEUTRAL",
+    relVolume: number,
+    hasExtremeRealtimePressure: boolean,
+    regime: MarketRegime,
+    structCheck: { confirmed: boolean; setupType?: string; message?: string }
+  ): {
+    met: boolean;
+    currentValue: string;
+    requiredStr: string;
+    description: string;
+    softened: boolean;
+    setupCategory: string;
+  } {
+    const config = dbManager.getConfig();
+    const baseMinRelVol = config.general.relative_volume_threshold !== undefined ? config.general.relative_volume_threshold : 1.30;
+    const softeningPercent = config.general.orderflow_softening_percent !== undefined ? config.general.orderflow_softening_percent : 10;
+    
+    // Determine active setup category from structCheck message or setupType
+    const msg = (structCheck?.message || "").toLowerCase();
+    const isBreakout = msg.includes("breakout") || msg.includes("super strong") || msg.includes("immediate breakout");
+    const isPullbackRetest = msg.includes("pullback") || msg.includes("retest") || msg.includes("mitigation");
+    const isEmaRetrace = msg.includes("ema") || msg.includes("pushback") || msg.includes("bounce");
+    const isLiquiditySweep = msg.includes("liquidity sweep") || msg.includes("setup 3");
+    const isFvg = msg.includes("fair value gap") || msg.includes("fvg") || msg.includes("setup 4");
+    const isOrderBlock = msg.includes("order block") || msg.includes("setup 5");
+    const isSqueeze = msg.includes("squeeze") || msg.includes("setup 6");
+    const isRangeReversal = regime === MarketRegime.RANGE_BOUND || msg.includes("range reversal") || msg.includes("ranging bullish") || msg.includes("ranging bearish");
+
+    let setupCategory = "General Momentum";
+    let targetRelVol = baseMinRelVol; // default e.g. 1.30x
+    let categoryDescription = "Standard momentum entry: requires clear transaction volume expansion above 20-period moving average.";
+
+    if (isSqueeze || (isBreakout && !isPullbackRetest)) {
+      // High-Velocity Breakouts require real breakout volume expansion
+      setupCategory = "Momentum Breakout / Squeeze Expansion";
+      targetRelVol = Math.max(1.25, baseMinRelVol);
+      categoryDescription = "Momentum Breakout: Demands high institutional expansion volume (>= 1.25x - 1.30x) to confirm genuine range expansion without false breakouts.";
+    } else if (isPullbackRetest || isEmaRetrace) {
+      // Pullbacks & Retests thrive on volume dry-up during retracement, only requiring healthy normal volume on the bounce
+      setupCategory = "Trend Retracement / Pullback Retest";
+      targetRelVol = Math.min(baseMinRelVol * 0.80, 1.05); // e.g. 1.04x
+      categoryDescription = "Pullback & Retest: Healthy trend retracements feature volume dry-up into support/resistance and steady retest volume (>= 1.05x).";
+    } else if (isLiquiditySweep || isFvg || isOrderBlock) {
+      // Smart Money (SMC) Setups: Order Flow / Institutional Wick Mitigations
+      setupCategory = "Institutional SMC (Sweep / FVG / Order Block)";
+      targetRelVol = Math.min(baseMinRelVol * 0.85, 1.10); // e.g. 1.10x
+      categoryDescription = "Smart Money Setup: Institutional mitigations and sweep reversals operate on targeted delta absorption, requiring baseline liquidity confirmation (>= 1.10x).";
+    } else if (isRangeReversal) {
+      // Range Mean Reversion
+      setupCategory = "Range Boundary Reversal";
+      targetRelVol = Math.min(baseMinRelVol * 0.90, 1.15); // e.g. 1.15x
+      categoryDescription = "Range Boundary Reversal: Mean-reversion off established range extremes requires rejection volume (>= 1.15x).";
+    }
+
+    // Dynamic softening under extreme real-time order flow pressure (strong CVD / book imbalance)
+    const softenedThreshold = targetRelVol * (1 - softeningPercent / 100);
+    const requiredRelVol = hasExtremeRealtimePressure ? softenedThreshold : targetRelVol;
+    const isSoftened = hasExtremeRealtimePressure && relVolume >= softenedThreshold && relVolume < targetRelVol;
+    const isMet = relVolume >= requiredRelVol;
+
+    let currentValueStr = `${relVolume.toFixed(2)}x [${setupCategory}]`;
+    if (isSoftened) {
+      currentValueStr += " (SOFTENED VIA LEADING ORDER FLOW)";
+    }
+
+    const requiredStr = `> ${requiredRelVol.toFixed(2)}x (${setupCategory})`;
+
+    return {
+      met: isMet,
+      currentValue: currentValueStr,
+      requiredStr,
+      description: `Context-Aware Volume Matrix [${setupCategory}]: ${categoryDescription}`,
+      softened: isSoftened,
+      setupCategory,
+    };
   }
 
   private isMultiCandleLongRejection(lastIdx: number, currentAtr: number): { confirmed: boolean; type: string } {
@@ -6471,18 +6569,7 @@ class TradingEngine {
       const isRangeShortReversal = revSignals.isShortReversal;
 
       // Compute relative volume to check breakout strength
-      const volumes = this.candles1m.map((c) => c.volume);
-      let relVolume = 1.0;
-      if (volumes.length >= 20) {
-        const currentVolume = volumes[lastIdx];
-        const startIdx = Math.max(0, lastIdx - 20);
-        const prevVolumes = volumes.slice(startIdx, lastIdx);
-        if (prevVolumes.length > 0) {
-          const sumPrevVolumes = prevVolumes.reduce((a, b) => a + b, 0);
-          const avgPrevVolume = sumPrevVolumes / prevVolumes.length;
-          relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
-        }
-      }
+      const relVolume = this.calculateAccurateRelativeVolume();
 
       const breakoutValidationLong = this.validateRangeBreakout("LONG", currentCandle, relVolume, recentCandlesForRange);
       const breakoutValidationShort = this.validateRangeBreakout("SHORT", currentCandle, relVolume, recentCandlesForRange);
@@ -7071,13 +7158,16 @@ class TradingEngine {
     let detailMsg = "";
     let isMet = true;
 
+    const config = dbManager.getConfig();
+    const minWallVol = config.general.relative_volume_threshold ? Math.min(config.general.relative_volume_threshold, 1.25) : 1.25;
+
     if (direction === "LONG") {
       if (nearSupport && (currentPrice - nearSupport) <= proximityTolerance) {
         hasSupportFloor = true;
       }
 
       if (nearResistance && (nearResistance - currentPrice) <= proximityTolerance) {
-        if (relVolume < 1.4) {
+        if (relVolume < minWallVol) {
           hasOverheadBlocker = true;
         }
       }
@@ -7087,7 +7177,7 @@ class TradingEngine {
 
       if (hasOverheadBlocker) {
         isMet = false;
-        detailMsg = `BLOCKED (Overhead Liquidity Wall detected at $${nearResistance!.toFixed(2)} - requires Rel Vol >= 1.40)`;
+        detailMsg = `BLOCKED (Overhead Liquidity Wall detected at $${nearResistance!.toFixed(2)} - requires Rel Vol >= ${minWallVol.toFixed(2)})`;
       } else if (hasSupportFloor) {
         detailMsg = `PASSED (Bouncing off heavy Horizontal Floor support at $${nearSupport!.toFixed(2)})`;
       } else if (stVABreakout || mtVABreakout) {
@@ -7101,7 +7191,7 @@ class TradingEngine {
       }
 
       if (nearSupport && (currentPrice - nearSupport) <= proximityTolerance) {
-        if (relVolume < 1.4) {
+        if (relVolume < minWallVol) {
           hasOverheadBlocker = true;
         }
       }
@@ -7111,7 +7201,7 @@ class TradingEngine {
 
       if (hasOverheadBlocker) {
         isMet = false;
-        detailMsg = `BLOCKED (Underhead Liquidity Support Floor detected at $${nearSupport!.toFixed(2)} - requires Rel Vol >= 1.40)`;
+        detailMsg = `BLOCKED (Underhead Liquidity Support Floor detected at $${nearSupport!.toFixed(2)} - requires Rel Vol >= ${minWallVol.toFixed(2)})`;
       } else if (hasSupportFloor) {
         detailMsg = `PASSED (Retesting heavy dynamic resistance ceiling at $${nearResistance!.toFixed(2)})`;
       } else if (stVABreakdown || mtVABreakdown) {
@@ -7472,19 +7562,7 @@ class TradingEngine {
     let adxValue = adx14[lastIdx] || 25;
 
     const volumes = this.candles1m.map((c) => c.volume);
-    let relVolume = 1.0;
-    if (volumes.length >= 20) {
-      const currentVolume = volumes[lastIdx];
-      const startIdx = Math.max(0, lastIdx - 20);
-      const prevVolumes = volumes.slice(startIdx, lastIdx);
-      if (prevVolumes.length > 0) {
-        const sumPrevVolumes = prevVolumes.reduce((a, b) => a + b, 0);
-        const avgPrevVolume = sumPrevVolumes / prevVolumes.length;
-        relVolume = avgPrevVolume > 0 ? currentVolume / avgPrevVolume : 1.0;
-      }
-    } else {
-      relVolume = 1.35;
-    }
+    const relVolume = this.calculateAccurateRelativeVolume();
 
     const isBullTrend1m = ema21[lastIdx] > ema50[lastIdx];
     const isBearTrend1m = ema21[lastIdx] < ema50[lastIdx];
@@ -7807,20 +7885,22 @@ class TradingEngine {
       softened: isTrendSoftened,
     });
 
-    // C5: Relative Volume Confirmation
-    const standardRelVolThreshold = relVolThreshold;
-    const softenedRelVolThreshold = standardRelVolThreshold * (1 - softeningPercent / 100);
-    const requiredRelVol = hasExtremeRealtimePressure 
-      ? softenedRelVolThreshold 
-      : standardRelVolThreshold;
-    const isRelVolumeSoftened = hasExtremeRealtimePressure && relVolume >= softenedRelVolThreshold && relVolume < standardRelVolThreshold;
+    // C5: Context-Aware Relative Volume Confirmation Matrix
+    const earlyStructCheckSecond = this.evaluateMarketStructureConfirmation(signalDirection, probabilityLong);
+    const contextVolResultSecond = this.evaluateContextAwareVolume(
+      signalDirection,
+      relVolume,
+      hasExtremeRealtimePressure,
+      this.currentRegime,
+      earlyStructCheckSecond
+    );
 
     conditions.push({
       name: "Relative Volume Confirmation",
-      met: relVolume >= requiredRelVol,
-      current_value: `${relVolume.toFixed(2)}x` + (hasExtremeRealtimePressure ? " (SOFTENED VIA LEADING ORDER FLOW)" : ""),
-      required: `> ${requiredRelVol.toFixed(2)}x above 20-period MA`,
-      softened: isRelVolumeSoftened,
+      met: contextVolResultSecond.met,
+      current_value: contextVolResultSecond.currentValue,
+      required: contextVolResultSecond.requiredStr,
+      softened: contextVolResultSecond.softened,
     });
 
     // C7: Daily Circuit Breaker
@@ -8294,7 +8374,7 @@ class TradingEngine {
         if ((regimeValid && regimeAligned) || !this.isGateActive(config, "Market Regime Filter")) entryScore += 20;
         if (trendAligned || !this.isGateActive(config, "Exponential Trend Alignment")) entryScore += 15;
         if (adxMet || !this.isGateActive(config, "ADX Trend Strength Filter")) entryScore += 15;
-        if (relVolume > requiredRelVol || !this.isGateActive(config, "Relative Volume Confirmation")) entryScore += 10;
+        if (contextVolResultSecond.met || !this.isGateActive(config, "Relative Volume Confirmation")) entryScore += 10;
       }
     }
 

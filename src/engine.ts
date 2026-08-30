@@ -4176,8 +4176,8 @@ class TradingEngine {
       if (breakoutIdx !== -1 && boBodyRatioMet && !isChasing && !isSetup1Invalidated && (hasPulledBackToZone || isShallowConsolidationHolding)) {
         const isRejection = isLongRejectionConfirmed;
         const isContinuation = currentCandle.close > currentCandle.open && (currentCandle.close >= breakoutLevel || isLongRejectionConfirmed);
-        const isEarlyRetestTouchHolding = hasPulledBackToZone && (isLongRejectionConfirmed || isLongCandleStabilized || absorptionResult.isAbsorption);
-        if ((isRejection && isContinuation) || (isShallowConsolidationHolding && isContinuation) || isEarlyRetestTouchHolding) {
+        const isEarlyRetestTouchHolding = hasPulledBackToZone && (isLongRejectionConfirmed || isLongCandleStabilized);
+        if ((isRejection && isContinuation) || (isShallowConsolidationHolding && isContinuation) || (isEarlyRetestTouchHolding && isLongCandleStabilized)) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
             const setupLabel = isShallowConsolidationHolding && !hasPulledBackToZone
@@ -4264,13 +4264,13 @@ class TradingEngine {
         }
       }
 
-      const isEarlyEmaTouchHolding = (touchesFirstEma || touchesSecondEma) && (isLongRejectionConfirmed || isLongCandleStabilized || isFallbackCrossoverBullish || absorptionResult.isAbsorption);
-      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && (isLongRejectionConfirmed || isEarlyEmaTouchHolding) && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
+      const isEarlyEmaTouchHolding = (touchesFirstEma || touchesSecondEma) && (isLongRejectionConfirmed || isLongCandleStabilized || isFallbackCrossoverBullish);
+      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && (isLongRejectionConfirmed || isEarlyEmaTouchHolding) && isLongCandleStabilized && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
       // Ensure Fallback Micro EMA Momentum Bounce requires RECENT retracement and price proximity to the EMA zone
       // (prevents taking late bounce entries when price has already drifted far above the EMA zone without candlestick rejection)
       const maxEmaProximityAtr = (effectiveEmaMult || 0.40) + 0.40;
       const isPriceNearEmaZone = (currentPrice - Math.min(firstEmaVal, secondEmaVal)) <= maxEmaProximityAtr * currentAtr;
-      const isFallbackEmaPushbackValid = isFallbackCrossoverBullish && isPriceNearEmaZone && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
+      const isFallbackEmaPushbackValid = isFallbackCrossoverBullish && isPriceNearEmaZone && isLongCandleStabilized && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
 
       const isEmaPushbackValid = (isRegularEmaPushbackValid || isFallbackEmaPushbackValid) && !isSetup2Invalidated;
       let emaPushbackMessage = "";
@@ -4541,8 +4541,8 @@ class TradingEngine {
       if (breakoutIdx !== -1 && boBodyRatioMet && !isChasing && !isSetup1Invalidated && (hasPulledBackToZone || isShallowConsolidationHolding)) {
         const isRejection = isShortRejectionConfirmed;
         const isContinuation = currentCandle.close < currentCandle.open && (currentCandle.close <= breakoutLevel || isShortRejectionConfirmed);
-        const isEarlyRetestTouchHolding = hasPulledBackToZone && (isShortRejectionConfirmed || isShortCandleStabilized || absorptionResult.isAbsorption);
-        if ((isRejection && isContinuation) || (isShallowConsolidationHolding && isContinuation) || isEarlyRetestTouchHolding) {
+        const isEarlyRetestTouchHolding = hasPulledBackToZone && (isShortRejectionConfirmed || isShortCandleStabilized);
+        if ((isRejection && isContinuation) || (isShallowConsolidationHolding && isContinuation) || (isEarlyRetestTouchHolding && isShortCandleStabilized)) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
             const setupLabel = isShallowConsolidationHolding && !hasPulledBackToZone
@@ -4629,13 +4629,13 @@ class TradingEngine {
         }
       }
 
-      const isEarlyEmaTouchHoldingShort = (touchesFirstEma || touchesSecondEma) && (isShortRejectionConfirmed || isShortCandleStabilized || isFallbackCrossoverBearish || absorptionResult.isAbsorption);
-      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && (isShortRejectionConfirmed || isEarlyEmaTouchHoldingShort) && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
+      const isEarlyEmaTouchHoldingShort = (touchesFirstEma || touchesSecondEma) && (isShortRejectionConfirmed || isShortCandleStabilized || isFallbackCrossoverBearish);
+      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && (isShortRejectionConfirmed || isEarlyEmaTouchHoldingShort) && isShortCandleStabilized && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
       // Ensure Fallback Micro EMA Momentum Bounce requires RECENT retracement and price proximity to the EMA zone
       // (prevents taking late bounce entries when price has already drifted far below the EMA zone without candlestick rejection)
       const maxEmaProximityAtr = (effectiveEmaMult || 0.40) + 0.40;
       const isPriceNearEmaZone = (Math.max(firstEmaVal, secondEmaVal) - currentPrice) <= maxEmaProximityAtr * currentAtr;
-      const isFallbackEmaPushbackValid = isFallbackCrossoverBearish && isPriceNearEmaZone && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
+      const isFallbackEmaPushbackValid = isFallbackCrossoverBearish && isPriceNearEmaZone && isShortCandleStabilized && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
 
       const isEmaPushbackValid = (isRegularEmaPushbackValid || isFallbackEmaPushbackValid) && !isSetup2Invalidated;
       let emaPushbackMessage = "";
@@ -6135,15 +6135,19 @@ class TradingEngine {
       const b0 = c0.close - c0.open;
 
       const healthyBodies = b2 >= 0.2 * currentAtr && b1 >= 0.2 * currentAtr && b0 >= 0.2 * currentAtr;
+      const isCurrentCandleHoldingHighs = currentPrice >= c0.low;
 
-      if (c2Bullish && c1Bullish && c0Bullish && ascendingCloses && healthyBodies) {
+      if (c2Bullish && c1Bullish && c0Bullish && ascendingCloses && healthyBodies && isCurrentCandleHoldingHighs) {
         isThreeWhiteSoldiers = true;
       }
     }
 
     // Institutional Order Flow Absorption and Early Wick Rejection Checks
+    // NOTE: Order flow metrics (CVD / order book imbalance) must NOT bypass candlestick confirmation on falling red candles.
+    // Price must confirm with a green close OR a lower rejection wick >= 35% of the candle range.
+    const isCandleBullishOrWickSupported = confirmCandle.close > confirmCandle.open || (confirmRange > 0 && confirmLowerWick / confirmRange >= 0.35);
     const absorptionLong = this.detectOrderFlowAbsorption("LONG");
-    if (absorptionLong.isAbsorption) {
+    if (absorptionLong.isAbsorption && isCandleBullishOrWickSupported) {
       return { confirmed: true, type: absorptionLong.type };
     }
     const isEarlyWickAbsorption = confirmRange > 0 && (confirmLowerWick / confirmRange >= 0.38) && (confirmCandle.close >= confirmCandle.open - 0.15 * confirmRange);
@@ -6338,15 +6342,19 @@ class TradingEngine {
       const b0 = c0.open - c0.close;
 
       const healthyBodies = b2 >= 0.2 * currentAtr && b1 >= 0.2 * currentAtr && b0 >= 0.2 * currentAtr;
+      const isCurrentCandleHoldingLows = currentPrice <= c0.high;
 
-      if (c2Bearish && c1Bearish && c0Bearish && descendingCloses && healthyBodies) {
+      if (c2Bearish && c1Bearish && c0Bearish && descendingCloses && healthyBodies && isCurrentCandleHoldingLows) {
         isThreeBlackCrows = true;
       }
     }
 
     // Institutional Order Flow Absorption and Early Wick Rejection Checks
+    // NOTE: Order flow metrics (CVD / order book imbalance) must NOT bypass candlestick confirmation on rising green candles.
+    // Price must confirm with a red close OR an upper rejection wick >= 35% of the candle range.
+    const isCandleBearishOrWickSupported = confirmCandle.close < confirmCandle.open || (confirmRange > 0 && confirmUpperWick / confirmRange >= 0.35);
     const absorptionShort = this.detectOrderFlowAbsorption("SHORT");
-    if (absorptionShort.isAbsorption) {
+    if (absorptionShort.isAbsorption && isCandleBearishOrWickSupported) {
       return { confirmed: true, type: absorptionShort.type };
     }
     const isEarlyWickAbsorptionShort = confirmRange > 0 && (confirmUpperWick / confirmRange >= 0.38) && (confirmCandle.close <= confirmCandle.open + 0.15 * confirmRange);

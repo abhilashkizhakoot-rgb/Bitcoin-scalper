@@ -277,6 +277,12 @@ const DEFAULT_CONFIG: StrategyConfig = {
     smc_tp_targeting_enabled: true,
     pinbar_two_candle_confirmation_enabled: true,
     pinbar_min_wick_ratio: 0.50,
+    trendline_breakout_enabled: true,
+    trendline_min_touch_points: 2,
+    trendline_min_volume_ratio: 1.20,
+    trendline_min_rr_ratio: 1.80,
+    trendline_max_slope_deg: 55,
+    trendline_lookback_candles: 45,
   },
   gate_scoring: {
     enabled: true,

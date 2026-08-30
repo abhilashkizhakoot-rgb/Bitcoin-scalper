@@ -3621,6 +3621,102 @@ export default function ConfigPage({
                   <p className="text-[10px] text-slate-400">Minimum proportion of total candle range that must be rejection wick to qualify as a Pin Bar (Standard: 0.50 / 50%).</p>
                 </div>
               </div>
+
+              {/* Grid 5: Trendline Breakout / Breakdown Setup (Setup 7) */}
+              <div className="border-t border-slate-100 pt-4 space-y-4">
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Enable Trendline Breakout Strategy (Setup 7)</span>
+                    <p className="text-[10px] text-slate-400">Detects descending resistance / ascending support trendlines (minimum 2 touches, sustainable 10°-55° slope) and trades decisive candle closes or retest & rejections with minimum R:R ratio.</p>
+                  </div>
+                  <button
+                    id="trendline_breakout_toggle"
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, trendline_breakout_enabled: msConfig.trendline_breakout_enabled === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.trendline_breakout_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.trendline_breakout_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Touch Points</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="2"
+                      max="6"
+                      value={msConfig.trendline_min_touch_points ?? 2}
+                      onChange={(e) => setMsConfig({ ...msConfig, trendline_min_touch_points: parseInputNumber(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Minimum number of distinct pivot swing touches required to validate trendline (Standard: 2).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Breakout Vol Ratio</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="1.0"
+                      max="3.0"
+                      value={msConfig.trendline_min_volume_ratio ?? 1.20}
+                      onChange={(e) => setMsConfig({ ...msConfig, trendline_min_volume_ratio: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Relative transaction volume expansion multiplier required on breakout candle (Standard: 1.20x).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Risk:Reward (R:R)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="1.0"
+                      max="5.0"
+                      value={msConfig.trendline_min_rr_ratio ?? 1.80}
+                      onChange={(e) => setMsConfig({ ...msConfig, trendline_min_rr_ratio: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Minimum reward-to-risk ratio required between trigger, SL, and target TP (Standard: 1.80x).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Max Slope Angle (Deg)</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="20"
+                      max="75"
+                      value={msConfig.trendline_max_slope_deg ?? 55}
+                      onChange={(e) => setMsConfig({ ...msConfig, trendline_max_slope_deg: parseInputNumber(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Maximum sustainable angle in degrees. Filters out vertical/blow-off lines (Standard: 55°).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Trendline Lookback Candles</label>
+                    <input
+                      type="number"
+                      step="5"
+                      min="15"
+                      max="120"
+                      value={msConfig.trendline_lookback_candles ?? 45}
+                      onChange={(e) => setMsConfig({ ...msConfig, trendline_lookback_candles: parseInputNumber(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Candle lookback window for identifying recent swing pivot highs and lows (Standard: 45 candles).</p>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Commit Button */}

@@ -317,6 +317,12 @@ export interface StrategyConfig {
     smc_tp_targeting_enabled?: boolean; // Enable SMC Dynamic Take-Profit targeting opposing liquidity
     pinbar_two_candle_confirmation_enabled?: boolean; // Require 2-candle confirmation for Pin Bars / Rejection Wicks (default: true)
     pinbar_min_wick_ratio?: number; // Minimum wick ratio to qualify as a pin bar (default: 0.50)
+    trendline_breakout_enabled?: boolean; // Enable Trendline Breakout / Breakdown Strategy (Setup 7) (default: true)
+    trendline_min_touch_points?: number; // Minimum distinct pivot touches to form valid trendline (default: 2)
+    trendline_min_volume_ratio?: number; // Minimum relative volume multiplier for breakout validation (default: 1.20)
+    trendline_min_rr_ratio?: number; // Minimum Risk-to-Reward ratio required for trendline breakout trade (default: 1.80)
+    trendline_max_slope_deg?: number; // Maximum sustainable slope angle (degrees) to avoid cliff breakouts (default: 55)
+    trendline_lookback_candles?: number; // Lookback window in 1m candles to scan for pivot trendlines (default: 45)
   };
   gate_scoring?: {
     enabled: boolean;

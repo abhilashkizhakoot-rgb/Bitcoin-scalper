@@ -3752,6 +3752,7 @@ class TradingEngine {
       "Fair Value Gap Retest Setup (Setup 4)": { status: "SKIP", reason: "Not evaluated." },
       "Institutional Order Block Setup (Setup 5)": { status: "SKIP", reason: "Not evaluated." },
       "Volatility Squeeze Setup (Setup 6)": { status: "SKIP", reason: "Not evaluated." },
+      "Trendline Breakout Setup (Setup 7)": { status: "SKIP", reason: "Not evaluated." },
     };
 
     const getReturnObj = (confirmed: boolean, message: string) => {
@@ -3947,6 +3948,30 @@ class TradingEngine {
       }
     } else {
       condDict["Volatility Squeeze Setup (Setup 6)"] = { status: "SKIP", reason: squeezeResult.description };
+    }
+
+    // --- FEATURE 9: Trendline Breakout Setup (Setup 7) Check ---
+    const tlResult = this.evaluateTrendlineBreakoutSetup(direction);
+    if (tlResult.isValid) {
+      if (!isMtfAligned) {
+        condDict["Trendline Breakout Setup (Setup 7)"] = { status: "FAIL", reason: "Blocked by 5m MTF Trend conflict." };
+      } else {
+        const tlDesc = `[Setup 7 - Trendline Breakout Confirmed]: ${tlResult.description}`;
+        condDict["Trendline Breakout Setup (Setup 7)"] = { status: "PASS", reason: tlDesc };
+        condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Valid Trendline Breakout Setup" };
+        condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Trendline level $${tlResult.trendlinePrice.toFixed(2)} broken at trigger $${tlResult.triggerLevel.toFixed(2)}` };
+        condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Trendline expansion candle" };
+        condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: `${tlResult.entryType} execution` };
+        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `SL at $${tlResult.stopLoss.toFixed(2)}` };
+        condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Trendline breakout at inflection" };
+        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Breakout volume valid" };
+
+        return getReturnObj(true, tlDesc);
+      }
+    } else if (tlResult.description && !tlResult.description.includes("No active") && !tlResult.description.includes("disabled")) {
+      condDict["Trendline Breakout Setup (Setup 7)"] = { status: "FAIL", reason: tlResult.description };
+    } else {
+      condDict["Trendline Breakout Setup (Setup 7)"] = { status: "SKIP", reason: tlResult.description || "No active trendline breakout setup" };
     }
 
     // Block standard trend setups if MTF trend alignment fails
@@ -5892,6 +5917,362 @@ class TradingEngine {
     return { isSqueezed, squeezeFired, squeezeFiredDirection, bbWidth, keltnerWidth, description: desc };
   }
 
+  public evaluateTrendlineBreakoutSetup(direction: "LONG" | "SHORT" | "NEUTRAL"): {
+    isValid: boolean;
+    direction: "LONG" | "SHORT" | "NEUTRAL";
+    triggerLevel: number;
+    stopLoss: number;
+    takeProfit: number;
+    rrRatio: number;
+    trendlinePrice: number;
+    touchPoints: number;
+    slopeDeg: number;
+    entryType: "AGGRESSIVE_CLOSE" | "CONSERVATIVE_RETEST";
+    description: string;
+  } {
+    if (direction === "NEUTRAL") {
+      return {
+        isValid: false,
+        direction: "NEUTRAL",
+        triggerLevel: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        rrRatio: 0,
+        trendlinePrice: 0,
+        touchPoints: 0,
+        slopeDeg: 0,
+        entryType: "AGGRESSIVE_CLOSE",
+        description: "Neutral direction",
+      };
+    }
+
+    const config = dbManager.getConfig();
+    const ms: any = config.market_structure || {};
+    if (ms.trendline_breakout_enabled === false) {
+      return {
+        isValid: false,
+        direction,
+        triggerLevel: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        rrRatio: 0,
+        trendlinePrice: 0,
+        touchPoints: 0,
+        slopeDeg: 0,
+        entryType: "AGGRESSIVE_CLOSE",
+        description: "Trendline breakout strategy disabled in config",
+      };
+    }
+
+    const minTouchPoints = ms.trendline_min_touch_points ?? 2;
+    const minVolRatio = ms.trendline_min_volume_ratio ?? 1.20;
+    const minRR = ms.trendline_min_rr_ratio ?? 1.80;
+    const maxSlopeDeg = ms.trendline_max_slope_deg ?? 55;
+    const lookback = ms.trendline_lookback_candles ?? 45;
+
+    const lastIdx = this.candles1m.length - 1;
+    if (lastIdx < 15) {
+      return {
+        isValid: false,
+        direction,
+        triggerLevel: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        rrRatio: 0,
+        trendlinePrice: 0,
+        touchPoints: 0,
+        slopeDeg: 0,
+        entryType: "AGGRESSIVE_CLOSE",
+        description: "Insufficient candle history for trendline breakout",
+      };
+    }
+
+    const currentCandle = this.candles1m[lastIdx];
+    const prevCandle = lastIdx >= 1 ? this.candles1m[lastIdx - 1] : currentCandle;
+    const currentPrice = this.currentPrice;
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentAtr = atr14[lastIdx] || 50;
+    const relVolume = this.calculateAccurateRelativeVolume();
+
+    const startIdx = Math.max(0, lastIdx - lookback);
+
+    if (direction === "LONG") {
+      // Find pivot highs (descending resistance trendline connecting lower highs)
+      const pivotHighs: { idx: number; price: number }[] = [];
+      for (let i = startIdx + 2; i <= lastIdx - 2; i++) {
+        const c = this.candles1m[i];
+        const prev1 = this.candles1m[i - 1];
+        const prev2 = this.candles1m[i - 2];
+        const next1 = this.candles1m[i + 1];
+        const next2 = this.candles1m[i + 2];
+        if (c.high >= prev1.high && c.high >= prev2.high && c.high >= next1.high && c.high >= next2.high) {
+          pivotHighs.push({ idx: i, price: c.high });
+        }
+      }
+
+      let bestSetup: {
+        p1: { idx: number; price: number };
+        p2: { idx: number; price: number };
+        slope: number;
+        angleDeg: number;
+        touchPoints: number;
+        trendlinePrice: number;
+        triggerLevel: number;
+        stopLoss: number;
+        takeProfit: number;
+        rrRatio: number;
+        entryType: "AGGRESSIVE_CLOSE" | "CONSERVATIVE_RETEST";
+      } | null = null;
+
+      for (let i = 0; i < pivotHighs.length; i++) {
+        for (let j = i + 1; j < pivotHighs.length; j++) {
+          const p1 = pivotHighs[i];
+          const p2 = pivotHighs[j];
+
+          // Must be lower high
+          if (p2.price >= p1.price - 0.05 * currentAtr) continue;
+          const barDist = p2.idx - p1.idx;
+          if (barDist < 4) continue;
+
+          const slope = (p2.price - p1.price) / barDist;
+          const normalizedPriceChange = Math.abs(p2.price - p1.price) / Math.max(1, currentAtr);
+          const angleDeg = (Math.atan2(normalizedPriceChange, barDist / 5) * 180) / Math.PI;
+
+          if (angleDeg > maxSlopeDeg || angleDeg < 8) continue;
+
+          let touches = 2;
+          for (let k = 0; k < pivotHighs.length; k++) {
+            if (k === i || k === j) continue;
+            const pk = pivotHighs[k];
+            if (pk.idx > p1.idx && pk.idx < p2.idx) {
+              const expectedPrice = p1.price + slope * (pk.idx - p1.idx);
+              if (Math.abs(pk.price - expectedPrice) <= 0.30 * currentAtr) {
+                touches++;
+              }
+            }
+          }
+          if (touches < minTouchPoints) continue;
+
+          const tlPriceCurrent = p1.price + slope * (lastIdx - p1.idx);
+          const tlPricePrev = p1.price + slope * (lastIdx - 1 - p1.idx);
+
+          // Breakout validation
+          const isPrevBreakout = prevCandle.close > tlPricePrev + 0.05 * currentAtr;
+          const isCurrentRetestHold = isPrevBreakout && currentCandle.low <= tlPriceCurrent + 0.30 * currentAtr && currentCandle.close >= tlPriceCurrent - 0.10 * currentAtr && (currentCandle.close >= currentCandle.open || (currentCandle.high - currentCandle.close) < (currentCandle.close - currentCandle.low));
+
+          const isCurrentDecisiveBreakout = currentCandle.close > tlPriceCurrent && currentCandle.close > currentCandle.open;
+          const currentBody = currentCandle.close - currentCandle.open;
+          const currentRange = currentCandle.high - currentCandle.low;
+          const hasBodyMomentum = currentRange > 0 && ((currentBody / currentRange >= 0.28) || currentBody >= 0.25 * currentAtr);
+
+          if (!isCurrentRetestHold && (!isCurrentDecisiveBreakout || !hasBodyMomentum)) {
+            continue;
+          }
+
+          const hasVolExpansion = relVolume >= minVolRatio * 0.85 || this.orderFlowStats.takerBuyRatio >= 0.56;
+          if (!hasVolExpansion) continue;
+
+          const entryType: "AGGRESSIVE_CLOSE" | "CONSERVATIVE_RETEST" = isCurrentRetestHold ? "CONSERVATIVE_RETEST" : "AGGRESSIVE_CLOSE";
+          const triggerLevel = currentPrice;
+
+          const sliceCandles = this.candles1m.slice(p2.idx, lastIdx + 1);
+          const lowestLowInSlice = sliceCandles.length > 0 ? Math.min(...sliceCandles.map(c => c.low)) : currentPrice - 1.5 * currentAtr;
+          const stopLoss = Math.min(lowestLowInSlice - 0.10 * currentAtr, currentPrice - 0.5 * currentAtr);
+
+          const takeProfit = Math.max(p1.price, currentPrice + 1.8 * (currentPrice - stopLoss));
+          const risk = Math.max(1, triggerLevel - stopLoss);
+          const reward = Math.max(1, takeProfit - triggerLevel);
+          const rrRatio = Number((reward / risk).toFixed(2));
+
+          if (rrRatio < minRR) continue;
+
+          if (!bestSetup || touches > bestSetup.touchPoints || (touches === bestSetup.touchPoints && rrRatio > bestSetup.rrRatio)) {
+            bestSetup = {
+              p1,
+              p2,
+              slope,
+              angleDeg,
+              touchPoints: touches,
+              trendlinePrice: tlPriceCurrent,
+              triggerLevel,
+              stopLoss,
+              takeProfit,
+              rrRatio,
+              entryType,
+            };
+          }
+        }
+      }
+
+      if (bestSetup) {
+        return {
+          isValid: true,
+          direction: "LONG",
+          triggerLevel: bestSetup.triggerLevel,
+          stopLoss: bestSetup.stopLoss,
+          takeProfit: bestSetup.takeProfit,
+          rrRatio: bestSetup.rrRatio,
+          trendlinePrice: bestSetup.trendlinePrice,
+          touchPoints: bestSetup.touchPoints,
+          slopeDeg: Number(bestSetup.angleDeg.toFixed(1)),
+          entryType: bestSetup.entryType,
+          description: `Bullish Trendline Breakout (${bestSetup.entryType === "CONSERVATIVE_RETEST" ? "Retest & Rejection" : "Decisive Candle Close"}): Descending resistance ($${bestSetup.p1.price.toFixed(2)} -> $${bestSetup.p2.price.toFixed(2)}, angle ${bestSetup.angleDeg.toFixed(0)}°, ${bestSetup.touchPoints} touches) broken at $${bestSetup.triggerLevel.toFixed(2)}. SL: $${bestSetup.stopLoss.toFixed(2)}, TP: $${bestSetup.takeProfit.toFixed(2)} (R:R ${bestSetup.rrRatio}x, Vol ${relVolume.toFixed(2)}x).`
+        };
+      }
+
+      return {
+        isValid: false,
+        direction: "LONG",
+        triggerLevel: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        rrRatio: 0,
+        trendlinePrice: 0,
+        touchPoints: 0,
+        slopeDeg: 0,
+        entryType: "AGGRESSIVE_CLOSE",
+        description: "No active bullish trendline breakout setup"
+      };
+
+    } else {
+      // Bearish Trendline Breakdown
+      const pivotLows: { idx: number; price: number }[] = [];
+      for (let i = startIdx + 2; i <= lastIdx - 2; i++) {
+        const c = this.candles1m[i];
+        const prev1 = this.candles1m[i - 1];
+        const prev2 = this.candles1m[i - 2];
+        const next1 = this.candles1m[i + 1];
+        const next2 = this.candles1m[i + 2];
+        if (c.low <= prev1.low && c.low <= prev2.low && c.low <= next1.low && c.low <= next2.low) {
+          pivotLows.push({ idx: i, price: c.low });
+        }
+      }
+
+      let bestSetup: {
+        p1: { idx: number; price: number };
+        p2: { idx: number; price: number };
+        slope: number;
+        angleDeg: number;
+        touchPoints: number;
+        trendlinePrice: number;
+        triggerLevel: number;
+        stopLoss: number;
+        takeProfit: number;
+        rrRatio: number;
+        entryType: "AGGRESSIVE_CLOSE" | "CONSERVATIVE_RETEST";
+      } | null = null;
+
+      for (let i = 0; i < pivotLows.length; i++) {
+        for (let j = i + 1; j < pivotLows.length; j++) {
+          const p1 = pivotLows[i];
+          const p2 = pivotLows[j];
+
+          // Must be higher low
+          if (p2.price <= p1.price + 0.05 * currentAtr) continue;
+          const barDist = p2.idx - p1.idx;
+          if (barDist < 4) continue;
+
+          const slope = (p2.price - p1.price) / barDist;
+          const normalizedPriceChange = Math.abs(p2.price - p1.price) / Math.max(1, currentAtr);
+          const angleDeg = (Math.atan2(normalizedPriceChange, barDist / 5) * 180) / Math.PI;
+
+          if (angleDeg > maxSlopeDeg || angleDeg < 8) continue;
+
+          let touches = 2;
+          for (let k = 0; k < pivotLows.length; k++) {
+            if (k === i || k === j) continue;
+            const pk = pivotLows[k];
+            if (pk.idx > p1.idx && pk.idx < p2.idx) {
+              const expectedPrice = p1.price + slope * (pk.idx - p1.idx);
+              if (Math.abs(pk.price - expectedPrice) <= 0.30 * currentAtr) {
+                touches++;
+              }
+            }
+          }
+          if (touches < minTouchPoints) continue;
+
+          const tlPriceCurrent = p1.price + slope * (lastIdx - p1.idx);
+          const tlPricePrev = p1.price + slope * (lastIdx - 1 - p1.idx);
+
+          const isPrevBreakdown = prevCandle.close < tlPricePrev - 0.05 * currentAtr;
+          const isCurrentRetestHold = isPrevBreakdown && currentCandle.high >= tlPriceCurrent - 0.30 * currentAtr && currentCandle.close <= tlPriceCurrent + 0.10 * currentAtr && (currentCandle.close <= currentCandle.open || (currentCandle.close - currentCandle.low) < (currentCandle.high - currentCandle.close));
+
+          const isCurrentDecisiveBreakdown = currentCandle.close < tlPriceCurrent && currentCandle.close < currentCandle.open;
+          const currentBody = currentCandle.open - currentCandle.close;
+          const currentRange = currentCandle.high - currentCandle.low;
+          const hasBodyMomentum = currentRange > 0 && ((currentBody / currentRange >= 0.28) || currentBody >= 0.25 * currentAtr);
+
+          if (!isCurrentRetestHold && (!isCurrentDecisiveBreakdown || !hasBodyMomentum)) {
+            continue;
+          }
+
+          const hasVolExpansion = relVolume >= minVolRatio * 0.85 || this.orderFlowStats.takerBuyRatio <= 0.44;
+          if (!hasVolExpansion) continue;
+
+          const entryType: "AGGRESSIVE_CLOSE" | "CONSERVATIVE_RETEST" = isCurrentRetestHold ? "CONSERVATIVE_RETEST" : "AGGRESSIVE_CLOSE";
+          const triggerLevel = currentPrice;
+
+          const sliceCandles = this.candles1m.slice(p2.idx, lastIdx + 1);
+          const highestHighInSlice = sliceCandles.length > 0 ? Math.max(...sliceCandles.map(c => c.high)) : currentPrice + 1.5 * currentAtr;
+          const stopLoss = Math.max(highestHighInSlice + 0.10 * currentAtr, currentPrice + 0.5 * currentAtr);
+
+          const takeProfit = Math.min(p1.price, currentPrice - 1.8 * (stopLoss - currentPrice));
+          const risk = Math.max(1, stopLoss - triggerLevel);
+          const reward = Math.max(1, triggerLevel - takeProfit);
+          const rrRatio = Number((reward / risk).toFixed(2));
+
+          if (rrRatio < minRR) continue;
+
+          if (!bestSetup || touches > bestSetup.touchPoints || (touches === bestSetup.touchPoints && rrRatio > bestSetup.rrRatio)) {
+            bestSetup = {
+              p1,
+              p2,
+              slope,
+              angleDeg,
+              touchPoints: touches,
+              trendlinePrice: tlPriceCurrent,
+              triggerLevel,
+              stopLoss,
+              takeProfit,
+              rrRatio,
+              entryType,
+            };
+          }
+        }
+      }
+
+      if (bestSetup) {
+        return {
+          isValid: true,
+          direction: "SHORT",
+          triggerLevel: bestSetup.triggerLevel,
+          stopLoss: bestSetup.stopLoss,
+          takeProfit: bestSetup.takeProfit,
+          rrRatio: bestSetup.rrRatio,
+          trendlinePrice: bestSetup.trendlinePrice,
+          touchPoints: bestSetup.touchPoints,
+          slopeDeg: Number(bestSetup.angleDeg.toFixed(1)),
+          entryType: bestSetup.entryType,
+          description: `Bearish Trendline Breakdown (${bestSetup.entryType === "CONSERVATIVE_RETEST" ? "Retest & Rejection" : "Decisive Candle Close"}): Ascending support ($${bestSetup.p1.price.toFixed(2)} -> $${bestSetup.p2.price.toFixed(2)}, angle ${bestSetup.angleDeg.toFixed(0)}°, ${bestSetup.touchPoints} touches) broken at $${bestSetup.triggerLevel.toFixed(2)}. SL: $${bestSetup.stopLoss.toFixed(2)}, TP: $${bestSetup.takeProfit.toFixed(2)} (R:R ${bestSetup.rrRatio}x, Vol ${relVolume.toFixed(2)}x).`
+        };
+      }
+
+      return {
+        isValid: false,
+        direction: "SHORT",
+        triggerLevel: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        rrRatio: 0,
+        trendlinePrice: 0,
+        touchPoints: 0,
+        slopeDeg: 0,
+        entryType: "AGGRESSIVE_CLOSE",
+        description: "No active bearish trendline breakdown setup"
+      };
+    }
+  }
+
   public evaluateContextAwareVolume(
     direction: "LONG" | "SHORT" | "NEUTRAL",
     relVolume: number,
@@ -5919,13 +6300,18 @@ class TradingEngine {
     const isFvg = msg.includes("fair value gap") || msg.includes("fvg") || msg.includes("setup 4");
     const isOrderBlock = msg.includes("order block") || msg.includes("setup 5");
     const isSqueeze = msg.includes("squeeze") || msg.includes("setup 6");
+    const isTrendlineBreakout = msg.includes("trendline breakout") || msg.includes("setup 7");
     const isRangeReversal = regime === MarketRegime.RANGE_BOUND || msg.includes("range reversal") || msg.includes("ranging bullish") || msg.includes("ranging bearish");
 
     let setupCategory = "General Momentum";
     let targetRelVol = baseMinRelVol; // default e.g. 1.30x
     let categoryDescription = "Standard momentum entry: requires clear transaction volume expansion above 20-period moving average.";
 
-    if (isSqueeze || (isBreakout && !isPullbackRetest)) {
+    if (isTrendlineBreakout) {
+      setupCategory = "Trendline Breakout Expansion";
+      targetRelVol = Math.max(1.15, Math.min(baseMinRelVol * 0.90, 1.25));
+      categoryDescription = "Trendline Breakout / Breakdown: Confirmed break of descending resistance or ascending support requires momentum volume expansion (>= 1.20x).";
+    } else if (isSqueeze || (isBreakout && !isPullbackRetest)) {
       // High-Velocity Breakouts require real breakout volume expansion
       setupCategory = "Momentum Breakout / Squeeze Expansion";
       targetRelVol = Math.max(1.25, baseMinRelVol);
@@ -6135,7 +6521,7 @@ class TradingEngine {
       const b0 = c0.close - c0.open;
 
       const healthyBodies = b2 >= 0.2 * currentAtr && b1 >= 0.2 * currentAtr && b0 >= 0.2 * currentAtr;
-      const isCurrentCandleHoldingHighs = currentPrice >= c0.low;
+      const isCurrentCandleHoldingHighs = this.currentPrice >= c0.low;
 
       if (c2Bullish && c1Bullish && c0Bullish && ascendingCloses && healthyBodies && isCurrentCandleHoldingHighs) {
         isThreeWhiteSoldiers = true;
@@ -6342,7 +6728,7 @@ class TradingEngine {
       const b0 = c0.open - c0.close;
 
       const healthyBodies = b2 >= 0.2 * currentAtr && b1 >= 0.2 * currentAtr && b0 >= 0.2 * currentAtr;
-      const isCurrentCandleHoldingLows = currentPrice <= c0.high;
+      const isCurrentCandleHoldingLows = this.currentPrice <= c0.high;
 
       if (c2Bearish && c1Bearish && c0Bearish && descendingCloses && healthyBodies && isCurrentCandleHoldingLows) {
         isThreeBlackCrows = true;
@@ -7884,16 +8270,18 @@ class TradingEngine {
       const isNotLongBreakout = isScalperBreakoutLongAllowed ? true : (struct.current_HH ? currentClose <= struct.current_HH.price : true);
       const isNotShortBreakdown = isScalperBreakdownShortAllowed ? true : (struct.current_LL ? currentClose >= struct.current_LL.price : true);
 
-      // ALSO CHECK SMC SETUPS (Liquidity Sweep, FVG Retest, Order Block Retest)
+      // ALSO CHECK SMC SETUPS (Liquidity Sweep, FVG Retest, Order Block Retest, Trendline Breakout)
       const smcSweepLong = this.detectLiquiditySweep("LONG");
       const smcSweepShort = this.detectLiquiditySweep("SHORT");
       const smcFvgLong = this.evaluateFVGSetup("LONG");
       const smcFvgShort = this.evaluateFVGSetup("SHORT");
       const smcObLong = this.evaluateOrderBlockSetup("LONG");
       const smcObShort = this.evaluateOrderBlockSetup("SHORT");
+      const smcTlLong = this.evaluateTrendlineBreakoutSetup("LONG");
+      const smcTlShort = this.evaluateTrendlineBreakoutSetup("SHORT");
 
-      const hasSmcLongSetup = smcSweepLong.isSweep || smcFvgLong.isFvgValid || smcObLong.isObValid;
-      const hasSmcShortSetup = smcSweepShort.isSweep || smcFvgShort.isFvgValid || smcObShort.isObValid;
+      const hasSmcLongSetup = smcSweepLong.isSweep || smcFvgLong.isFvgValid || smcObLong.isObValid || smcTlLong.isValid;
+      const hasSmcShortSetup = smcSweepShort.isSweep || smcFvgShort.isFvgValid || smcObShort.isObValid || smcTlShort.isValid;
 
       if ((isUptrendAligned && (hasValidPushbackLong || isScalperBreakoutLongAllowed) && isNotLongBreakout && probabilityLong >= 0.65) || hasSmcLongSetup) {
         signalDirection = "LONG";
@@ -7923,8 +8311,8 @@ class TradingEngine {
     const vwapLowerVal = lastCandle.vwap_lower !== undefined ? lastCandle.vwap_lower : currentClose * 0.99;
 
     // Evaluate active SMC structural setup presence for threshold & alignment bypass
-    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFVGSetup("LONG").isFvgValid || this.evaluateOrderBlockSetup("LONG").isObValid)) ||
-                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFVGSetup("SHORT").isFvgValid || this.evaluateOrderBlockSetup("SHORT").isObValid));
+    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFVGSetup("LONG").isFvgValid || this.evaluateOrderBlockSetup("LONG").isObValid || this.evaluateTrendlineBreakoutSetup("LONG").isValid)) ||
+                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFVGSetup("SHORT").isFvgValid || this.evaluateOrderBlockSetup("SHORT").isObValid || this.evaluateTrendlineBreakoutSetup("SHORT").isValid));
 
     // 2. Conditions Check (Strict 10-Conditions Checklist)
     const conditions: {

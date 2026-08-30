@@ -716,12 +716,12 @@ class DatabaseManager {
         const fileContent = fs.readFileSync(DB_FILE_PATH, "utf-8");
         this.cache = JSON.parse(fileContent);
         
-        // Migrate legacy/default 2.0 Take Profit ratio to 3.5 to offset round-trip exchange fees
+        // Ensure default properties exist without overwriting user customizations
         if (this.cache && this.cache.config) {
           let updated = false;
           if (this.cache.config.risk_management) {
-            if (!this.cache.config.risk_management.take_profit_ratio || this.cache.config.risk_management.take_profit_ratio <= 2.0) {
-              this.cache.config.risk_management.take_profit_ratio = 3.5;
+            if (this.cache.config.risk_management.take_profit_ratio === undefined || isNaN(this.cache.config.risk_management.take_profit_ratio)) {
+              this.cache.config.risk_management.take_profit_ratio = 1.5;
               updated = true;
             }
             if (this.cache.config.risk_management.min_atr_for_trading_enabled === undefined) {
@@ -1082,8 +1082,8 @@ class DatabaseManager {
         this.cache.config.risk_management.delta_scalper_offer_enabled = true;
         changed = true;
       }
-      if (this.cache.config.risk_management.stop_loss_atr_multiplier === undefined || this.cache.config.risk_management.stop_loss_atr_multiplier <= 1.4) {
-        this.cache.config.risk_management.stop_loss_atr_multiplier = 2.2;
+      if (this.cache.config.risk_management.stop_loss_atr_multiplier === undefined || isNaN(this.cache.config.risk_management.stop_loss_atr_multiplier) || this.cache.config.risk_management.stop_loss_atr_multiplier <= 0) {
+        this.cache.config.risk_management.stop_loss_atr_multiplier = 1.8;
         changed = true;
       }
       if (this.cache.config.risk_management.take_profit_atr_multiplier === undefined) {
@@ -1106,7 +1106,7 @@ class DatabaseManager {
         this.cache.config.risk_management.trailing_stop_loss_enabled = true;
         changed = true;
       }
-      if (this.cache.config.risk_management.trailing_stop_loss_distance_atr === undefined || this.cache.config.risk_management.trailing_stop_loss_distance_atr <= 1.3) {
+      if (this.cache.config.risk_management.trailing_stop_loss_distance_atr === undefined || isNaN(this.cache.config.risk_management.trailing_stop_loss_distance_atr) || this.cache.config.risk_management.trailing_stop_loss_distance_atr <= 0) {
         this.cache.config.risk_management.trailing_stop_loss_distance_atr = 1.8;
         changed = true;
       }

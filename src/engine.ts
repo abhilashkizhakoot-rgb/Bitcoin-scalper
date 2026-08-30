@@ -1295,6 +1295,16 @@ class TradingEngine {
       const isRangeLongBreakout = (currentPrice > rangeHigh) && breakoutValidationLong.isValid;
       const isRangeShortBreakdown = (currentPrice < rangeLow) && breakoutValidationShort.isValid;
 
+      // SMC & Trendline Breakout (Setup 7) checks during consolidation / range-bound
+      const smcTlLong = this.evaluateTrendlineBreakoutSetup("LONG");
+      const smcTlShort = this.evaluateTrendlineBreakoutSetup("SHORT");
+      const smcSweepLong = this.detectLiquiditySweep("LONG");
+      const smcSweepShort = this.detectLiquiditySweep("SHORT");
+      const smcFvgLong = this.evaluateFVGSetup("LONG");
+      const smcFvgShort = this.evaluateFVGSetup("SHORT");
+      const smcObLong = this.evaluateOrderBlockSetup("LONG");
+      const smcObShort = this.evaluateOrderBlockSetup("SHORT");
+
       if (isRangeLongReversal) {
         signalDirection = "LONG";
       } else if (isRangeShortReversal) {
@@ -1303,11 +1313,26 @@ class TradingEngine {
         signalDirection = "LONG";
       } else if (isRangeShortBreakdown) {
         signalDirection = "SHORT";
+      } else if (smcTlLong.isValid || smcSweepLong.isSweep || smcFvgLong.isFvgValid || smcObLong.isObValid) {
+        signalDirection = "LONG";
+      } else if (smcTlShort.isValid || smcSweepShort.isSweep || smcFvgShort.isFvgValid || smcObShort.isObValid) {
+        signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
       }
     } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
-      signalDirection = "NEUTRAL";
+      // In low volatility compression, detect if Squeeze (Setup 6) or Trendline Breakout (Setup 7) fires
+      const smcTlLong = this.evaluateTrendlineBreakoutSetup("LONG");
+      const smcTlShort = this.evaluateTrendlineBreakoutSetup("SHORT");
+      const squeezeCheck = this.evaluateVolatilitySqueeze();
+
+      if (smcTlLong.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "LONG")) {
+        signalDirection = "LONG";
+      } else if (smcTlShort.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "SHORT")) {
+        signalDirection = "SHORT";
+      } else {
+        signalDirection = "NEUTRAL";
+      }
     } else {
       // --- ENHANCED INTELLIGENT ENTRY SIGNAL DETECTION & PULLBACK PROXIMITY ---
       const recentCandles = this.candles1m.slice(-10);
@@ -1339,13 +1364,28 @@ class TradingEngine {
       const isNotLongBreakout = isScalperBreakoutLongAllowed ? true : (struct.current_HH ? currentPrice <= struct.current_HH.price : true);
       const isNotShortBreakdown = isScalperBreakdownShortAllowed ? true : (struct.current_LL ? currentPrice >= struct.current_LL.price : true);
 
-      // Multi-factor intelligent direction assessment (including Liquidity Sweep Setup 3)
+      // Multi-factor intelligent direction assessment (including Setup 7 Trendline Breakout & SMC Setups)
+      const smcTlLong = this.evaluateTrendlineBreakoutSetup("LONG");
+      const smcTlShort = this.evaluateTrendlineBreakoutSetup("SHORT");
       const longSweepSignal = this.detectLiquiditySweep("LONG");
       const shortSweepSignal = this.detectLiquiditySweep("SHORT");
+      const smcFvgLong = this.evaluateFVGSetup("LONG");
+      const smcFvgShort = this.evaluateFVGSetup("SHORT");
+      const smcObLong = this.evaluateOrderBlockSetup("LONG");
+      const smcObShort = this.evaluateOrderBlockSetup("SHORT");
+      const squeezeCheck = this.evaluateVolatilitySqueeze();
 
-      if (longSweepSignal.isSweep && probabilityLong >= 0.50) {
+      if (smcTlLong.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "LONG")) {
+        signalDirection = "LONG";
+      } else if (smcTlShort.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "SHORT")) {
+        signalDirection = "SHORT";
+      } else if (longSweepSignal.isSweep && probabilityLong >= 0.50) {
         signalDirection = "LONG";
       } else if (shortSweepSignal.isSweep && probabilityShort >= 0.50) {
+        signalDirection = "SHORT";
+      } else if (smcFvgLong.isFvgValid || smcObLong.isObValid) {
+        signalDirection = "LONG";
+      } else if (smcFvgShort.isFvgValid || smcObShort.isObValid) {
         signalDirection = "SHORT";
       } else if (isUptrendAligned && (hasValidPushbackLong || isScalperBreakoutLongAllowed) && isNotLongBreakout && probabilityLong >= 0.58) {
         signalDirection = "LONG";
@@ -1395,7 +1435,13 @@ class TradingEngine {
       };
     }
 
-    if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
+    // Evaluate active SMC / structural setup presence for threshold & alignment bypass
+    const smcTlActive = (signalDirection === "LONG" && this.evaluateTrendlineBreakoutSetup("LONG").isValid) ||
+                        (signalDirection === "SHORT" && this.evaluateTrendlineBreakoutSetup("SHORT").isValid);
+    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFVGSetup("LONG").isFvgValid || this.evaluateOrderBlockSetup("LONG").isObValid || smcTlActive)) ||
+                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFVGSetup("SHORT").isFvgValid || this.evaluateOrderBlockSetup("SHORT").isObValid || smcTlActive));
+
+    if (this.currentRegime === MarketRegime.LOW_VOLATILITY && !isSmcActive) {
       return {
         conditions: [
           {
@@ -1446,7 +1492,7 @@ class TradingEngine {
     // C1: CatBoost AI Prediction
     const pbTrendStatus = this.detectPullbackTrendlineBreak();
     const isEnteringPullback = true;
-    const catboostThreshold = this.currentRegime === MarketRegime.RANGE_BOUND 
+    const catboostThreshold = (this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) 
       ? 0.50 
       : 0.55;
     const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold) : false;
@@ -1456,8 +1502,8 @@ class TradingEngine {
       met: (pLongMet || pShortMet),
       current_value: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}% | P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%`,
       required: signalDirection === "LONG"
-        ? `P(LONG) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "55"}% (Evaluating LONG Trade)`
-        : `P(SHORT) >= ${this.currentRegime === MarketRegime.RANGE_BOUND ? "50" : "55"}% (Evaluating SHORT Trade)`,
+        ? `P(LONG) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "55"}% (Evaluating LONG Trade)`
+        : `P(SHORT) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "55"}% (Evaluating SHORT Trade)`,
       description: "Uses pre-trained ensemble trees mapping momentum, EMA spreads, and ATR volatility expansion.",
       priority: "CRITICAL",
     });
@@ -1469,12 +1515,13 @@ class TradingEngine {
     const isLowVolatility = false;
 
     // C2: Market Regime lock
-    // Blocked all entries during LOW_VOLATILITY.
+    // Blocked all entries during LOW_VOLATILITY unless structural setup active.
     const regimeValid = !isLowVolatility;
     const regimeAligned =
       (signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
       (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
-      this.currentRegime === MarketRegime.HIGH_VOLATILITY;
+      this.currentRegime === MarketRegime.HIGH_VOLATILITY ||
+      isSmcActive;
 
     const isRegimeSoftened = false;
 
@@ -1500,11 +1547,15 @@ class TradingEngine {
 
     const activeSweepSignal = this.detectLiquiditySweep(signalDirection);
 
-    if (activeSweepSignal.isSweep) {
+    if (isSmcActive) {
       trendAligned = true;
       adxMet = adxValue >= hardFloorAdx;
-      currentTrendStr = "PASSING (Bypassed via Liquidity Sweep Reversal Setup 3)";
-      requiredStr = "Liquidity Sweep Setup Active";
+      currentTrendStr = smcTlActive 
+        ? "PASSING (Bypassed via Trendline Breakout Setup 7)" 
+        : activeSweepSignal.isSweep 
+        ? "PASSING (Bypassed via Liquidity Sweep Reversal Setup 3)"
+        : "PASSING (Bypassed via SMC Structural Setup)";
+      requiredStr = "SMC / Trendline Breakout Setup Active";
     } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       const isRsiBypassEnabled = config.general.enable_ranging_extreme_rsi_bypass ?? false;
       const overboughtThresh = config.general.ranging_rsi_overbought_threshold ?? 75.0;
@@ -8235,6 +8286,16 @@ class TradingEngine {
       const isRangeLongBreakout = (currentClose > rangeHigh) && breakoutValidationLong.isValid;
       const isRangeShortBreakdown = (currentClose < rangeLow) && breakoutValidationShort.isValid;
 
+      // Also check SMC & Setup 7 Trendline Breakouts during Range-Bound consolidation
+      const smcTlLong = this.evaluateTrendlineBreakoutSetup("LONG");
+      const smcTlShort = this.evaluateTrendlineBreakoutSetup("SHORT");
+      const smcSweepLong = this.detectLiquiditySweep("LONG");
+      const smcSweepShort = this.detectLiquiditySweep("SHORT");
+      const smcFvgLong = this.evaluateFVGSetup("LONG");
+      const smcFvgShort = this.evaluateFVGSetup("SHORT");
+      const smcObLong = this.evaluateOrderBlockSetup("LONG");
+      const smcObShort = this.evaluateOrderBlockSetup("SHORT");
+
       if (isRangeLongReversal) {
         signalDirection = "LONG";
       } else if (isRangeShortReversal) {
@@ -8243,11 +8304,25 @@ class TradingEngine {
         signalDirection = "LONG";
       } else if (isRangeShortBreakdown) {
         signalDirection = "SHORT";
+      } else if (smcTlLong.isValid || smcSweepLong.isSweep || smcFvgLong.isFvgValid || smcObLong.isObValid) {
+        signalDirection = "LONG";
+      } else if (smcTlShort.isValid || smcSweepShort.isSweep || smcFvgShort.isFvgValid || smcObShort.isObValid) {
+        signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
       }
     } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
-      signalDirection = "NEUTRAL";
+      const smcTlLong = this.evaluateTrendlineBreakoutSetup("LONG");
+      const smcTlShort = this.evaluateTrendlineBreakoutSetup("SHORT");
+      const squeezeCheck = this.evaluateVolatilitySqueeze();
+
+      if (smcTlLong.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "LONG")) {
+        signalDirection = "LONG";
+      } else if (smcTlShort.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "SHORT")) {
+        signalDirection = "SHORT";
+      } else {
+        signalDirection = "NEUTRAL";
+      }
     } else {
       // --- TREND-FOLLOWING LOGIC RESTRICTED TO 20/50 EMA PUSHBACKS ---
       const recentCandles = this.candles1m.slice(-8);

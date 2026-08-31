@@ -638,13 +638,20 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
                 return (
                   <div
                     key={idx}
-                    className={`border rounded-xl p-3 flex flex-col justify-between space-y-1.5 ${
+                    className={`border rounded-xl p-3 flex flex-col justify-between space-y-2 ${
                       cond?.met
                         ? "bg-emerald-50/10 border-emerald-100/60"
                         : "bg-rose-50/10 border-rose-100/60"
                     }`}
                   >
-                    <span className="text-[10px] font-sans font-semibold text-slate-600 block truncate">{gate.label}</span>
+                    <div>
+                      <span className="text-[11px] font-sans font-semibold text-slate-700 block truncate">{gate.label}</span>
+                      {cond?.current_value && (
+                        <p className="text-[10px] text-slate-500 font-mono mt-0.5 truncate" title={String(cond.current_value)}>
+                          {String(cond.current_value)}
+                        </p>
+                      )}
+                    </div>
                     <div className="flex items-center justify-between mt-1">
                       <span className={`text-[9px] font-bold font-mono ${cond?.met ? "text-emerald-700 bg-emerald-50 border border-emerald-100/50" : "text-rose-700 bg-rose-50 border border-rose-100/50"} px-2 py-0.5 rounded-md`}>
                         {cond?.met ? "PASSED" : "BLOCKED"}

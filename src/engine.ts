@@ -5039,12 +5039,12 @@ class TradingEngine {
     const currentPrice = this.currentPrice;
     const atr14 = this.calculateATR(this.candles1m, 14);
     const currentAtr = atr14[lastIdx] || 50;
-    const requireRejection = ms.order_block_require_candlestick_rejection !== false;
 
     const closedIdx = (lastIdx === this.candles1m.length - 1 && this.candles1m.length >= 2) ? lastIdx - 1 : lastIdx;
     const setupIdx = closedIdx >= 1 ? closedIdx - 1 : closedIdx;
     const confirmCandle = this.candles1m[closedIdx];
     const setupCandle = this.candles1m[setupIdx];
+    const currentCandle = this.candles1m[lastIdx];
 
     // SMC Market Structure Anchors for Premium vs Discount Zone evaluation
     const struct = this.getTrendMarketStructure();
@@ -5054,6 +5054,7 @@ class TradingEngine {
     const equilibrium = hasValidRange ? (swingHigh + swingLow) / 2 : 0;
 
     if (direction === "LONG") {
+      // Strictly require validated bullish rejection candlestick confirmation
       const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtr);
 
       for (let i = lastIdx - 1; i >= Math.max(0, lastIdx - 20); i--) {
@@ -5085,41 +5086,34 @@ class TradingEngine {
             const isBroken = postObCandles.some(c => c.close < obLow - 0.20 * currentAtr) || (currentPrice < obLow - 0.20 * currentAtr);
 
             if (hasTouchedOb && !isBroken) {
-              if (requireRejection) {
-                // Verify that rejection pattern formed at or wicked into the OB zone
-                const isRejectionAtOb = confirmCandle && setupCandle && (
-                  (confirmCandle.low <= obHigh + 0.15 * currentAtr && confirmCandle.high >= obLow - 0.15 * currentAtr) ||
-                  (setupCandle.low <= obHigh + 0.15 * currentAtr && setupCandle.high >= obLow - 0.15 * currentAtr)
-                );
+              // Verify that rejection pattern formed at or wicked into the OB zone
+              const isRejectionAtOb = (confirmCandle && confirmCandle.low <= obHigh + 0.15 * currentAtr && confirmCandle.high >= obLow - 0.15 * currentAtr) ||
+                                       (setupCandle && setupCandle.low <= obHigh + 0.15 * currentAtr && setupCandle.high >= obLow - 0.15 * currentAtr) ||
+                                       (currentCandle && currentCandle.low <= obHigh + 0.15 * currentAtr && currentCandle.high >= obLow - 0.15 * currentAtr);
 
-                if (rejectionCheck.confirmed && isRejectionAtOb) {
-                  return {
-                    isObValid: true,
-                    obHigh,
-                    obLow,
-                    description: `Bullish Institutional Order Block Retest Confirmed via [${rejectionCheck.type}]: Price ($${currentPrice.toFixed(2)}) rejected and holding unmitigated OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
-                  };
-                } else if (rejectionCheck.confirmed && !isRejectionAtOb) {
-                  return {
-                    isObValid: false,
-                    obHigh,
-                    obLow,
-                    description: `Awaiting Order Block Rejection: Rejection pattern formed away from OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
-                  };
-                } else {
-                  return {
-                    isObValid: false,
-                    obHigh,
-                    obLow,
-                    description: `Awaiting Bullish Rejection: Price ($${currentPrice.toFixed(2)}) retesting OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}) — awaiting confirmed bullish rejection candlestick pattern (e.g. Pin Bar, Bullish Engulfing, Bullish Harami, Hammer).`,
-                  };
-                }
-              } else {
+              // Strict candlestick confirmation check: must have confirmed bullish pattern and close holding above OB low
+              const isCandleHoldingSupport = confirmCandle ? confirmCandle.close >= obLow - 0.10 * currentAtr : true;
+
+              if (rejectionCheck.confirmed && isRejectionAtOb && isCandleHoldingSupport) {
                 return {
                   isObValid: true,
                   obHigh,
                   obLow,
-                  description: `Bullish Institutional Order Block Retest: Price ($${currentPrice.toFixed(2)}) retesting unmitigated OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
+                  description: `Bullish Institutional Order Block Retest Confirmed via [${rejectionCheck.type}]: Price ($${currentPrice.toFixed(2)}) confirmed rejection and holding unmitigated OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
+                };
+              } else if (rejectionCheck.confirmed && !isRejectionAtOb) {
+                return {
+                  isObValid: false,
+                  obHigh,
+                  obLow,
+                  description: `Awaiting Order Block Rejection: Rejection pattern formed away from OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
+                };
+              } else {
+                return {
+                  isObValid: false,
+                  obHigh,
+                  obLow,
+                  description: `Awaiting Bullish Candlestick Confirmation: Price ($${currentPrice.toFixed(2)}) retested OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}) — awaiting confirmed bullish rejection candlestick pattern (e.g. Pin Bar, Bullish Engulfing, Morning Star, Harami, Hammer).`,
                 };
               }
             }
@@ -5127,6 +5121,7 @@ class TradingEngine {
         }
       }
     } else {
+      // Strictly require validated bearish rejection candlestick confirmation
       const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtr);
 
       for (let i = lastIdx - 1; i >= Math.max(0, lastIdx - 20); i--) {
@@ -5158,41 +5153,34 @@ class TradingEngine {
             const isBroken = postObCandles.some(c => c.close > obHigh + 0.20 * currentAtr) || (currentPrice > obHigh + 0.20 * currentAtr);
 
             if (hasTouchedOb && !isBroken) {
-              if (requireRejection) {
-                // Verify that rejection pattern formed at or wicked into the OB zone
-                const isRejectionAtOb = confirmCandle && setupCandle && (
-                  (confirmCandle.high >= obLow - 0.15 * currentAtr && confirmCandle.low <= obHigh + 0.15 * currentAtr) ||
-                  (setupCandle.high >= obLow - 0.15 * currentAtr && setupCandle.low <= obHigh + 0.15 * currentAtr)
-                );
+              // Verify that rejection pattern formed at or wicked into the OB zone
+              const isRejectionAtOb = (confirmCandle && confirmCandle.high >= obLow - 0.15 * currentAtr && confirmCandle.low <= obHigh + 0.15 * currentAtr) ||
+                                       (setupCandle && setupCandle.high >= obLow - 0.15 * currentAtr && setupCandle.low <= obHigh + 0.15 * currentAtr) ||
+                                       (currentCandle && currentCandle.high >= obLow - 0.15 * currentAtr && currentCandle.low <= obHigh + 0.15 * currentAtr);
 
-                if (rejectionCheck.confirmed && isRejectionAtOb) {
-                  return {
-                    isObValid: true,
-                    obHigh,
-                    obLow,
-                    description: `Bearish Institutional Order Block Retest Confirmed via [${rejectionCheck.type}]: Price ($${currentPrice.toFixed(2)}) rejected and holding unmitigated OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
-                  };
-                } else if (rejectionCheck.confirmed && !isRejectionAtOb) {
-                  return {
-                    isObValid: false,
-                    obHigh,
-                    obLow,
-                    description: `Awaiting Order Block Rejection: Rejection pattern formed away from OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
-                  };
-                } else {
-                  return {
-                    isObValid: false,
-                    obHigh,
-                    obLow,
-                    description: `Awaiting Bearish Rejection: Price ($${currentPrice.toFixed(2)}) retesting OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}) — awaiting confirmed bearish rejection candlestick pattern (e.g. Pin Bar, Bearish Engulfing, Bearish Harami, Shooting Star).`,
-                  };
-                }
-              } else {
+              // Strict candlestick confirmation check: must have confirmed bearish pattern and close holding below OB high
+              const isCandleHoldingResistance = confirmCandle ? confirmCandle.close <= obHigh + 0.10 * currentAtr : true;
+
+              if (rejectionCheck.confirmed && isRejectionAtOb && isCandleHoldingResistance) {
                 return {
                   isObValid: true,
                   obHigh,
                   obLow,
-                  description: `Bearish Institutional Order Block Retest: Price ($${currentPrice.toFixed(2)}) retesting unmitigated OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
+                  description: `Bearish Institutional Order Block Retest Confirmed via [${rejectionCheck.type}]: Price ($${currentPrice.toFixed(2)}) confirmed rejection and holding unmitigated OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
+                };
+              } else if (rejectionCheck.confirmed && !isRejectionAtOb) {
+                return {
+                  isObValid: false,
+                  obHigh,
+                  obLow,
+                  description: `Awaiting Order Block Rejection: Rejection pattern formed away from OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
+                };
+              } else {
+                return {
+                  isObValid: false,
+                  obHigh,
+                  obLow,
+                  description: `Awaiting Bearish Candlestick Confirmation: Price ($${currentPrice.toFixed(2)}) retested OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}) — awaiting confirmed bearish rejection candlestick pattern (e.g. Pin Bar, Bearish Engulfing, Evening Star, Harami, Shooting Star).`,
                 };
               }
             }

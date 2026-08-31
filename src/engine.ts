@@ -3780,21 +3780,23 @@ class TradingEngine {
     const ema200Val = ema200ValComputed;
 
     const condDict: Record<string, { status: "PASS" | "FAIL" | "SKIP"; reason: string }> = {
-      "Multi-Timeframe Trend Alignment": { status: "SKIP", reason: "Not evaluated." },
-      "EMA Structure Alignment": { status: "SKIP", reason: "Not evaluated." },
-      "Breakout Level Confirmation": { status: "SKIP", reason: "Not evaluated." },
-      "Breakout Candle Body Ratio": { status: "SKIP", reason: "Not evaluated." },
-      "Immediate Breakout Entry Allowance": { status: "SKIP", reason: "Not evaluated." },
-      "Dynamic Invalidation Floor/Ceiling": { status: "SKIP", reason: "Not evaluated." },
-      "Chasing Lookback limit": { status: "SKIP", reason: "Not evaluated." },
-      "Volume-Validated Pullback": { status: "SKIP", reason: "Not evaluated." },
-      "Pullback & Retest Setup (Setup 1)": { status: "SKIP", reason: "Not evaluated." },
-      "EMA Retracement / Pushback Setup (Setup 2)": { status: "SKIP", reason: "Not evaluated." },
-      "Liquidity Sweep Setup (Setup 3)": { status: "SKIP", reason: "Not evaluated." },
-      "Fair Value Gap Retest Setup (Setup 4)": { status: "SKIP", reason: "Not evaluated." },
-      "Institutional Order Block Setup (Setup 5)": { status: "SKIP", reason: "Not evaluated." },
-      "Volatility Squeeze Setup (Setup 6)": { status: "SKIP", reason: "Not evaluated." },
-      "Trendline Breakout Setup (Setup 7)": { status: "SKIP", reason: "Not evaluated." },
+      "Multi-Timeframe Trend Alignment": { status: "SKIP", reason: "Evaluating 5m trend alignment..." },
+      "EMA Structure Alignment": { status: "SKIP", reason: "Evaluating EMA structure..." },
+      "Breakout Level Confirmation": { status: "SKIP", reason: "Pending structural breakout trigger" },
+      "Breakout Candle Body Ratio": { status: "SKIP", reason: "Pending breakout candle evaluation" },
+      "Immediate Breakout Entry Allowance": { status: "SKIP", reason: "Pending breakout momentum evaluation" },
+      "Dynamic Invalidation Floor/Ceiling": { status: "SKIP", reason: "Pending setup invalidation evaluation" },
+      "Chasing Lookback limit": { status: "SKIP", reason: "Pending lookback duration evaluation" },
+      "Volume-Validated Pullback": { status: "SKIP", reason: "Pending pullback volume validation" },
+      "Pullback & Retest Setup (Setup 1)": { status: "SKIP", reason: "No active breakout & retest setup" },
+      "EMA Retracement / Pushback Setup (Setup 2)": { status: "SKIP", reason: "No active dynamic EMA pushback setup" },
+      "Liquidity Sweep Setup (Setup 3)": { status: "SKIP", reason: "No active liquidity sweep setup" },
+      "Fair Value Gap Retest Setup (Setup 4)": { status: "SKIP", reason: "No active fair value gap setup" },
+      "Institutional Order Block Setup (Setup 5)": { status: "SKIP", reason: "No active order block setup" },
+      "Volatility Squeeze Setup (Setup 6)": { status: "SKIP", reason: "No active volatility squeeze" },
+      "Trendline Breakout Setup (Setup 7)": { status: "SKIP", reason: "No active trendline breakout setup" },
+      "Micro-Trend Flag Breakout Setup (Setup 8)": { status: "SKIP", reason: "No active micro-flag setup" },
+      "Range Failed Auction Reclaim Setup (Setup 9)": { status: "SKIP", reason: "No active range failed auction setup" },
     };
 
     const getReturnObj = (confirmed: boolean, message: string) => {
@@ -3829,16 +3831,6 @@ class TradingEngine {
         status: val.status,
         reason: val.reason,
       }));
-
-      this.log(`[Checkpoint Radar Debug - Market Confirmation]`);
-      this.log(`  Direction: ${direction} | Regime: ${this.currentRegime} | ADX: ${adxValue.toFixed(1)} (${adxLabel})`);
-      this.log(`  Evaluating Retracement on EMA Pair: ${emaZoneLabel} (Testing: ${specificEmaTested}, Pullback Depth Class: ${classifiedDepth}, Points: ${depthPoints})`);
-      this.log(`  Conditions Evaluation:`);
-      for (const cond of sub_conditions) {
-        const icon = cond.status === "PASS" ? "✅" : cond.status === "FAIL" ? "❌" : "➖";
-        this.log(`    ${icon} ${cond.name}: [${cond.status}] - ${cond.reason}`);
-      }
-      this.log(`  Final Market Structure Gate Confirmation Result: ${confirmed ? "PASSED" : "BLOCKED"} (${message})`);
 
       return {
         confirmed,
@@ -3893,10 +3885,85 @@ class TradingEngine {
       condDict["Multi-Timeframe Trend Alignment"] = { status: "SKIP", reason: "Not enough 5m candles available (< 10)." };
     }
 
-    // --- FEATURE 5: Liquidity Sweep Setup (Setup 3) Check ---
+    // --- PRE-EVALUATE ALL SMC / SPECIALIZED SETUPS UPFRONT ---
+    // 1. Setup 3: Liquidity Sweep
     const sweepResult = this.detectLiquiditySweep(direction);
     if (sweepResult.isSweep) {
       condDict["Liquidity Sweep Setup (Setup 3)"] = { status: "PASS", reason: sweepResult.description };
+    } else if (sweepResult.description && sweepResult.description.includes("awaiting CHoCH")) {
+      condDict["Liquidity Sweep Setup (Setup 3)"] = { status: "FAIL", reason: sweepResult.description };
+    } else {
+      condDict["Liquidity Sweep Setup (Setup 3)"] = { status: "SKIP", reason: sweepResult.description || "No active liquidity sweep setup" };
+    }
+
+    // 2. Setup 4: Fair Value Gap Retest
+    const fvgResult = this.evaluateFVGSetup(direction);
+    if (fvgResult.isFvgValid) {
+      condDict["Fair Value Gap Retest Setup (Setup 4)"] = { status: isMtfAligned ? "PASS" : "FAIL", reason: isMtfAligned ? fvgResult.description : "Blocked by 5m MTF Trend conflict." };
+    } else if (fvgResult.description && (fvgResult.description.includes("Awaiting") || fvgResult.description.includes("awaiting"))) {
+      condDict["Fair Value Gap Retest Setup (Setup 4)"] = { status: "FAIL", reason: fvgResult.description };
+    } else {
+      condDict["Fair Value Gap Retest Setup (Setup 4)"] = { status: "SKIP", reason: fvgResult.description || "No active fair value gap setup" };
+    }
+
+    // 3. Setup 5: Institutional Order Block Retest
+    const obResult = this.evaluateOrderBlockSetup(direction);
+    if (obResult.isObValid) {
+      condDict["Institutional Order Block Setup (Setup 5)"] = { status: isMtfAligned ? "PASS" : "FAIL", reason: isMtfAligned ? obResult.description : "Blocked by 5m MTF Trend conflict." };
+    } else if (obResult.description && (obResult.description.includes("Awaiting") || obResult.description.includes("awaiting"))) {
+      condDict["Institutional Order Block Setup (Setup 5)"] = { status: "FAIL", reason: obResult.description };
+    } else {
+      condDict["Institutional Order Block Setup (Setup 5)"] = { status: "SKIP", reason: obResult.description || "No active order block setup" };
+    }
+
+    // 4. Setup 6: Volatility Squeeze Breakout
+    const squeezeResult = this.evaluateVolatilitySqueeze();
+    const absorptionResult = this.detectOrderFlowAbsorption(direction);
+    const isSqueezeSetupValid = (squeezeResult.squeezeFired && squeezeResult.squeezeFiredDirection === direction) ||
+      (squeezeResult.isSqueezed && (hasHighHFPressure || absorptionResult.isAbsorption));
+    const sqDesc = squeezeResult.squeezeFired
+      ? `[Setup 6 - Volatility Squeeze Expansion Confirmed]: Momentum fired in direction of ${direction} from compressed Bollinger/Keltner base.`
+      : (squeezeResult.isSqueezed
+          ? `[Setup 6 - Pre-Breakout Squeeze Accumulation Confirmed]: Volatility tightly coiled with institutional order flow absorption (${absorptionResult.type || "High HF Pressure"}).`
+          : squeezeResult.description);
+    if (isSqueezeSetupValid) {
+      condDict["Volatility Squeeze Setup (Setup 6)"] = { status: isMtfAligned ? "PASS" : "FAIL", reason: isMtfAligned ? sqDesc : "Blocked by 5m MTF Trend conflict." };
+    } else {
+      condDict["Volatility Squeeze Setup (Setup 6)"] = { status: "SKIP", reason: squeezeResult.description || "No active volatility squeeze" };
+    }
+
+    // 5. Setup 7: Trendline Breakout
+    const tlResult = this.evaluateTrendlineBreakoutSetup(direction);
+    if (tlResult.isValid) {
+      condDict["Trendline Breakout Setup (Setup 7)"] = { status: isMtfAligned ? "PASS" : "FAIL", reason: isMtfAligned ? tlResult.description : "Blocked by 5m MTF Trend conflict." };
+    } else if (tlResult.description && !tlResult.description.includes("No active") && !tlResult.description.includes("disabled")) {
+      condDict["Trendline Breakout Setup (Setup 7)"] = { status: "FAIL", reason: tlResult.description };
+    } else {
+      condDict["Trendline Breakout Setup (Setup 7)"] = { status: "SKIP", reason: tlResult.description || "No active trendline breakout setup" };
+    }
+
+    // 6. Setup 8: Micro-Trend Flag Breakout
+    const flagResult = this.evaluateMicroFlagSetup(direction);
+    if (flagResult.isValid) {
+      condDict["Micro-Trend Flag Breakout Setup (Setup 8)"] = { status: isMtfAligned ? "PASS" : "FAIL", reason: isMtfAligned ? flagResult.description : "Blocked by 5m MTF Trend conflict." };
+    } else if (flagResult.description && !flagResult.description.includes("No active") && !flagResult.description.includes("disabled")) {
+      condDict["Micro-Trend Flag Breakout Setup (Setup 8)"] = { status: "FAIL", reason: flagResult.description };
+    } else {
+      condDict["Micro-Trend Flag Breakout Setup (Setup 8)"] = { status: "SKIP", reason: flagResult.description || "No active micro-flag setup" };
+    }
+
+    // 7. Setup 9: Range Failed Auction / SFP Reclaim
+    const failedAuctionResult = this.evaluateFailedAuctionSetup(direction);
+    if (failedAuctionResult.isValid) {
+      condDict["Range Failed Auction Reclaim Setup (Setup 9)"] = { status: "PASS", reason: failedAuctionResult.description };
+    } else if (failedAuctionResult.description && !failedAuctionResult.description.includes("No active") && !failedAuctionResult.description.includes("disabled")) {
+      condDict["Range Failed Auction Reclaim Setup (Setup 9)"] = { status: "FAIL", reason: failedAuctionResult.description };
+    } else {
+      condDict["Range Failed Auction Reclaim Setup (Setup 9)"] = { status: "SKIP", reason: failedAuctionResult.description || "No active range failed auction setup" };
+    }
+
+    // --- PRIORITY DISPATCH FOR SMC / SPECIALIZED SETUPS ---
+    if (sweepResult.isSweep) {
       condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Liquidity Sweep Reversal Setup" };
       condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Liquidity sweep confirmed at level $${sweepResult.sweptLevel.toFixed(2)}` };
       condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: `Reclaimed with ${sweepResult.wickRatio.toFixed(0)}% wick` };
@@ -3904,6 +3971,8 @@ class TradingEngine {
       condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "Reclamation intact" };
       condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Sweep reversal candle" };
       condDict["Volume-Validated Pullback"] = { status: "PASS", reason: `Confirmed volume expansion (${sweepResult.volumeMult.toFixed(1)}x)` };
+      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Liquidity Sweep Setup (Setup 3)" };
+      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Liquidity Sweep Setup (Setup 3)" };
       if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
         condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Liquidity sweep reversal entry" };
       }
@@ -3912,108 +3981,102 @@ class TradingEngine {
         true,
         `[Setup 3 - Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`
       );
-    } else if (sweepResult.description.includes("awaiting CHoCH")) {
-      condDict["Liquidity Sweep Setup (Setup 3)"] = { status: "FAIL", reason: sweepResult.description };
     }
 
-    // --- FEATURE 6: Fair Value Gap (FVG) Retest Setup (Setup 4) Check ---
-    const fvgResult = this.evaluateFVGSetup(direction);
-    if (fvgResult.isFvgValid) {
-      if (!isMtfAligned) {
-        condDict["Fair Value Gap Retest Setup (Setup 4)"] = { status: "FAIL", reason: `Blocked by 5m MTF Trend conflict.` };
-      } else {
-        condDict["Fair Value Gap Retest Setup (Setup 4)"] = { status: "PASS", reason: fvgResult.description };
-        condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Fair Value Gap Inefficiency Retest" };
-        condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `FVG entry target confirmed at $${fvgResult.fvgLevel.toFixed(2)}` };
-        condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "FVG displacement candle" };
-        condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "FVG retracement entry" };
-        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "FVG boundaries holding" };
-        condDict["Chasing Lookback limit"] = { status: "PASS", reason: "FVG retracement entry" };
-        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "FVG retest volume within bounds" };
+    if (fvgResult.isFvgValid && isMtfAligned) {
+      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Fair Value Gap Inefficiency Retest" };
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `FVG entry target confirmed at $${fvgResult.fvgLevel.toFixed(2)}` };
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "FVG displacement candle" };
+      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "FVG retracement entry" };
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "FVG boundaries holding" };
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "FVG retracement entry" };
+      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "FVG retest volume within bounds" };
+      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Fair Value Gap Retest (Setup 4)" };
+      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Fair Value Gap Retest (Setup 4)" };
 
-        return getReturnObj(
-          true,
-          `[Setup 4 - Fair Value Gap Retest Confirmed] ${fvgResult.description}`
-        );
-      }
-    } else if (fvgResult.description.includes("Awaiting") || fvgResult.description.includes("awaiting")) {
-      condDict["Fair Value Gap Retest Setup (Setup 4)"] = { status: "FAIL", reason: fvgResult.description };
+      return getReturnObj(
+        true,
+        `[Setup 4 - Fair Value Gap Retest Confirmed] ${fvgResult.description}`
+      );
     }
 
-    // --- FEATURE 7: Institutional Order Block (OB) Retest Setup (Setup 5) Check ---
-    const obResult = this.evaluateOrderBlockSetup(direction);
-    if (obResult.isObValid) {
-      if (!isMtfAligned) {
-        condDict["Institutional Order Block Setup (Setup 5)"] = { status: "FAIL", reason: `Blocked by 5m MTF Trend conflict.` };
-      } else {
-        condDict["Institutional Order Block Setup (Setup 5)"] = { status: "PASS", reason: obResult.description };
-        condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Institutional Order Block Retest" };
-        condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Order Block zone $${obResult.obLow.toFixed(2)} - $${obResult.obHigh.toFixed(2)}` };
-        condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "OB displacement candle" };
-        condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Order block retest entry" };
-        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "Order block holding" };
-        condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Order block retest entry" };
-        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Order block retest volume valid" };
+    if (obResult.isObValid && isMtfAligned) {
+      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Institutional Order Block Retest" };
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Order Block zone $${obResult.obLow.toFixed(2)} - $${obResult.obHigh.toFixed(2)}` };
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "OB displacement candle" };
+      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Order block retest entry" };
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "Order block holding" };
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Order block retest entry" };
+      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Order block retest volume valid" };
+      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Order Block Retest (Setup 5)" };
+      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Order Block Retest (Setup 5)" };
 
-        return getReturnObj(
-          true,
-          `[Setup 5 - Institutional Order Block Retest Confirmed] ${obResult.description}`
-        );
-      }
-    } else if (obResult.description.includes("Awaiting") || obResult.description.includes("awaiting")) {
-      condDict["Institutional Order Block Setup (Setup 5)"] = { status: "FAIL", reason: obResult.description };
+      return getReturnObj(
+        true,
+        `[Setup 5 - Institutional Order Block Retest Confirmed] ${obResult.description}`
+      );
     }
 
-    // --- FEATURE 8: Volatility Squeeze Breakout Setup (Setup 6) Check ---
-    const squeezeResult = this.evaluateVolatilitySqueeze();
-    const absorptionResult = this.detectOrderFlowAbsorption(direction);
-    const isSqueezeSetupValid = (squeezeResult.squeezeFired && squeezeResult.squeezeFiredDirection === direction) ||
-      (squeezeResult.isSqueezed && (hasHighHFPressure || absorptionResult.isAbsorption));
+    if (isSqueezeSetupValid && isMtfAligned) {
+      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Volatility Squeeze Expansion Setup" };
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: "Squeeze release at compression origin" };
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Squeeze expansion candle" };
+      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Early squeeze entry" };
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "Compression baseline holding" };
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Squeeze entry at inflection" };
+      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Squeeze breakout volume valid" };
+      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Volatility Squeeze Setup (Setup 6)" };
+      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Volatility Squeeze Setup (Setup 6)" };
 
-    if (isSqueezeSetupValid) {
-      if (!isMtfAligned) {
-        condDict["Volatility Squeeze Setup (Setup 6)"] = { status: "FAIL", reason: "Blocked by 5m MTF Trend conflict." };
-      } else {
-        const sqDesc = squeezeResult.squeezeFired
-          ? `[Setup 6 - Volatility Squeeze Expansion Confirmed]: Momentum fired in direction of ${direction} from compressed Bollinger/Keltner base.`
-          : `[Setup 6 - Pre-Breakout Squeeze Accumulation Confirmed]: Volatility tightly coiled with institutional order flow absorption (${absorptionResult.type || "High HF Pressure"}).`;
-        condDict["Volatility Squeeze Setup (Setup 6)"] = { status: "PASS", reason: sqDesc };
-        condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Volatility Squeeze Expansion Setup" };
-        condDict["Breakout Level Confirmation"] = { status: "PASS", reason: "Squeeze release at compression origin" };
-        condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Squeeze expansion candle" };
-        condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Early squeeze entry" };
-        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "Compression baseline holding" };
-        condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Squeeze entry at inflection" };
-        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Squeeze breakout volume valid" };
-
-        return getReturnObj(true, sqDesc);
-      }
-    } else {
-      condDict["Volatility Squeeze Setup (Setup 6)"] = { status: "SKIP", reason: squeezeResult.description };
+      return getReturnObj(true, sqDesc);
     }
 
-    // --- FEATURE 9: Trendline Breakout Setup (Setup 7) Check ---
-    const tlResult = this.evaluateTrendlineBreakoutSetup(direction);
-    if (tlResult.isValid) {
-      if (!isMtfAligned) {
-        condDict["Trendline Breakout Setup (Setup 7)"] = { status: "FAIL", reason: "Blocked by 5m MTF Trend conflict." };
-      } else {
-        const tlDesc = `[Setup 7 - Trendline Breakout Confirmed]: ${tlResult.description}`;
-        condDict["Trendline Breakout Setup (Setup 7)"] = { status: "PASS", reason: tlDesc };
-        condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Valid Trendline Breakout Setup" };
-        condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Trendline level $${tlResult.trendlinePrice.toFixed(2)} broken at trigger $${tlResult.triggerLevel.toFixed(2)}` };
-        condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Trendline expansion candle" };
-        condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: `${tlResult.entryType} execution` };
-        condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `SL at $${tlResult.stopLoss.toFixed(2)}` };
-        condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Trendline breakout at inflection" };
-        condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Breakout volume valid" };
+    if (tlResult.isValid && isMtfAligned) {
+      const tlDesc = `[Setup 7 - Trendline Breakout Confirmed]: ${tlResult.description}`;
+      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Valid Trendline Breakout Setup" };
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Trendline level $${tlResult.trendlinePrice.toFixed(2)} broken at trigger $${tlResult.triggerLevel.toFixed(2)}` };
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Trendline expansion candle" };
+      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: `${tlResult.entryType} execution` };
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `SL at $${tlResult.stopLoss.toFixed(2)}` };
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Trendline breakout at inflection" };
+      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Breakout volume valid" };
+      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Trendline Breakout Setup (Setup 7)" };
+      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Trendline Breakout Setup (Setup 7)" };
 
-        return getReturnObj(true, tlDesc);
+      return getReturnObj(true, tlDesc);
+    }
+
+    if (flagResult.isValid && isMtfAligned) {
+      const flagDesc = `[Setup 8 - Micro-Trend Flag Breakout Confirmed]: ${flagResult.description}`;
+      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for High-Momentum Micro-Flag Breakout" };
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Flag consolidation high/low $${flagResult.triggerLevel.toFixed(2)} broken out` };
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Flag breakout expansion candle" };
+      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Direct micro-flag momentum entry" };
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `SL at $${flagResult.stopLoss.toFixed(2)}` };
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Micro-flag breakout entry" };
+      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Breakout volume expansion valid" };
+      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Micro-Flag Breakout Setup (Setup 8)" };
+      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Micro-Flag Breakout Setup (Setup 8)" };
+
+      return getReturnObj(true, flagDesc);
+    }
+
+    if (failedAuctionResult.isValid) {
+      const faDesc = `[Setup 9 - Range Failed Auction Reclaim Confirmed]: ${failedAuctionResult.description}`;
+      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Range Failed Auction Mean Reversion" };
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Range boundary $${failedAuctionResult.rangeBoundary.toFixed(2)} reclaimed` };
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Reclamation candle confirmed" };
+      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "SFP Reclaim entry" };
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `SL at $${failedAuctionResult.stopLoss.toFixed(2)}` };
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Inflection point reclaim" };
+      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Delta absorption validated" };
+      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Range Failed Auction Setup (Setup 9)" };
+      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Range Failed Auction Setup (Setup 9)" };
+      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
+        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Range false breakout mean-reversion" };
       }
-    } else if (tlResult.description && !tlResult.description.includes("No active") && !tlResult.description.includes("disabled")) {
-      condDict["Trendline Breakout Setup (Setup 7)"] = { status: "FAIL", reason: tlResult.description };
-    } else {
-      condDict["Trendline Breakout Setup (Setup 7)"] = { status: "SKIP", reason: tlResult.description || "No active trendline breakout setup" };
+
+      return getReturnObj(true, faDesc);
     }
 
     // Block standard trend setups if MTF trend alignment fails
@@ -6230,6 +6293,417 @@ class TradingEngine {
     }
   }
 
+  /**
+   * FEATURE 10: Setup 8 - Micro Bull / Bear Flag Breakout (High-Momentum Shallow Retracement)
+   * Captures fast expansion bursts (flagpole) followed by tight shallow consolidation (3-6 candles, <=38.2% retrace)
+   * and high-volume breakout in the trending direction on 1m scalping charts.
+   */
+  public evaluateMicroFlagSetup(direction: "LONG" | "SHORT" | "NEUTRAL"): {
+    isValid: boolean;
+    direction: "LONG" | "SHORT" | "NEUTRAL";
+    triggerLevel: number;
+    stopLoss: number;
+    takeProfit: number;
+    poleHeight: number;
+    retracePct: number;
+    flagCandles: number;
+    description: string;
+  } {
+    const config = dbManager.getConfig();
+    const ms = config.market_structure || ({} as MarketStructureConfig);
+
+    if (ms.micro_flag_strategy_enabled === false || direction === "NEUTRAL") {
+      return {
+        isValid: false,
+        direction,
+        triggerLevel: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        poleHeight: 0,
+        retracePct: 0,
+        flagCandles: 0,
+        description: ms.micro_flag_strategy_enabled === false ? "Micro Flag strategy disabled" : "Neutral direction"
+      };
+    }
+
+    if (this.candles1m.length < 15) {
+      return {
+        isValid: false,
+        direction,
+        triggerLevel: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        poleHeight: 0,
+        retracePct: 0,
+        flagCandles: 0,
+        description: "Insufficient candle history"
+      };
+    }
+
+    const lastIdx = this.candles1m.length - 1;
+    const currentCandle = this.candles1m[lastIdx];
+    const currentPrice = this.currentPrice;
+
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentAtr = atr14[lastIdx] || 50;
+
+    const minPoleAtrMult = ms.micro_flag_min_pole_atr_mult !== undefined ? ms.micro_flag_min_pole_atr_mult : 1.5;
+    const maxRetracePct = ms.micro_flag_max_retrace_pct !== undefined ? ms.micro_flag_max_retrace_pct : 38.2;
+    const maxFlagCandles = ms.micro_flag_consolidation_max_candles !== undefined ? ms.micro_flag_consolidation_max_candles : 6;
+    const minVolRatio = ms.micro_flag_min_breakout_volume_ratio !== undefined ? ms.micro_flag_min_breakout_volume_ratio : 1.25;
+
+    const relVolume = this.calculateAccurateRelativeVolume();
+
+    if (direction === "LONG") {
+      // Look for a bullish flag:
+      // 1. Consolidation window: last 2 to maxFlagCandles (excluding the current breakout candle)
+      // 2. Pole window: 2 to 5 candles preceding the consolidation
+      for (let flagLen = 2; flagLen <= maxFlagCandles; flagLen++) {
+        const flagEndIdx = lastIdx - 1; // last closed candle
+        const flagStartIdx = flagEndIdx - flagLen + 1;
+        if (flagStartIdx < 3) continue;
+
+        const flagSlice = this.candles1m.slice(flagStartIdx, flagEndIdx + 1);
+        const flagHigh = Math.max(...flagSlice.map(c => c.high));
+        const flagLow = Math.min(...flagSlice.map(c => c.low));
+
+        // Scan pole of 2 to 5 candles prior to flag start
+        for (let poleLen = 2; poleLen <= 5; poleLen++) {
+          const poleStartIdx = flagStartIdx - poleLen;
+          if (poleStartIdx < 0) continue;
+
+          const poleSlice = this.candles1m.slice(poleStartIdx, flagStartIdx);
+          const poleLow = Math.min(...poleSlice.map(c => c.low));
+          const poleHigh = Math.max(...poleSlice.map(c => c.high));
+          const poleHeight = poleHigh - poleLow;
+
+          // Check if pole is sufficiently impulsive (>= minPoleAtrMult * ATR)
+          if (poleHeight < minPoleAtrMult * currentAtr) continue;
+
+          // Check if retracement is shallow (flagLow should not retrace > maxRetracePct of poleHeight from poleHigh)
+          const retraceAmount = poleHigh - flagLow;
+          const retracePct = (retraceAmount / poleHeight) * 100;
+          if (retracePct > maxRetracePct || retraceAmount < 0) continue;
+
+          // Volume in consolidation should be relatively dry compared to pole
+          const poleAvgVol = poleSlice.reduce((sum, c) => sum + c.volume, 0) / poleSlice.length;
+          const flagAvgVol = flagSlice.reduce((sum, c) => sum + c.volume, 0) / flagSlice.length;
+          const isVolumeContracted = flagAvgVol <= poleAvgVol * 1.15;
+
+          // Check breakout condition:
+          // Current price or current candle breaks above the flag consolidation high with relative volume
+          const isBreakingOut = currentCandle.close > flagHigh || currentPrice > flagHigh;
+          const isVolumeConfirmed = relVolume >= minVolRatio || this.orderFlowStats.takerBuyRatio >= 0.55;
+
+          if (isBreakingOut && isVolumeConfirmed && isVolumeContracted) {
+            const stopLoss = flagLow - 0.20 * currentAtr;
+            const targetExtension = flagHigh + Math.max(poleHeight * 0.8, 1.5 * currentAtr);
+
+            return {
+              isValid: true,
+              direction: "LONG",
+              triggerLevel: flagHigh,
+              stopLoss,
+              takeProfit: targetExtension,
+              poleHeight,
+              retracePct: Number(retracePct.toFixed(1)),
+              flagCandles: flagLen,
+              description: `Bullish Micro-Flag Breakout: Impulsive pole +$${poleHeight.toFixed(2)} (${(poleHeight / currentAtr).toFixed(1)}x ATR) consolidated for ${flagLen} candles with shallow ${retracePct.toFixed(1)}% retrace. Broken out above $${flagHigh.toFixed(2)} with ${(relVolume).toFixed(2)}x volume (SL: $${stopLoss.toFixed(2)}, TP: $${targetExtension.toFixed(2)}).`
+            };
+          }
+        }
+      }
+
+      return {
+        isValid: false,
+        direction: "LONG",
+        triggerLevel: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        poleHeight: 0,
+        retracePct: 0,
+        flagCandles: 0,
+        description: "No active bullish micro-flag breakout setup"
+      };
+    } else {
+      // SHORT: Look for a bearish flag
+      for (let flagLen = 2; flagLen <= maxFlagCandles; flagLen++) {
+        const flagEndIdx = lastIdx - 1;
+        const flagStartIdx = flagEndIdx - flagLen + 1;
+        if (flagStartIdx < 3) continue;
+
+        const flagSlice = this.candles1m.slice(flagStartIdx, flagEndIdx + 1);
+        const flagHigh = Math.max(...flagSlice.map(c => c.high));
+        const flagLow = Math.min(...flagSlice.map(c => c.low));
+
+        for (let poleLen = 2; poleLen <= 5; poleLen++) {
+          const poleStartIdx = flagStartIdx - poleLen;
+          if (poleStartIdx < 0) continue;
+
+          const poleSlice = this.candles1m.slice(poleStartIdx, flagStartIdx);
+          const poleLow = Math.min(...poleSlice.map(c => c.low));
+          const poleHigh = Math.max(...poleSlice.map(c => c.high));
+          const poleHeight = poleHigh - poleLow;
+
+          if (poleHeight < minPoleAtrMult * currentAtr) continue;
+
+          const retraceAmount = flagHigh - poleLow;
+          const retracePct = (retraceAmount / poleHeight) * 100;
+          if (retracePct > maxRetracePct || retraceAmount < 0) continue;
+
+          const poleAvgVol = poleSlice.reduce((sum, c) => sum + c.volume, 0) / poleSlice.length;
+          const flagAvgVol = flagSlice.reduce((sum, c) => sum + c.volume, 0) / flagSlice.length;
+          const isVolumeContracted = flagAvgVol <= poleAvgVol * 1.15;
+
+          const isBreakingDown = currentCandle.close < flagLow || currentPrice < flagLow;
+          const isVolumeConfirmed = relVolume >= minVolRatio || this.orderFlowStats.takerBuyRatio <= 0.45;
+
+          if (isBreakingDown && isVolumeConfirmed && isVolumeContracted) {
+            const stopLoss = flagHigh + 0.20 * currentAtr;
+            const targetExtension = flagLow - Math.max(poleHeight * 0.8, 1.5 * currentAtr);
+
+            return {
+              isValid: true,
+              direction: "SHORT",
+              triggerLevel: flagLow,
+              stopLoss,
+              takeProfit: targetExtension,
+              poleHeight,
+              retracePct: Number(retracePct.toFixed(1)),
+              flagCandles: flagLen,
+              description: `Bearish Micro-Flag Breakdown: Impulsive pole -$${poleHeight.toFixed(2)} (${(poleHeight / currentAtr).toFixed(1)}x ATR) consolidated for ${flagLen} candles with shallow ${retracePct.toFixed(1)}% retrace. Broken down below $${flagLow.toFixed(2)} with ${(relVolume).toFixed(2)}x volume (SL: $${stopLoss.toFixed(2)}, TP: $${targetExtension.toFixed(2)}).`
+            };
+          }
+        }
+      }
+
+      return {
+        isValid: false,
+        direction: "SHORT",
+        triggerLevel: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        poleHeight: 0,
+        retracePct: 0,
+        flagCandles: 0,
+        description: "No active bearish micro-flag breakdown setup"
+      };
+    }
+  }
+
+  /**
+   * FEATURE 11: Setup 9 - Range Failed Auction / Swing Failure Pattern (SFP) Reclaim
+   * Captures false breakouts outside established range boundaries that fail within 1-3 candles
+   * and decisively close back inside the range with delta/order flow absorption.
+   */
+  public evaluateFailedAuctionSetup(direction: "LONG" | "SHORT" | "NEUTRAL"): {
+    isValid: boolean;
+    direction: "LONG" | "SHORT" | "NEUTRAL";
+    rangeBoundary: number;
+    reclaimPrice: number;
+    deviationAtr: number;
+    candlesOutside: number;
+    stopLoss: number;
+    takeProfit: number;
+    description: string;
+  } {
+    const config = dbManager.getConfig();
+    const ms = config.market_structure || ({} as MarketStructureConfig);
+
+    if (ms.failed_auction_strategy_enabled === false || direction === "NEUTRAL") {
+      return {
+        isValid: false,
+        direction,
+        rangeBoundary: 0,
+        reclaimPrice: 0,
+        deviationAtr: 0,
+        candlesOutside: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        description: ms.failed_auction_strategy_enabled === false ? "Failed Auction strategy disabled" : "Neutral direction"
+      };
+    }
+
+    if (this.candles1m.length < 25) {
+      return {
+        isValid: false,
+        direction,
+        rangeBoundary: 0,
+        reclaimPrice: 0,
+        deviationAtr: 0,
+        candlesOutside: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        description: "Insufficient candle history"
+      };
+    }
+
+    const lastIdx = this.candles1m.length - 1;
+    const currentCandle = this.candles1m[lastIdx];
+    const currentPrice = this.currentPrice;
+
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentAtr = atr14[lastIdx] || 50;
+
+    const maxDeviationAtr = ms.failed_auction_max_deviation_atr_mult !== undefined ? ms.failed_auction_max_deviation_atr_mult : 0.8;
+    const maxCandlesOutside = ms.failed_auction_max_candles_outside !== undefined ? ms.failed_auction_max_candles_outside : 3;
+
+    // Define the range bounding box from the prior 25-30 candles (excluding current/recent poke)
+    const rangeLookback = 30;
+    const rangeStartIdx = Math.max(0, lastIdx - rangeLookback);
+    const rangeSlice = this.candles1m.slice(rangeStartIdx, Math.max(rangeStartIdx + 10, lastIdx - 4));
+    if (rangeSlice.length < 10) {
+      return {
+        isValid: false,
+        direction,
+        rangeBoundary: 0,
+        reclaimPrice: 0,
+        deviationAtr: 0,
+        candlesOutside: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        description: "Insufficient range window"
+      };
+    }
+
+    const rangeHigh = Math.max(...rangeSlice.map(c => c.high));
+    const rangeLow = Math.min(...rangeSlice.map(c => c.low));
+    const rangeMedian = (rangeHigh + rangeLow) / 2;
+
+    const absorption = this.detectOrderFlowAbsorption(direction);
+
+    if (direction === "LONG") {
+      // Bullish Failed Auction / SFP at Range Low:
+      // Price poked below rangeLow (poked out by <= maxDeviationAtr * ATR), spent <= maxCandlesOutside below,
+      // and current candle has closed or is actively closing back ABOVE rangeLow with bullish momentum/absorption.
+      let pokeLowest = rangeLow;
+      let pokeCount = 0;
+      let pokeStartIndex = -1;
+
+      // Also check if the current candle itself wicked below rangeLow and is already reclaiming
+      const currentLowPoked = currentCandle.low < rangeLow;
+      if (currentLowPoked) {
+        pokeLowest = Math.min(pokeLowest, currentCandle.low);
+        pokeCount++;
+      }
+
+      for (let i = 1; i <= Math.min(6, lastIdx - rangeStartIdx); i++) {
+        const c = this.candles1m[lastIdx - i];
+        if (c.low < rangeLow) {
+          pokeLowest = Math.min(pokeLowest, c.low);
+          pokeCount++;
+          if (pokeStartIndex === -1) pokeStartIndex = lastIdx - i;
+        } else if (pokeCount > 0) {
+          // Finished the poke window
+          break;
+        }
+      }
+
+      if (pokeCount >= 1 && pokeCount <= maxCandlesOutside) {
+        const deviationAmount = rangeLow - pokeLowest;
+        const deviationAtrRatio = deviationAmount / currentAtr;
+
+        // Check that the overshoot was not a massive runaway trend breakdown
+        if (deviationAtrRatio <= maxDeviationAtr && deviationAmount > 0.02 * currentAtr) {
+          // Check that price is now firmly reclaimed back INSIDE the range (above rangeLow)
+          const isReclaimed = currentCandle.close >= rangeLow || currentPrice >= rangeLow;
+          const isBullishCandle = currentCandle.close >= currentCandle.open || currentPrice >= currentCandle.open || (currentCandle.close - currentCandle.low) > (currentCandle.high - currentCandle.close);
+          const isOrderFlowSupported = absorption.isAbsorption || this.orderFlowStats.takerBuyRatio >= 0.45 || this.orderBookStats.imbalanceRatio >= -0.15;
+
+          if (isReclaimed && isBullishCandle && isOrderFlowSupported) {
+            const stopLoss = pokeLowest - 0.15 * currentAtr;
+            const takeProfit = rangeHigh - 0.15 * currentAtr;
+
+            return {
+              isValid: true,
+              direction: "LONG",
+              rangeBoundary: rangeLow,
+              reclaimPrice: currentPrice,
+              deviationAtr: Number(deviationAtrRatio.toFixed(2)),
+              candlesOutside: pokeCount,
+              stopLoss,
+              takeProfit,
+              description: `Bullish Range Failed Auction (SFP Reclaim): Price false-breakdown low $${pokeLowest.toFixed(2)} (-${(deviationAtrRatio).toFixed(2)}x ATR for ${pokeCount}c) reclaimed back above Range Low $${rangeLow.toFixed(2)}. ${absorption.type || "Bullish delta reversal"} targeting median $${rangeMedian.toFixed(2)} and Range High $${rangeHigh.toFixed(2)} (SL: $${stopLoss.toFixed(2)}).`
+            };
+          }
+        }
+      }
+
+      return {
+        isValid: false,
+        direction: "LONG",
+        rangeBoundary: rangeLow,
+        reclaimPrice: 0,
+        deviationAtr: 0,
+        candlesOutside: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        description: "No active bullish range failed auction setup"
+      };
+    } else {
+      // SHORT: Bearish Failed Auction / SFP at Range High
+      let pokeHighest = rangeHigh;
+      let pokeCount = 0;
+
+      // Also check if current candle itself wicked above rangeHigh and is already reclaiming
+      const currentHighPoked = currentCandle.high > rangeHigh;
+      if (currentHighPoked) {
+        pokeHighest = Math.max(pokeHighest, currentCandle.high);
+        pokeCount++;
+      }
+
+      for (let i = 1; i <= Math.min(6, lastIdx - rangeStartIdx); i++) {
+        const c = this.candles1m[lastIdx - i];
+        if (c.high > rangeHigh) {
+          pokeHighest = Math.max(pokeHighest, c.high);
+          pokeCount++;
+        } else if (pokeCount > 0) {
+          break;
+        }
+      }
+
+      if (pokeCount >= 1 && pokeCount <= maxCandlesOutside) {
+        const deviationAmount = pokeHighest - rangeHigh;
+        const deviationAtrRatio = deviationAmount / currentAtr;
+
+        if (deviationAtrRatio <= maxDeviationAtr && deviationAmount > 0.02 * currentAtr) {
+          const isReclaimed = currentCandle.close <= rangeHigh || currentPrice <= rangeHigh;
+          const isBearishCandle = currentCandle.close <= currentCandle.open || currentPrice <= currentCandle.open || (currentCandle.high - currentCandle.close) > (currentCandle.close - currentCandle.low);
+          const isOrderFlowSupported = absorption.isAbsorption || this.orderFlowStats.takerBuyRatio <= 0.55 || this.orderBookStats.imbalanceRatio <= 0.15;
+
+          if (isReclaimed && isBearishCandle && isOrderFlowSupported) {
+            const stopLoss = pokeHighest + 0.15 * currentAtr;
+            const takeProfit = rangeLow + 0.15 * currentAtr;
+
+            return {
+              isValid: true,
+              direction: "SHORT",
+              rangeBoundary: rangeHigh,
+              reclaimPrice: currentPrice,
+              deviationAtr: Number(deviationAtrRatio.toFixed(2)),
+              candlesOutside: pokeCount,
+              stopLoss,
+              takeProfit,
+              description: `Bearish Range Failed Auction (SFP Reclaim): Price false-breakout high $${pokeHighest.toFixed(2)} (+${(deviationAtrRatio).toFixed(2)}x ATR for ${pokeCount}c) reclaimed back below Range High $${rangeHigh.toFixed(2)}. ${absorption.type || "Bearish delta reversal"} targeting median $${rangeMedian.toFixed(2)} and Range Low $${rangeLow.toFixed(2)} (SL: $${stopLoss.toFixed(2)}).`
+            };
+          }
+        }
+      }
+
+      return {
+        isValid: false,
+        direction: "SHORT",
+        rangeBoundary: rangeHigh,
+        reclaimPrice: 0,
+        deviationAtr: 0,
+        candlesOutside: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        description: "No active bearish range failed auction setup"
+      };
+    }
+  }
+
   public evaluateContextAwareVolume(
     direction: "LONG" | "SHORT" | "NEUTRAL",
     relVolume: number,
@@ -6258,13 +6732,23 @@ class TradingEngine {
     const isOrderBlock = msg.includes("order block") || msg.includes("setup 5");
     const isSqueeze = msg.includes("squeeze") || msg.includes("setup 6");
     const isTrendlineBreakout = msg.includes("trendline breakout") || msg.includes("setup 7");
-    const isRangeReversal = regime === MarketRegime.RANGE_BOUND || msg.includes("range reversal") || msg.includes("ranging bullish") || msg.includes("ranging bearish");
+    const isMicroFlag = msg.includes("micro-flag") || msg.includes("micro-trend flag") || msg.includes("setup 8");
+    const isFailedAuction = msg.includes("failed auction") || msg.includes("sfp") || msg.includes("setup 9");
+    const isRangeReversal = regime === MarketRegime.RANGE_BOUND || isFailedAuction || msg.includes("range reversal") || msg.includes("ranging bullish") || msg.includes("ranging bearish");
 
     let setupCategory = "General Momentum";
     let targetRelVol = baseMinRelVol; // default e.g. 1.30x
     let categoryDescription = "Standard momentum entry: requires clear transaction volume expansion above 20-period moving average.";
 
-    if (isTrendlineBreakout) {
+    if (isMicroFlag) {
+      setupCategory = "Micro-Trend Flag Breakout";
+      targetRelVol = Math.max(1.15, Math.min(baseMinRelVol * 0.95, 1.25));
+      categoryDescription = "Micro-Trend Flag Breakout: Shallow consolidation breakout requires volume expansion (>= 1.20x) following consolidation volume dry-up.";
+    } else if (isFailedAuction) {
+      setupCategory = "Range Failed Auction (SFP Reclaim)";
+      targetRelVol = Math.min(baseMinRelVol * 0.85, 1.10);
+      categoryDescription = "Range Failed Auction: False breakout liquidity poke reclaimed back inside range with absorption volume (>= 1.10x).";
+    } else if (isTrendlineBreakout) {
       setupCategory = "Trendline Breakout Expansion";
       targetRelVol = Math.max(1.15, Math.min(baseMinRelVol * 0.90, 1.25));
       categoryDescription = "Trendline Breakout / Breakdown: Confirmed break of descending resistance or ascending support requires momentum volume expansion (>= 1.20x).";
@@ -8192,7 +8676,7 @@ class TradingEngine {
       const isRangeLongBreakout = (currentClose > rangeHigh) && breakoutValidationLong.isValid;
       const isRangeShortBreakdown = (currentClose < rangeLow) && breakoutValidationShort.isValid;
 
-      // Also check SMC & Setup 7 Trendline Breakouts during Range-Bound consolidation
+      // Also check SMC & Setup 7-9 Breakouts/Reclaims during Range-Bound consolidation
       const smcTlLong = this.evaluateTrendlineBreakoutSetup("LONG");
       const smcTlShort = this.evaluateTrendlineBreakoutSetup("SHORT");
       const smcSweepLong = this.detectLiquiditySweep("LONG");
@@ -8201,6 +8685,10 @@ class TradingEngine {
       const smcFvgShort = this.evaluateFVGSetup("SHORT");
       const smcObLong = this.evaluateOrderBlockSetup("LONG");
       const smcObShort = this.evaluateOrderBlockSetup("SHORT");
+      const smcFlagLong = this.evaluateMicroFlagSetup("LONG");
+      const smcFlagShort = this.evaluateMicroFlagSetup("SHORT");
+      const smcFaLong = this.evaluateFailedAuctionSetup("LONG");
+      const smcFaShort = this.evaluateFailedAuctionSetup("SHORT");
 
       if (isRangeLongReversal) {
         signalDirection = "LONG";
@@ -8210,9 +8698,9 @@ class TradingEngine {
         signalDirection = "LONG";
       } else if (isRangeShortBreakdown) {
         signalDirection = "SHORT";
-      } else if (smcTlLong.isValid || smcSweepLong.isSweep || smcFvgLong.isFvgValid || smcObLong.isObValid) {
+      } else if (smcFaLong.isValid || smcFlagLong.isValid || smcTlLong.isValid || smcSweepLong.isSweep || smcFvgLong.isFvgValid || smcObLong.isObValid) {
         signalDirection = "LONG";
-      } else if (smcTlShort.isValid || smcSweepShort.isSweep || smcFvgShort.isFvgValid || smcObShort.isObValid) {
+      } else if (smcFaShort.isValid || smcFlagShort.isValid || smcTlShort.isValid || smcSweepShort.isSweep || smcFvgShort.isFvgValid || smcObShort.isObValid) {
         signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
@@ -8220,11 +8708,15 @@ class TradingEngine {
     } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
       const smcTlLong = this.evaluateTrendlineBreakoutSetup("LONG");
       const smcTlShort = this.evaluateTrendlineBreakoutSetup("SHORT");
+      const smcFlagLong = this.evaluateMicroFlagSetup("LONG");
+      const smcFlagShort = this.evaluateMicroFlagSetup("SHORT");
+      const smcFaLong = this.evaluateFailedAuctionSetup("LONG");
+      const smcFaShort = this.evaluateFailedAuctionSetup("SHORT");
       const squeezeCheck = this.evaluateVolatilitySqueeze();
 
-      if (smcTlLong.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "LONG")) {
+      if (smcFaLong.isValid || smcFlagLong.isValid || smcTlLong.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "LONG")) {
         signalDirection = "LONG";
-      } else if (smcTlShort.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "SHORT")) {
+      } else if (smcFaShort.isValid || smcFlagShort.isValid || smcTlShort.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "SHORT")) {
         signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
@@ -8251,7 +8743,7 @@ class TradingEngine {
       const isNotLongBreakout = isScalperBreakoutLongAllowed ? true : (struct.current_HH ? currentClose <= struct.current_HH.price : true);
       const isNotShortBreakdown = isScalperBreakdownShortAllowed ? true : (struct.current_LL ? currentClose >= struct.current_LL.price : true);
 
-      // ALSO CHECK SMC SETUPS (Liquidity Sweep, FVG Retest, Order Block Retest, Trendline Breakout)
+      // ALSO CHECK SMC SETUPS (Liquidity Sweep, FVG Retest, Order Block Retest, Trendline Breakout, Micro-Flag, Failed Auction)
       const smcSweepLong = this.detectLiquiditySweep("LONG");
       const smcSweepShort = this.detectLiquiditySweep("SHORT");
       const smcFvgLong = this.evaluateFVGSetup("LONG");
@@ -8260,9 +8752,13 @@ class TradingEngine {
       const smcObShort = this.evaluateOrderBlockSetup("SHORT");
       const smcTlLong = this.evaluateTrendlineBreakoutSetup("LONG");
       const smcTlShort = this.evaluateTrendlineBreakoutSetup("SHORT");
+      const smcFlagLong = this.evaluateMicroFlagSetup("LONG");
+      const smcFlagShort = this.evaluateMicroFlagSetup("SHORT");
+      const smcFaLong = this.evaluateFailedAuctionSetup("LONG");
+      const smcFaShort = this.evaluateFailedAuctionSetup("SHORT");
 
-      const hasSmcLongSetup = smcSweepLong.isSweep || smcFvgLong.isFvgValid || smcObLong.isObValid || smcTlLong.isValid;
-      const hasSmcShortSetup = smcSweepShort.isSweep || smcFvgShort.isFvgValid || smcObShort.isObValid || smcTlShort.isValid;
+      const hasSmcLongSetup = smcSweepLong.isSweep || smcFvgLong.isFvgValid || smcObLong.isObValid || smcTlLong.isValid || smcFlagLong.isValid || smcFaLong.isValid;
+      const hasSmcShortSetup = smcSweepShort.isSweep || smcFvgShort.isFvgValid || smcObShort.isObValid || smcTlShort.isValid || smcFlagShort.isValid || smcFaShort.isValid;
 
       if ((isUptrendAligned && (hasValidPushbackLong || isScalperBreakoutLongAllowed) && isNotLongBreakout && probabilityLong >= 0.65) || hasSmcLongSetup) {
         signalDirection = "LONG";
@@ -8292,8 +8788,8 @@ class TradingEngine {
     const vwapLowerVal = lastCandle.vwap_lower !== undefined ? lastCandle.vwap_lower : currentClose * 0.99;
 
     // Evaluate active SMC structural setup presence for threshold & alignment bypass
-    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFVGSetup("LONG").isFvgValid || this.evaluateOrderBlockSetup("LONG").isObValid || this.evaluateTrendlineBreakoutSetup("LONG").isValid)) ||
-                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFVGSetup("SHORT").isFvgValid || this.evaluateOrderBlockSetup("SHORT").isObValid || this.evaluateTrendlineBreakoutSetup("SHORT").isValid));
+    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFVGSetup("LONG").isFvgValid || this.evaluateOrderBlockSetup("LONG").isObValid || this.evaluateTrendlineBreakoutSetup("LONG").isValid || this.evaluateMicroFlagSetup("LONG").isValid || this.evaluateFailedAuctionSetup("LONG").isValid)) ||
+                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFVGSetup("SHORT").isFvgValid || this.evaluateOrderBlockSetup("SHORT").isObValid || this.evaluateTrendlineBreakoutSetup("SHORT").isValid || this.evaluateMicroFlagSetup("SHORT").isValid || this.evaluateFailedAuctionSetup("SHORT").isValid));
 
     // 2. Conditions Check (Strict 10-Conditions Checklist)
     const conditions: {

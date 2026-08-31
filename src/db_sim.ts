@@ -278,6 +278,14 @@ const DEFAULT_CONFIG: StrategyConfig = {
     trendline_min_rr_ratio: 1.80,
     trendline_max_slope_deg: 55,
     trendline_lookback_candles: 45,
+    micro_flag_strategy_enabled: true,
+    micro_flag_min_pole_atr_mult: 1.5,
+    micro_flag_max_retrace_pct: 38.2,
+    micro_flag_consolidation_max_candles: 6,
+    micro_flag_min_breakout_volume_ratio: 1.25,
+    failed_auction_strategy_enabled: true,
+    failed_auction_max_deviation_atr_mult: 0.8,
+    failed_auction_max_candles_outside: 3,
   },
   gate_scoring: {
     enabled: true,
@@ -1197,6 +1205,14 @@ class DatabaseManager {
       if (ms.liquidity_sweep_volume_mult === undefined) { ms.liquidity_sweep_volume_mult = def.liquidity_sweep_volume_mult || 1.0; changed = true; }
       if (ms.pinbar_two_candle_confirmation_enabled === undefined) { ms.pinbar_two_candle_confirmation_enabled = def.pinbar_two_candle_confirmation_enabled !== undefined ? def.pinbar_two_candle_confirmation_enabled : true; changed = true; }
       if (ms.pinbar_min_wick_ratio === undefined) { ms.pinbar_min_wick_ratio = def.pinbar_min_wick_ratio || 0.50; changed = true; }
+      if (ms.micro_flag_strategy_enabled === undefined) { ms.micro_flag_strategy_enabled = def.micro_flag_strategy_enabled !== false; changed = true; }
+      if (ms.micro_flag_min_pole_atr_mult === undefined) { ms.micro_flag_min_pole_atr_mult = def.micro_flag_min_pole_atr_mult || 1.5; changed = true; }
+      if (ms.micro_flag_max_retrace_pct === undefined) { ms.micro_flag_max_retrace_pct = def.micro_flag_max_retrace_pct || 38.2; changed = true; }
+      if (ms.micro_flag_consolidation_max_candles === undefined) { ms.micro_flag_consolidation_max_candles = def.micro_flag_consolidation_max_candles || 6; changed = true; }
+      if (ms.micro_flag_min_breakout_volume_ratio === undefined) { ms.micro_flag_min_breakout_volume_ratio = def.micro_flag_min_breakout_volume_ratio || 1.25; changed = true; }
+      if (ms.failed_auction_strategy_enabled === undefined) { ms.failed_auction_strategy_enabled = def.failed_auction_strategy_enabled !== false; changed = true; }
+      if (ms.failed_auction_max_deviation_atr_mult === undefined) { ms.failed_auction_max_deviation_atr_mult = def.failed_auction_max_deviation_atr_mult || 0.8; changed = true; }
+      if (ms.failed_auction_max_candles_outside === undefined) { ms.failed_auction_max_candles_outside = def.failed_auction_max_candles_outside || 3; changed = true; }
     }
 
     if (!this.cache?.config?.gate_scoring) {

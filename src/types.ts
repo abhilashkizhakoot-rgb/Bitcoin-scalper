@@ -318,6 +318,14 @@ export interface StrategyConfig {
     trendline_min_rr_ratio?: number; // Minimum Risk-to-Reward ratio required for trendline breakout trade (default: 1.80)
     trendline_max_slope_deg?: number; // Maximum sustainable slope angle (degrees) to avoid cliff breakouts (default: 55)
     trendline_lookback_candles?: number; // Lookback window in 1m candles to scan for pivot trendlines (default: 45)
+    micro_flag_strategy_enabled?: boolean; // Enable Micro Bull/Bear Flag Breakout Strategy (Setup 8) (default: true)
+    micro_flag_min_pole_atr_mult?: number; // Minimum impulsive pole size relative to ATR (default: 1.5)
+    micro_flag_max_retrace_pct?: number; // Maximum allowed retracement percentage of pole height (default: 38.2%)
+    micro_flag_consolidation_max_candles?: number; // Maximum candles inside the flag consolidation (default: 6)
+    micro_flag_min_breakout_volume_ratio?: number; // Minimum volume ratio on breakout candle (default: 1.25)
+    failed_auction_strategy_enabled?: boolean; // Enable Range Failed Auction / SFP Reclaim Strategy (Setup 9) (default: true)
+    failed_auction_max_deviation_atr_mult?: number; // Maximum price poke beyond range boundary in ATR multiples (default: 0.8)
+    failed_auction_max_candles_outside?: number; // Maximum candles price spent outside boundary before reclaiming (default: 3)
   };
   gate_scoring?: {
     enabled: boolean;

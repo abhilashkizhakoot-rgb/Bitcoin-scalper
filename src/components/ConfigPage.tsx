@@ -3619,6 +3619,148 @@ export default function ConfigPage({
                   </div>
                 </div>
               </div>
+
+              {/* Grid 6: Micro Bull/Bear Flag Breakout (Setup 8) */}
+              <div className="border-t border-slate-100 pt-4 space-y-4">
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Enable Micro Bull/Bear Flag Strategy (Setup 8)</span>
+                    <p className="text-[10px] text-slate-400">Captures high-momentum shallow retracements in strong 1m trending markets without requiring deep EMA/swing pullbacks.</p>
+                  </div>
+                  <button
+                    id="micro_flag_toggle"
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, micro_flag_strategy_enabled: msConfig.micro_flag_strategy_enabled === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.micro_flag_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.micro_flag_strategy_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Pole ATR Multiple</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.8"
+                      max="4.0"
+                      disabled={msConfig.micro_flag_strategy_enabled === false}
+                      value={msConfig.micro_flag_min_pole_atr_mult ?? 1.5}
+                      onChange={(e) => setMsConfig({ ...msConfig, micro_flag_min_pole_atr_mult: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Minimum impulsive displacement height of the flag pole in ATR multiples (Standard: 1.5x ATR).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Max Retrace % of Pole</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="15"
+                      max="60"
+                      disabled={msConfig.micro_flag_strategy_enabled === false}
+                      value={msConfig.micro_flag_max_retrace_pct ?? 38.2}
+                      onChange={(e) => setMsConfig({ ...msConfig, micro_flag_max_retrace_pct: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Maximum shallow retrace depth allowed inside the flag before invalidation (Standard: 38.2%).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Max Consolidation Candles</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="2"
+                      max="10"
+                      disabled={msConfig.micro_flag_strategy_enabled === false}
+                      value={msConfig.micro_flag_consolidation_max_candles ?? 6}
+                      onChange={(e) => setMsConfig({ ...msConfig, micro_flag_consolidation_max_candles: parseInputNumber(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Maximum candle count in flag consolidation to ensure tight momentum (Standard: 6 candles).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Breakout Vol Ratio</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="1.0"
+                      max="3.0"
+                      disabled={msConfig.micro_flag_strategy_enabled === false}
+                      value={msConfig.micro_flag_min_breakout_volume_ratio ?? 1.25}
+                      onChange={(e) => setMsConfig({ ...msConfig, micro_flag_min_breakout_volume_ratio: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Relative volume expansion multiplier required on the flag breakout candle (Standard: 1.25x).</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid 7: Range Failed Auction / SFP Reclaim (Setup 9) */}
+              <div className="border-t border-slate-100 pt-4 space-y-4">
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Enable Range Failed Auction / SFP Strategy (Setup 9)</span>
+                    <p className="text-[10px] text-slate-400">Trades false breakout liquidity runs poking outside range boundaries that immediately close back inside with absorption.</p>
+                  </div>
+                  <button
+                    id="failed_auction_toggle"
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, failed_auction_strategy_enabled: msConfig.failed_auction_strategy_enabled === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.failed_auction_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.failed_auction_strategy_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Max Deviation ATR Multiple</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.2"
+                      max="2.0"
+                      disabled={msConfig.failed_auction_strategy_enabled === false}
+                      value={msConfig.failed_auction_max_deviation_atr_mult ?? 0.8}
+                      onChange={(e) => setMsConfig({ ...msConfig, failed_auction_max_deviation_atr_mult: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Maximum price overshoot beyond the range boundary in ATR multiples before treating as a true breakout (Standard: 0.8x ATR).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Max Candles Outside Boundary</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      max="6"
+                      disabled={msConfig.failed_auction_strategy_enabled === false}
+                      value={msConfig.failed_auction_max_candles_outside ?? 3}
+                      onChange={(e) => setMsConfig({ ...msConfig, failed_auction_max_candles_outside: parseInputNumber(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Maximum number of candles allowed outside the range before failing back inside (Standard: 3 candles).</p>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Commit Button */}

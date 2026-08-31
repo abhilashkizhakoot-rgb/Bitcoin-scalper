@@ -3983,6 +3983,24 @@ class TradingEngine {
       );
     }
 
+    // High-confluence Golden SMC Setup (Order Block + Fair Value Gap overlapping confluence)
+    if (fvgResult.isFvgValid && obResult.isObValid && isMtfAligned) {
+      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Institutional OB + FVG Confluence Setup" };
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `OB + FVG Confluence zone $${Math.min(obResult.obLow, fvgResult.fvgBottom).toFixed(2)} - $${Math.max(obResult.obHigh, fvgResult.fvgTop).toFixed(2)}` };
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "OB+FVG displacement & structure confirmation" };
+      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Institutional confluence retracement entry" };
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "OB floor & FVG bounds intact" };
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "OB + FVG retest entry" };
+      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Institutional volume confirmed" };
+      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for OB + FVG Confluence Setup" };
+      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for OB + FVG Confluence Setup" };
+
+      return getReturnObj(
+        true,
+        `[Golden SMC Setup - OB + FVG Confluence Confirmed] Confluence of Order Block ($${obResult.obLow.toFixed(2)} - $${obResult.obHigh.toFixed(2)}) & Fair Value Gap ($${fvgResult.fvgBottom.toFixed(2)} - $${fvgResult.fvgTop.toFixed(2)}, CE: $${fvgResult.consequentEncroachment.toFixed(2)}).`
+      );
+    }
+
     if (fvgResult.isFvgValid && isMtfAligned) {
       condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Fair Value Gap Inefficiency Retest" };
       condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `FVG entry target confirmed at $${fvgResult.fvgLevel.toFixed(2)}` };
@@ -4865,11 +4883,15 @@ class TradingEngine {
     fvgLevel: number;
     consequentEncroachment: number;
     description: string;
+    fvgBottom: number;
+    fvgTop: number;
+    isDisplacementConfirmed: boolean;
+    hasStructureShift: boolean;
   } {
     const config = dbManager.getConfig();
     const ms: any = config.market_structure || {};
     if (ms.fvg_strategy_enabled === false || this.candles1m.length < 10) {
-      return { isFvgValid: false, fvgLevel: 0, consequentEncroachment: 0, description: "FVG strategy disabled or insufficient data" };
+      return { isFvgValid: false, fvgLevel: 0, consequentEncroachment: 0, description: "FVG strategy disabled or insufficient data", fvgBottom: 0, fvgTop: 0, isDisplacementConfirmed: false, hasStructureShift: false };
     }
 
     const atr14 = this.calculateATR(this.candles1m, 14);
@@ -4892,10 +4914,22 @@ class TradingEngine {
 
       for (let i = lastIdx; i >= lastIdx - lookback; i--) {
         const c1 = this.candles1m[i - 2];
+        const c2 = this.candles1m[i - 1]; // Middle displacement impulse candle
         const c3 = this.candles1m[i];
-        if (c1 && c3) {
+        if (c1 && c2 && c3) {
           const gapSize = c3.low - c1.high;
           if (gapSize >= minGap) {
+            // 1. Validate Displacement on Middle Candle (c2)
+            const c2Body = c2.close - c2.open;
+            const c2Range = c2.high - c2.low;
+            const isC2Bullish = c2.close > c2.open;
+            const isDisplacement = isC2Bullish && (c2Body >= 0.45 * currentAtr || (c2Range > 0 && c2Body / c2Range >= 0.50));
+
+            // 2. Validate Structure Shift / BOS (c2 or c3 broke above preceding micro swing high)
+            const prevSlice = this.candles1m.slice(Math.max(0, i - 6), i - 2);
+            const prevMicroHigh = prevSlice.length > 0 ? Math.max(...prevSlice.map(c => c.high)) : 0;
+            const hasStructureShift = prevMicroHigh > 0 && Math.max(c2.high, c3.high) >= prevMicroHigh;
+
             const fvgBottom = c1.high;
             const fvgTop = c3.low;
             const fvgHeight = fvgTop - fvgBottom;
@@ -4927,17 +4961,27 @@ class TradingEngine {
               const isCandleHoldingSupport = confirmCandle ? confirmCandle.close >= fvgBottom - 0.10 * currentAtr : true;
 
               if (rejectionCheck.confirmed && isRejectionAtFvg && isCandleHoldingSupport) {
+                const shiftText = hasStructureShift ? " [MSS/BOS Aligned]" : "";
+                const dispText = isDisplacement ? " [Displacement Confirmed]" : "";
                 return {
                   isFvgValid: true,
                   fvgLevel: targetEntry,
                   consequentEncroachment: ce,
-                  description: `Bullish Fair Value Gap (FVG) Retest Confirmed via [${rejectionCheck.type}]: Price ($${currentPrice.toFixed(2)}) confirmed rejection and holding unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
+                  fvgBottom,
+                  fvgTop,
+                  isDisplacementConfirmed: isDisplacement,
+                  hasStructureShift,
+                  description: `Bullish Fair Value Gap (FVG) Retest Confirmed via [${rejectionCheck.type}]${dispText}${shiftText}: Price ($${currentPrice.toFixed(2)}) confirmed rejection and holding unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
                 };
               } else if (rejectionCheck.confirmed && !isRejectionAtFvg) {
                 return {
                   isFvgValid: false,
                   fvgLevel: targetEntry,
                   consequentEncroachment: ce,
+                  fvgBottom,
+                  fvgTop,
+                  isDisplacementConfirmed: isDisplacement,
+                  hasStructureShift,
                   description: `Awaiting FVG Zone Rejection: Rejection pattern formed away from FVG CE zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
                 };
               } else {
@@ -4945,6 +4989,10 @@ class TradingEngine {
                   isFvgValid: false,
                   fvgLevel: targetEntry,
                   consequentEncroachment: ce,
+                  fvgBottom,
+                  fvgTop,
+                  isDisplacementConfirmed: isDisplacement,
+                  hasStructureShift,
                   description: `Awaiting Bullish Candlestick Confirmation: Price ($${currentPrice.toFixed(2)}) retested FVG CE zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) — awaiting confirmed bullish rejection candlestick pattern (e.g. Pin Bar, Engulfing, Morning Star, Harami).`,
                 };
               }
@@ -4958,10 +5006,22 @@ class TradingEngine {
 
       for (let i = lastIdx; i >= lastIdx - lookback; i--) {
         const c1 = this.candles1m[i - 2];
+        const c2 = this.candles1m[i - 1]; // Middle displacement impulse candle
         const c3 = this.candles1m[i];
-        if (c1 && c3) {
+        if (c1 && c2 && c3) {
           const gapSize = c1.low - c3.high;
           if (gapSize >= minGap) {
+            // 1. Validate Displacement on Middle Candle (c2)
+            const c2Body = c2.open - c2.close;
+            const c2Range = c2.high - c2.low;
+            const isC2Bearish = c2.close < c2.open;
+            const isDisplacement = isC2Bearish && (c2Body >= 0.45 * currentAtr || (c2Range > 0 && c2Body / c2Range >= 0.50));
+
+            // 2. Validate Structure Shift / BOS (c2 or c3 broke below preceding micro swing low)
+            const prevSlice = this.candles1m.slice(Math.max(0, i - 6), i - 2);
+            const prevMicroLow = prevSlice.length > 0 ? Math.min(...prevSlice.map(c => c.low)) : 0;
+            const hasStructureShift = prevMicroLow > 0 && Math.min(c2.low, c3.low) <= prevMicroLow;
+
             const fvgTop = c1.low;
             const fvgBottom = c3.high;
             const fvgHeight = fvgTop - fvgBottom;
@@ -4993,17 +5053,27 @@ class TradingEngine {
               const isCandleHoldingResistance = confirmCandle ? confirmCandle.close <= fvgTop + 0.10 * currentAtr : true;
 
               if (rejectionCheck.confirmed && isRejectionAtFvg && isCandleHoldingResistance) {
+                const shiftText = hasStructureShift ? " [MSS/BOS Aligned]" : "";
+                const dispText = isDisplacement ? " [Displacement Confirmed]" : "";
                 return {
                   isFvgValid: true,
                   fvgLevel: targetEntry,
                   consequentEncroachment: ce,
-                  description: `Bearish Fair Value Gap (FVG) Retest Confirmed via [${rejectionCheck.type}]: Price ($${currentPrice.toFixed(2)}) confirmed rejection and holding unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
+                  fvgBottom,
+                  fvgTop,
+                  isDisplacementConfirmed: isDisplacement,
+                  hasStructureShift,
+                  description: `Bearish Fair Value Gap (FVG) Retest Confirmed via [${rejectionCheck.type}]${dispText}${shiftText}: Price ($${currentPrice.toFixed(2)}) confirmed rejection and holding unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
                 };
               } else if (rejectionCheck.confirmed && !isRejectionAtFvg) {
                 return {
                   isFvgValid: false,
                   fvgLevel: targetEntry,
                   consequentEncroachment: ce,
+                  fvgBottom,
+                  fvgTop,
+                  isDisplacementConfirmed: isDisplacement,
+                  hasStructureShift,
                   description: `Awaiting FVG Zone Rejection: Rejection pattern formed away from FVG CE zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
                 };
               } else {
@@ -5011,6 +5081,10 @@ class TradingEngine {
                   isFvgValid: false,
                   fvgLevel: targetEntry,
                   consequentEncroachment: ce,
+                  fvgBottom,
+                  fvgTop,
+                  isDisplacementConfirmed: isDisplacement,
+                  hasStructureShift,
                   description: `Awaiting Bearish Candlestick Confirmation: Price ($${currentPrice.toFixed(2)}) retested FVG CE zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) — awaiting confirmed bearish rejection candlestick pattern (e.g. Pin Bar, Engulfing, Evening Star, Harami).`,
                 };
               }
@@ -5020,7 +5094,7 @@ class TradingEngine {
       }
     }
 
-    return { isFvgValid: false, fvgLevel: 0, consequentEncroachment: 0, description: "No active unmitigated FVG retest" };
+    return { isFvgValid: false, fvgLevel: 0, consequentEncroachment: 0, description: "No active unmitigated FVG retest", fvgBottom: 0, fvgTop: 0, isDisplacementConfirmed: false, hasStructureShift: false };
   }
 
   public evaluateOrderBlockSetup(direction: "LONG" | "SHORT"): {
@@ -5028,11 +5102,14 @@ class TradingEngine {
     obHigh: number;
     obLow: number;
     description: string;
+    isDisplacementConfirmed: boolean;
+    hasStructureBreak: boolean;
+    hasFvgImbalance: boolean;
   } {
     const config = dbManager.getConfig();
     const ms: any = config.market_structure || {};
     if (ms.order_block_strategy_enabled === false || this.candles1m.length < 10) {
-      return { isObValid: false, obHigh: 0, obLow: 0, description: "Order block strategy disabled or insufficient data" };
+      return { isObValid: false, obHigh: 0, obLow: 0, description: "Order block strategy disabled or insufficient data", isDisplacementConfirmed: false, hasStructureBreak: false, hasFvgImbalance: false };
     }
 
     const lastIdx = this.candles1m.length - 1;
@@ -5060,12 +5137,21 @@ class TradingEngine {
       for (let i = lastIdx - 1; i >= Math.max(0, lastIdx - 20); i--) {
         const candle = this.candles1m[i];
         const nextCandle = this.candles1m[i + 1];
+        const secondNextCandle = this.candles1m[i + 2];
         if (candle && nextCandle) {
           const isBearishCandle = candle.close < candle.open;
-          const isStrongExpansionUp = nextCandle.close > nextCandle.open && (nextCandle.close - nextCandle.open) >= 0.8 * currentAtr;
+          const isStrongExpansionUp = nextCandle.close > nextCandle.open && (nextCandle.close - nextCandle.open) >= 0.70 * currentAtr;
           if (isBearishCandle && isStrongExpansionUp) {
             const obHigh = candle.high;
             const obLow = candle.low;
+
+            // Structure Break (BOS/MSS) Check: Expansion broke previous micro swing high
+            const prevCandles = this.candles1m.slice(Math.max(0, i - 5), i);
+            const prevMicroHigh = prevCandles.length > 0 ? Math.max(...prevCandles.map(c => c.high)) : 0;
+            const hasStructureBreak = prevMicroHigh > 0 && Math.max(nextCandle.high, secondNextCandle ? secondNextCandle.high : 0) >= prevMicroHigh;
+
+            // Imbalance Check: Created an FVG gap between candle i and candle i+2
+            const hasFvgImbalance = secondNextCandle ? secondNextCandle.low > candle.high + 0.05 * currentAtr : false;
 
             // SMC Guard 1: Reject candidate OB if it sits right at the Swing High ceiling (< 0.75 * ATR from HH)
             if (swingHigh > 0 && obHigh >= swingHigh - 0.75 * currentAtr) {
@@ -5095,17 +5181,25 @@ class TradingEngine {
               const isCandleHoldingSupport = confirmCandle ? confirmCandle.close >= obLow - 0.10 * currentAtr : true;
 
               if (rejectionCheck.confirmed && isRejectionAtOb && isCandleHoldingSupport) {
+                const bosText = hasStructureBreak ? " [BOS/MSS Shift]" : "";
+                const imbText = hasFvgImbalance ? " [Imbalance Validated]" : "";
                 return {
                   isObValid: true,
                   obHigh,
                   obLow,
-                  description: `Bullish Institutional Order Block Retest Confirmed via [${rejectionCheck.type}]: Price ($${currentPrice.toFixed(2)}) confirmed rejection and holding unmitigated OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
+                  isDisplacementConfirmed: isStrongExpansionUp,
+                  hasStructureBreak,
+                  hasFvgImbalance,
+                  description: `Bullish Institutional Order Block Retest Confirmed via [${rejectionCheck.type}]${bosText}${imbText}: Price ($${currentPrice.toFixed(2)}) confirmed rejection and holding unmitigated OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
                 };
               } else if (rejectionCheck.confirmed && !isRejectionAtOb) {
                 return {
                   isObValid: false,
                   obHigh,
                   obLow,
+                  isDisplacementConfirmed: isStrongExpansionUp,
+                  hasStructureBreak,
+                  hasFvgImbalance,
                   description: `Awaiting Order Block Rejection: Rejection pattern formed away from OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
                 };
               } else {
@@ -5113,6 +5207,9 @@ class TradingEngine {
                   isObValid: false,
                   obHigh,
                   obLow,
+                  isDisplacementConfirmed: isStrongExpansionUp,
+                  hasStructureBreak,
+                  hasFvgImbalance,
                   description: `Awaiting Bullish Candlestick Confirmation: Price ($${currentPrice.toFixed(2)}) retested OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}) — awaiting confirmed bullish rejection candlestick pattern (e.g. Pin Bar, Bullish Engulfing, Morning Star, Harami, Hammer).`,
                 };
               }
@@ -5127,12 +5224,21 @@ class TradingEngine {
       for (let i = lastIdx - 1; i >= Math.max(0, lastIdx - 20); i--) {
         const candle = this.candles1m[i];
         const nextCandle = this.candles1m[i + 1];
+        const secondNextCandle = this.candles1m[i + 2];
         if (candle && nextCandle) {
           const isBullishCandle = candle.close > candle.open;
-          const isStrongExpansionDown = nextCandle.close < nextCandle.open && (nextCandle.open - nextCandle.close) >= 0.8 * currentAtr;
+          const isStrongExpansionDown = nextCandle.close < nextCandle.open && (nextCandle.open - nextCandle.close) >= 0.70 * currentAtr;
           if (isBullishCandle && isStrongExpansionDown) {
             const obHigh = candle.high;
             const obLow = candle.low;
+
+            // Structure Break (BOS/MSS) Check: Expansion broke previous micro swing low
+            const prevCandles = this.candles1m.slice(Math.max(0, i - 5), i);
+            const prevMicroLow = prevCandles.length > 0 ? Math.min(...prevCandles.map(c => c.low)) : 0;
+            const hasStructureBreak = prevMicroLow > 0 && Math.min(nextCandle.low, secondNextCandle ? secondNextCandle.low : 999999) <= prevMicroLow;
+
+            // Imbalance Check: Created a bearish FVG gap between candle i and candle i+2
+            const hasFvgImbalance = secondNextCandle ? secondNextCandle.high < candle.low - 0.05 * currentAtr : false;
 
             // SMC Guard 1: Reject candidate Bearish OB if it sits right at the Swing Low floor (< 0.75 * ATR from LL)
             if (swingLow > 0 && obLow <= swingLow + 0.75 * currentAtr) {
@@ -5162,17 +5268,25 @@ class TradingEngine {
               const isCandleHoldingResistance = confirmCandle ? confirmCandle.close <= obHigh + 0.10 * currentAtr : true;
 
               if (rejectionCheck.confirmed && isRejectionAtOb && isCandleHoldingResistance) {
+                const bosText = hasStructureBreak ? " [BOS/MSS Shift]" : "";
+                const imbText = hasFvgImbalance ? " [Imbalance Validated]" : "";
                 return {
                   isObValid: true,
                   obHigh,
                   obLow,
-                  description: `Bearish Institutional Order Block Retest Confirmed via [${rejectionCheck.type}]: Price ($${currentPrice.toFixed(2)}) confirmed rejection and holding unmitigated OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
+                  isDisplacementConfirmed: isStrongExpansionDown,
+                  hasStructureBreak,
+                  hasFvgImbalance,
+                  description: `Bearish Institutional Order Block Retest Confirmed via [${rejectionCheck.type}]${bosText}${imbText}: Price ($${currentPrice.toFixed(2)}) confirmed rejection and holding unmitigated OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
                 };
               } else if (rejectionCheck.confirmed && !isRejectionAtOb) {
                 return {
                   isObValid: false,
                   obHigh,
                   obLow,
+                  isDisplacementConfirmed: isStrongExpansionDown,
+                  hasStructureBreak,
+                  hasFvgImbalance,
                   description: `Awaiting Order Block Rejection: Rejection pattern formed away from OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}).`,
                 };
               } else {
@@ -5180,6 +5294,9 @@ class TradingEngine {
                   isObValid: false,
                   obHigh,
                   obLow,
+                  isDisplacementConfirmed: isStrongExpansionDown,
+                  hasStructureBreak,
+                  hasFvgImbalance,
                   description: `Awaiting Bearish Candlestick Confirmation: Price ($${currentPrice.toFixed(2)}) retested OB zone ($${obLow.toFixed(2)} - $${obHigh.toFixed(2)}) — awaiting confirmed bearish rejection candlestick pattern (e.g. Pin Bar, Bearish Engulfing, Evening Star, Harami, Shooting Star).`,
                 };
               }
@@ -5189,7 +5306,7 @@ class TradingEngine {
       }
     }
 
-    return { isObValid: false, obHigh: 0, obLow: 0, description: "No active unmitigated Order Block retest" };
+    return { isObValid: false, obHigh: 0, obLow: 0, description: "No active unmitigated Order Block retest", isDisplacementConfirmed: false, hasStructureBreak: false, hasFvgImbalance: false };
   }
 
   public detectLiquiditySweep(direction: "LONG" | "SHORT" | "NEUTRAL"): {

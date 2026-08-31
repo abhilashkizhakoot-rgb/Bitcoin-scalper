@@ -1386,30 +1386,33 @@ class TradingEngine {
       const exhaustionLong = this.evaluateExhaustionReversalCondition("LONG", currentPrice, closes, lastIdx);
       const exhaustionShort = this.evaluateExhaustionReversalCondition("SHORT", currentPrice, closes, lastIdx);
 
+      const upperWickExhaustion = this.evaluateDirectionalExhaustionWicks("LONG");
+      const lowerWickExhaustion = this.evaluateDirectionalExhaustionWicks("SHORT");
+
       if (smcTlLong.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "LONG")) {
-        signalDirection = "LONG";
+        signalDirection = !upperWickExhaustion.isExhausted ? "LONG" : "NEUTRAL";
       } else if (smcTlShort.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "SHORT")) {
-        signalDirection = "SHORT";
+        signalDirection = !lowerWickExhaustion.isExhausted ? "SHORT" : "NEUTRAL";
       } else if (longSweepSignal.isSweep && probabilityLong >= 0.50) {
         signalDirection = "LONG";
       } else if (shortSweepSignal.isSweep && probabilityShort >= 0.50) {
         signalDirection = "SHORT";
       } else if (smcFvgLong.isFvgValid || smcObLong.isObValid) {
-        signalDirection = "LONG";
+        signalDirection = !upperWickExhaustion.isExhausted ? "LONG" : "NEUTRAL";
       } else if (smcFvgShort.isFvgValid || smcObShort.isObValid) {
-        signalDirection = "SHORT";
+        signalDirection = !lowerWickExhaustion.isExhausted ? "SHORT" : "NEUTRAL";
       } else if (exhaustionLong.isExhausted && probabilityLong >= 0.48) {
-        signalDirection = "LONG";
+        signalDirection = !upperWickExhaustion.isExhausted ? "LONG" : "NEUTRAL";
       } else if (exhaustionShort.isExhausted && probabilityShort >= 0.48) {
-        signalDirection = "SHORT";
+        signalDirection = !lowerWickExhaustion.isExhausted ? "SHORT" : "NEUTRAL";
       } else if (isUptrendAligned && (hasValidPushbackLong || isScalperBreakoutLongAllowed) && isNotLongBreakout && probabilityLong >= 0.58) {
-        signalDirection = "LONG";
+        signalDirection = !upperWickExhaustion.isExhausted ? "LONG" : "NEUTRAL";
       } else if (isDowntrendAligned && (hasValidPushbackShort || isScalperBreakdownShortAllowed) && isNotShortBreakdown && probabilityShort >= 0.58) {
-        signalDirection = "SHORT";
+        signalDirection = !lowerWickExhaustion.isExhausted ? "SHORT" : "NEUTRAL";
       } else if (isUptrendAligned && (probabilityLong >= 0.55 || (this.orderFlowStats.takerBuyRatio >= 0.54 && currentRsi >= 45))) {
-        signalDirection = "LONG";
+        signalDirection = !upperWickExhaustion.isExhausted ? "LONG" : "NEUTRAL";
       } else if (isDowntrendAligned && (probabilityShort >= 0.55 || (this.orderFlowStats.takerBuyRatio <= 0.46 && currentRsi <= 55))) {
-        signalDirection = "SHORT";
+        signalDirection = !lowerWickExhaustion.isExhausted ? "SHORT" : "NEUTRAL";
       } else {
         signalDirection = "NEUTRAL";
       }
@@ -2133,6 +2136,27 @@ class TradingEngine {
       current_value: choppyValStr,
       required: choppyReqStr,
       description: "Blocks trade entry signals if price action is in a choppy consolidation zone (high Choppiness Index), exhibits low net directional displacement (low Kaufman Efficiency Ratio), or is dominated by wicks.",
+      priority: "CRITICAL",
+    });
+
+    // Directional Overhead Supply & Exhaustion Wick Protection Gate
+    const dirWickExhaustion = signalDirection === "LONG"
+      ? this.evaluateDirectionalExhaustionWicks("LONG")
+      : (signalDirection === "SHORT" ? this.evaluateDirectionalExhaustionWicks("SHORT") : { isExhausted: false, description: "Neutral direction", wickCount: 0, dominantWickZone: { min: 0, max: 0 }, highestWickHigh: 0, lowestWickLow: 0, totalCandlesScanned: 0, qualifyingCandleIndices: [] });
+
+    const exhaustionWickFilterEnabled = config.general?.enable_exhaustion_wick_filter !== false;
+    const isWickExhaustionGateMet = !exhaustionWickFilterEnabled || !dirWickExhaustion.isExhausted;
+
+    conditions.push({
+      name: "Overhead Supply & Exhaustion Wick Protection",
+      met: isWickExhaustionGateMet,
+      current_value: isWickExhaustionGateMet
+        ? (dirWickExhaustion.wickCount > 0 ? `PASSING (${dirWickExhaustion.description})` : "PASSING (No contrary rejection wick clusters detected)")
+        : `BLOCKED (${dirWickExhaustion.description})`,
+      required: signalDirection === "LONG"
+        ? "No upper rejection wick cluster at resistance ceiling"
+        : (signalDirection === "SHORT" ? "No lower rejection wick cluster at demand floor" : "Clean price action without contrary exhaustion wicks"),
+      description: "Strictly blocks trade entry signals when price action exhibits repeated rejection wicks at local extremes, indicating trend exhaustion and overhead supply or demand absorption.",
       priority: "CRITICAL",
     });
 
@@ -3198,6 +3222,212 @@ class TradingEngine {
     return Number((totalWickRatio / slice.length).toFixed(3));
   }
 
+  /**
+   * Directional Exhaustion & Overhead Supply / Demand Rejection Wick Analyzer
+   * Detects repeated prominent rejection wicks at local extremes (e.g. multiple upper wicks at resistance),
+   * strictly protecting against entering long right below a supply ceiling or short right above a demand floor.
+   */
+  public evaluateDirectionalExhaustionWicks(direction: "LONG" | "SHORT"): {
+    isExhausted: boolean;
+    wickCount: number;
+    totalCandlesScanned: number;
+    highestWickHigh: number;
+    lowestWickLow: number;
+    dominantWickZone: { min: number; max: number };
+    qualifyingCandleIndices: number[];
+    description: string;
+  } {
+    const config = dbManager.getConfig();
+    if (config.general?.enable_exhaustion_wick_filter === false) {
+      return {
+        isExhausted: false,
+        wickCount: 0,
+        totalCandlesScanned: 0,
+        highestWickHigh: 0,
+        lowestWickLow: 0,
+        dominantWickZone: { min: 0, max: 0 },
+        qualifyingCandleIndices: [],
+        description: "Exhaustion wick protection disabled.",
+      };
+    }
+
+    const lookback = config.general?.exhaustion_wick_lookback || 6;
+    const minWickCount = config.general?.exhaustion_wick_min_count || 2;
+    const minWickRatio = config.general?.exhaustion_wick_min_ratio || 0.35;
+
+    if (this.candles1m.length < 10) {
+      return {
+        isExhausted: false,
+        wickCount: 0,
+        totalCandlesScanned: 0,
+        highestWickHigh: 0,
+        lowestWickLow: 0,
+        dominantWickZone: { min: 0, max: 0 },
+        qualifyingCandleIndices: [],
+        description: "Insufficient candle data for wick exhaustion analysis.",
+      };
+    }
+
+    const lastIdx = this.candles1m.length - 1;
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentAtr = atr14[lastIdx] || 50;
+
+    const scanStart = Math.max(0, this.candles1m.length - lookback);
+    const scanCandles = this.candles1m.slice(scanStart);
+
+    // Reference broader context (last 20 candles) to locate recent swing levels
+    const contextStart = Math.max(0, this.candles1m.length - 20);
+    const contextCandles = this.candles1m.slice(contextStart);
+    const localHigh = Math.max(...contextCandles.map((c) => c.high));
+    const localLow = Math.min(...contextCandles.map((c) => c.low));
+
+    if (direction === "LONG") {
+      const qualifyingWicks: { index: number; candle: Candlestick; upperWick: number; upperWickRatio: number }[] = [];
+
+      for (let i = 0; i < scanCandles.length; i++) {
+        const c = scanCandles[i];
+        const globalIdx = scanStart + i;
+        const range = c.high - c.low;
+        if (range <= 0) continue;
+
+        const body = Math.abs(c.close - c.open);
+        const upperWick = c.high - Math.max(c.open, c.close);
+        const upperWickRatio = upperWick / range;
+
+        // Check if candle high is near the recent local high (within 1.5 ATR or 0.4%)
+        const isNearLocalHigh = c.high >= localHigh - 1.5 * currentAtr || c.high >= localHigh * 0.996;
+
+        // Prominent overhead supply / rejection wick criteria:
+        // 1. High upper wick proportion (>= minWickRatio) with meaningful absolute size (>= 0.20 ATR)
+        // 2. Upper wick >= 1.5x body with >= 0.15 ATR
+        // 3. Shooting star / pinbar at highs (upper wick >= 2x body)
+        // 4. Closed in lower half of candle after spiking high with >= 30% upper wick
+        const isProminentUpperWick =
+          (upperWickRatio >= minWickRatio && upperWick >= 0.20 * currentAtr) ||
+          (upperWick >= 1.5 * body && upperWick >= 0.15 * currentAtr) ||
+          (upperWick >= 2.0 * body && upperWick >= 0.10 * currentAtr) ||
+          (c.close <= c.low + 0.50 * range && upperWickRatio >= 0.30 && upperWick >= 0.15 * currentAtr);
+
+        if (isNearLocalHigh && isProminentUpperWick) {
+          qualifyingWicks.push({ index: globalIdx, candle: c, upperWick, upperWickRatio });
+        }
+      }
+
+      if (qualifyingWicks.length >= minWickCount) {
+        const highestWickHigh = Math.max(...qualifyingWicks.map((w) => w.candle.high));
+        const minZonePrice = Math.min(...qualifyingWicks.map((w) => Math.max(w.candle.open, w.candle.close)));
+        const maxZonePrice = highestWickHigh;
+
+        const currentCandle = this.candles1m[lastIdx];
+        const isDecisiveBreakoutAboveWicks =
+          currentCandle &&
+          currentCandle.close > highestWickHigh &&
+          currentCandle.close - currentCandle.open > 0.4 * (currentCandle.high - currentCandle.low);
+
+        if (!isDecisiveBreakoutAboveWicks && this.currentPrice <= highestWickHigh + 0.05 * currentAtr) {
+          const desc = `Multiple upper rejection wicks (${qualifyingWicks.length} wicks in last ${lookback}m) at supply zone $${minZonePrice.toFixed(2)} - $${maxZonePrice.toFixed(2)} indicate buyer exhaustion and overhead selling resistance.`;
+          return {
+            isExhausted: true,
+            wickCount: qualifyingWicks.length,
+            totalCandlesScanned: scanCandles.length,
+            highestWickHigh,
+            lowestWickLow: localLow,
+            dominantWickZone: { min: minZonePrice, max: maxZonePrice },
+            qualifyingCandleIndices: qualifyingWicks.map((w) => w.index),
+            description: desc,
+          };
+        }
+      }
+
+      return {
+        isExhausted: false,
+        wickCount: qualifyingWicks.length,
+        totalCandlesScanned: scanCandles.length,
+        highestWickHigh: localHigh,
+        lowestWickLow: localLow,
+        dominantWickZone: { min: localHigh, max: localHigh },
+        qualifyingCandleIndices: qualifyingWicks.map((w) => w.index),
+        description: `No overhead upper wick exhaustion detected (${qualifyingWicks.length} qualifying wicks found, minimum required: ${minWickCount}).`,
+      };
+    }
+
+    if (direction === "SHORT") {
+      const qualifyingWicks: { index: number; candle: Candlestick; lowerWick: number; lowerWickRatio: number }[] = [];
+
+      for (let i = 0; i < scanCandles.length; i++) {
+        const c = scanCandles[i];
+        const globalIdx = scanStart + i;
+        const range = c.high - c.low;
+        if (range <= 0) continue;
+
+        const body = Math.abs(c.close - c.open);
+        const lowerWick = Math.min(c.open, c.close) - c.low;
+        const lowerWickRatio = lowerWick / range;
+
+        // Check if candle low is near recent local low (within 1.5 ATR or 0.4%)
+        const isNearLocalLow = c.low <= localLow + 1.5 * currentAtr || c.low <= localLow * 1.004;
+
+        const isProminentLowerWick =
+          (lowerWickRatio >= minWickRatio && lowerWick >= 0.20 * currentAtr) ||
+          (lowerWick >= 1.5 * body && lowerWick >= 0.15 * currentAtr) ||
+          (lowerWick >= 2.0 * body && lowerWick >= 0.10 * currentAtr) ||
+          (c.close >= c.low + 0.50 * range && lowerWickRatio >= 0.30 && lowerWick >= 0.15 * currentAtr);
+
+        if (isNearLocalLow && isProminentLowerWick) {
+          qualifyingWicks.push({ index: globalIdx, candle: c, lowerWick, lowerWickRatio });
+        }
+      }
+
+      if (qualifyingWicks.length >= minWickCount) {
+        const lowestWickLow = Math.min(...qualifyingWicks.map((w) => w.candle.low));
+        const maxZonePrice = Math.max(...qualifyingWicks.map((w) => Math.min(w.candle.open, w.candle.close)));
+        const minZonePrice = lowestWickLow;
+
+        const currentCandle = this.candles1m[lastIdx];
+        const isDecisiveBreakdownBelowWicks =
+          currentCandle &&
+          currentCandle.close < lowestWickLow &&
+          currentCandle.open - currentCandle.close > 0.4 * (currentCandle.high - currentCandle.low);
+
+        if (!isDecisiveBreakdownBelowWicks && this.currentPrice >= lowestWickLow - 0.05 * currentAtr) {
+          const desc = `Multiple lower rejection wicks (${qualifyingWicks.length} wicks in last ${lookback}m) at demand floor $${minZonePrice.toFixed(2)} - $${maxZonePrice.toFixed(2)} indicate seller exhaustion and aggressive buy absorption.`;
+          return {
+            isExhausted: true,
+            wickCount: qualifyingWicks.length,
+            totalCandlesScanned: scanCandles.length,
+            highestWickHigh: localHigh,
+            lowestWickLow,
+            dominantWickZone: { min: minZonePrice, max: maxZonePrice },
+            qualifyingCandleIndices: qualifyingWicks.map((w) => w.index),
+            description: desc,
+          };
+        }
+      }
+
+      return {
+        isExhausted: false,
+        wickCount: qualifyingWicks.length,
+        totalCandlesScanned: scanCandles.length,
+        highestWickHigh: localHigh,
+        lowestWickLow: localLow,
+        dominantWickZone: { min: localLow, max: localLow },
+        qualifyingCandleIndices: qualifyingWicks.map((w) => w.index),
+        description: `No demand floor lower wick exhaustion detected (${qualifyingWicks.length} qualifying wicks found, minimum required: ${minWickCount}).`,
+      };
+    }
+
+    return {
+      isExhausted: false,
+      wickCount: 0,
+      totalCandlesScanned: 0,
+      highestWickHigh: localHigh,
+      lowestWickLow: localLow,
+      dominantWickZone: { min: 0, max: 0 },
+      qualifyingCandleIndices: [],
+      description: "Neutral direction.",
+    };
+  }
+
   public detectWedgePattern(): {
     risingWedge: boolean;
     fallingWedge: boolean;
@@ -4153,6 +4383,14 @@ class TradingEngine {
     if (!isMtfAligned) {
       const mtfFailReason = condDict["Multi-Timeframe Trend Alignment"]?.reason || "5m MTF trend conflict.";
       return getReturnObj(false, `${mtfFailReason} ${direction} entry blocked.`);
+    }
+
+    // Directional Overhead Supply & Exhaustion Wick Protection Guard
+    const wickExhaustion = this.evaluateDirectionalExhaustionWicks(direction);
+    if (wickExhaustion.isExhausted) {
+      const wickBlockReason = `Blocked: ${wickExhaustion.description} ${direction === "LONG" ? "Long" : "Short"} entry forbidden into overhead supply/demand rejection wick clusters.`;
+      condDict["Breakout Level Confirmation"] = { status: "FAIL", reason: wickExhaustion.description };
+      return getReturnObj(false, wickBlockReason);
     }
 
     if (direction === "LONG") {
@@ -5585,7 +5823,40 @@ class TradingEngine {
   private evaluateMarketStructureConfirmation(signalDirection: "LONG" | "SHORT" | "NEUTRAL", probabilityLong: number): MarketStructureConfirmationResult {
     const rawResult = this.evaluateMarketStructureConfirmationRaw(signalDirection, probabilityLong);
     const emaFiltered = this.applyEma200ProximityFilter(signalDirection, this.currentPrice, rawResult);
-    return this.applyBollingerBandExhaustionGuard(signalDirection, this.currentPrice, emaFiltered);
+    const bbFiltered = this.applyBollingerBandExhaustionGuard(signalDirection, this.currentPrice, emaFiltered);
+    return this.applyExhaustionWickFilter(signalDirection, bbFiltered);
+  }
+
+  /**
+   * Directional Exhaustion Wick Protection Filter for Market Structure
+   * Blocks entries when multiple long upper/lower rejection wicks demonstrate supply/demand ceiling exhaustion.
+   */
+  private applyExhaustionWickFilter(
+    direction: "LONG" | "SHORT" | "NEUTRAL",
+    result: MarketStructureConfirmationResult
+  ): MarketStructureConfirmationResult {
+    if (!result.confirmed || direction === "NEUTRAL") {
+      return result;
+    }
+
+    const wickCheck = this.evaluateDirectionalExhaustionWicks(direction);
+    if (wickCheck.isExhausted) {
+      return {
+        ...result,
+        confirmed: false,
+        message: `Exhaustion Wick Protection: Blocked ${direction} entry due to ${wickCheck.wickCount} rejection wicks at supply/demand extreme zone ($${wickCheck.dominantWickZone.min.toFixed(2)} - $${wickCheck.dominantWickZone.max.toFixed(2)}).`,
+        sub_conditions: [
+          ...(result.sub_conditions || []),
+          {
+            name: "Exhaustion Wick Protection Filter",
+            status: "FAIL",
+            reason: wickCheck.description,
+          },
+        ],
+      };
+    }
+
+    return result;
   }
 
   /**

@@ -211,6 +211,10 @@ export interface StrategyConfig {
     exhaustion_rsi_overbought_threshold?: number;
     exhaustion_lookback_candles?: number;
     exhaustion_require_structural_confluence?: boolean;
+    enable_exhaustion_wick_filter?: boolean;
+    exhaustion_wick_min_count?: number;
+    exhaustion_wick_min_ratio?: number;
+    exhaustion_wick_lookback?: number;
   };
   ml_settings: {
     entry_threshold_long: number; // e.g. 0.80

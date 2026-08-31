@@ -151,6 +151,10 @@ const DEFAULT_CONFIG: StrategyConfig = {
     exhaustion_rsi_overbought_threshold: 68.0,
     exhaustion_lookback_candles: 6,
     exhaustion_require_structural_confluence: true,
+    enable_exhaustion_wick_filter: true,
+    exhaustion_wick_min_count: 2,
+    exhaustion_wick_min_ratio: 0.35,
+    exhaustion_wick_lookback: 6,
   },
   ml_settings: {
     entry_threshold_long: 0.80,

@@ -146,6 +146,11 @@ const DEFAULT_CONFIG: StrategyConfig = {
     enable_ranging_extreme_rsi_bypass: false,
     ranging_rsi_overbought_threshold: 75.0,
     ranging_rsi_oversold_threshold: 25.0,
+    enable_exhaustion_trend_bypass: true,
+    exhaustion_rsi_oversold_threshold: 32.0,
+    exhaustion_rsi_overbought_threshold: 68.0,
+    exhaustion_lookback_candles: 6,
+    exhaustion_require_structural_confluence: true,
   },
   ml_settings: {
     entry_threshold_long: 0.80,
@@ -1061,6 +1066,26 @@ class DatabaseManager {
       }
       if (this.cache.config.general.ranging_rsi_oversold_threshold === undefined) {
         this.cache.config.general.ranging_rsi_oversold_threshold = 25.0;
+        changed = true;
+      }
+      if (this.cache.config.general.enable_exhaustion_trend_bypass === undefined) {
+        this.cache.config.general.enable_exhaustion_trend_bypass = true;
+        changed = true;
+      }
+      if (this.cache.config.general.exhaustion_rsi_oversold_threshold === undefined) {
+        this.cache.config.general.exhaustion_rsi_oversold_threshold = 32.0;
+        changed = true;
+      }
+      if (this.cache.config.general.exhaustion_rsi_overbought_threshold === undefined) {
+        this.cache.config.general.exhaustion_rsi_overbought_threshold = 68.0;
+        changed = true;
+      }
+      if (this.cache.config.general.exhaustion_lookback_candles === undefined) {
+        this.cache.config.general.exhaustion_lookback_candles = 6;
+        changed = true;
+      }
+      if (this.cache.config.general.exhaustion_require_structural_confluence === undefined) {
+        this.cache.config.general.exhaustion_require_structural_confluence = true;
         changed = true;
       }
     }

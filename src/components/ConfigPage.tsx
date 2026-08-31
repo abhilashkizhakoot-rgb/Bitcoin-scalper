@@ -1058,6 +1058,75 @@ export default function ConfigPage({
                   )}
                 </div>
 
+                {/* Multi-Factor Intelligent Exhaustion Trend Alignment Bypass Controls */}
+                <div className="md:col-span-2 border border-indigo-200 rounded-lg p-4 bg-indigo-50/30 space-y-3">
+                  <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 font-sans block">Intelligent Exhaustion Trend Alignment Bypass</span>
+                      <span className="text-[10px] text-slate-500">Intelligently recognizes genuine market exhaustion (RSI hook, Bollinger stretch, dynamic EMA200/100 support/resistance, candlestick absorption) to bypass lagging EMA trend alignment without weakening normal trend-following gates.</span>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={generalConfig.enable_exhaustion_trend_bypass !== false}
+                        onChange={(e) => setGeneralConfig({ ...generalConfig, enable_exhaustion_trend_bypass: e.target.checked })}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
+                        id="config-enable-exhaustion-trend-bypass"
+                      />
+                      <span className="text-xs font-semibold text-slate-700">Active</span>
+                    </label>
+                  </div>
+
+                  {generalConfig.enable_exhaustion_trend_bypass !== false && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-semibold text-slate-700">Oversold RSI Floor (Long Bypass)</label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="10"
+                          max="45"
+                          value={generalConfig.exhaustion_rsi_oversold_threshold !== undefined ? generalConfig.exhaustion_rsi_oversold_threshold : 32.0}
+                          onChange={(e) => setGeneralConfig({ ...generalConfig, exhaustion_rsi_oversold_threshold: parseInputNumber(e.target.value, true) })}
+                          className="w-full text-xs rounded border border-slate-300 px-3 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white font-mono"
+                          id="config-exhaustion-rsi-oversold"
+                        />
+                        <p className="text-[9px] text-slate-400">RSI threshold enabling multi-candle oversold exhaustion detection for LONG entries (Default: 32.0).</p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-semibold text-slate-700">Overbought RSI Ceiling (Short Bypass)</label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="55"
+                          max="90"
+                          value={generalConfig.exhaustion_rsi_overbought_threshold !== undefined ? generalConfig.exhaustion_rsi_overbought_threshold : 68.0}
+                          onChange={(e) => setGeneralConfig({ ...generalConfig, exhaustion_rsi_overbought_threshold: parseInputNumber(e.target.value, true) })}
+                          className="w-full text-xs rounded border border-slate-300 px-3 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white font-mono"
+                          id="config-exhaustion-rsi-overbought"
+                        />
+                        <p className="text-[9px] text-slate-400">RSI threshold enabling multi-candle overbought exhaustion detection for SHORT entries (Default: 68.0).</p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-semibold text-slate-700">Exhaustion Lookback Candles</label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="2"
+                          max="20"
+                          value={generalConfig.exhaustion_lookback_candles !== undefined ? generalConfig.exhaustion_lookback_candles : 6}
+                          onChange={(e) => setGeneralConfig({ ...generalConfig, exhaustion_lookback_candles: parseInputNumber(e.target.value, false) })}
+                          className="w-full text-xs rounded border border-slate-300 px-3 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white font-mono"
+                          id="config-exhaustion-lookback"
+                        />
+                        <p className="text-[9px] text-slate-400">Number of recent 1m candles scanned for extreme RSI inflection and candlestick rejection (Default: 6).</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Range Extreme RSI Trend Bypass Controls */}
                 <div className="md:col-span-2 border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-200 pb-2">

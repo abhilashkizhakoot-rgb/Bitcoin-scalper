@@ -16,6 +16,7 @@ import {
   ExitReason,
   TradingSignal,
   StrategyConfig,
+  MarketStructureConfig,
 } from "./types.js";
 import { FinBertSentimentModel } from "./finbert.js";
 import { CrossSourceSentimentAggregator } from "./sentimentEngine.js";
@@ -3683,16 +3684,6 @@ class TradingEngine {
     const ema100ValComputed = ema100Series[lastIdx] || ema100Val;
     const ema200ValComputed = ema200Series[lastIdx] || currentPrice;
 
-    // Configurable fallback crossover EMAs for Setup 2
-    const fallbackEnabled = ms.fallback_crossover_enabled !== false;
-    const fallbackFastPeriod = ms.fallback_crossover_fast_period || 5;
-    const fallbackSlowPeriod = ms.fallback_crossover_slow_period || 15;
-    const fallbackFastSeries = this.calculateEMA(closes, fallbackFastPeriod);
-    const fallbackSlowSeries = this.calculateEMA(closes, fallbackSlowPeriod);
-
-    let isFallbackCrossoverBullish = false;
-    let isFallbackCrossoverBearish = false;
-
     // 1. EMA Slope of EMA20 (over last 5 candles)
     const slopePeriod = 5;
     let ema20SlopePct = 0;
@@ -4304,58 +4295,15 @@ class TradingEngine {
         return c.low <= emaVal + 0.25 * currentAtr && c.high >= emaVal - 0.15 * currentAtr;
       });
       
-      // Calculate Fallback Micro EMA Momentum Confirmation with ATR fraction filters (Setup 2 fallback)
-      const bounceAtrFraction = ms.fallback_crossover_bounce_atr_fraction !== undefined ? ms.fallback_crossover_bounce_atr_fraction : 0.15;
-      const invalidationAtrFraction = ms.fallback_crossover_invalidation_atr_fraction !== undefined ? ms.fallback_crossover_invalidation_atr_fraction : 0.25;
-
-      if (fallbackEnabled && closes.length >= fallbackSlowPeriod) {
-        const fCurrent = fallbackFastSeries[lastIdx];
-        const sCurrent = fallbackSlowSeries[lastIdx];
-        
-        // 1. Bullish Alignment (fast EMA above slow EMA)
-        const isAlignedBullish = fCurrent > sCurrent;
-        
-        // 2. Bounce Confirmation (close is at least bounce fraction above slow EMA)
-        const isBounceConfirmed = currentPrice >= sCurrent + bounceAtrFraction * currentAtr;
-        
-        // 3. Check for a recent crossover (fast EMA crossed above slow EMA within the last 3 candles)
-        let hasRecentCrossover = false;
-        for (let i = 0; i < 3; i++) {
-          const currIdx = lastIdx - i;
-          const prevIdx = currIdx - 1;
-          if (prevIdx >= 0 && fallbackFastSeries[currIdx] !== undefined && fallbackSlowSeries[currIdx] !== undefined) {
-            if (fallbackFastSeries[currIdx] > fallbackSlowSeries[currIdx] && fallbackFastSeries[prevIdx] <= fallbackSlowSeries[prevIdx]) {
-              hasRecentCrossover = true;
-              break;
-            }
-          }
-        }
-
-        // 4. Fallback Crossover Invalidation Check (only evaluates current price to allow retracement flexibility)
-        const isFallbackCrossoverInvalidated = currentPrice < sCurrent - invalidationAtrFraction * currentAtr;
-
-        // Crossover is valid if fast is above slow, price is bouncing or we had a recent crossover, and the current price is not below the invalidation threshold.
-        if (isAlignedBullish && (isBounceConfirmed || hasRecentCrossover) && !isFallbackCrossoverInvalidated) {
-          isFallbackCrossoverBullish = true;
-        }
-      }
-
-      const isEarlyEmaTouchHolding = (touchesFirstEma || touchesSecondEma) && (isLongRejectionConfirmed || isLongCandleStabilized || isFallbackCrossoverBullish);
+      const isEarlyEmaTouchHolding = (touchesFirstEma || touchesSecondEma) && (isLongRejectionConfirmed || isLongCandleStabilized);
       const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && (isLongRejectionConfirmed || isEarlyEmaTouchHolding) && isLongCandleStabilized && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
-      // Ensure Fallback Micro EMA Momentum Bounce requires RECENT retracement and price proximity to the EMA zone
-      // (prevents taking late bounce entries when price has already drifted far above the EMA zone without candlestick rejection)
-      const maxEmaProximityAtr = (effectiveEmaMult || 0.40) + 0.40;
-      const isPriceNearEmaZone = (currentPrice - Math.min(firstEmaVal, secondEmaVal)) <= maxEmaProximityAtr * currentAtr;
-      const isFallbackEmaPushbackValid = isFallbackCrossoverBullish && isPriceNearEmaZone && isLongCandleStabilized && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
 
-      const isEmaPushbackValid = (isRegularEmaPushbackValid || isFallbackEmaPushbackValid) && !isSetup2Invalidated;
+      const isEmaPushbackValid = isRegularEmaPushbackValid && !isSetup2Invalidated;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
           const matchedEmaVal = touchesFirstEma ? firstEmaVal : (touchesSecondEma ? secondEmaVal : firstEmaVal);
-          const confirmType = (isLongRejectionConfirmed && (touchesFirstEma || touchesSecondEma))
-            ? `via [${longRejectionType}]` 
-            : `via Fallback Micro EMA Momentum Bounce (${fallbackFastPeriod}/${fallbackSlowPeriod} EMA, +${bounceAtrFraction.toFixed(2)}xATR)`;
+          const confirmType = isLongRejectionConfirmed ? `via [${longRejectionType}]` : "via dynamic support touch & hold";
           emaPushbackMessage = `${emaZoneLabel} Pushback confirmed ${confirmType}${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected/bounced off dynamic EMA support at $${matchedEmaVal.toFixed(2)} (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "PASS", reason: emaPushbackMessage };
         } else {
@@ -4366,7 +4314,7 @@ class TradingEngine {
         if (isSetup2Invalidated) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Blocked: Price broke below dynamic EMA invalidation floor $${emaInvalidationFloor.toFixed(2)}.` };
         } else if (hasRetracedToEMA || touchesFirstEma || touchesSecondEma) {
-          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle or fallback micro EMA crossover/momentum bounce (${fallbackFastPeriod}/${fallbackSlowPeriod} EMA, +${bounceAtrFraction.toFixed(2)}xATR).` };
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle.` };
         } else {
           const thresholdVal = Math.max(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: `Skipped: Price has not recently retraced into dynamic EMA threshold level of $${thresholdVal.toFixed(2)}.` };
@@ -4669,58 +4617,15 @@ class TradingEngine {
         return c.high >= emaVal - 0.25 * currentAtr && c.low <= emaVal + 0.15 * currentAtr;
       });
       
-      // Calculate Fallback Micro EMA Momentum Confirmation with ATR fraction filters (Setup 2 fallback)
-      const bounceAtrFraction = ms.fallback_crossover_bounce_atr_fraction !== undefined ? ms.fallback_crossover_bounce_atr_fraction : 0.15;
-      const invalidationAtrFraction = ms.fallback_crossover_invalidation_atr_fraction !== undefined ? ms.fallback_crossover_invalidation_atr_fraction : 0.25;
-
-      if (fallbackEnabled && closes.length >= fallbackSlowPeriod) {
-        const fCurrent = fallbackFastSeries[lastIdx];
-        const sCurrent = fallbackSlowSeries[lastIdx];
-        
-        // 1. Bearish Alignment (fast EMA below slow EMA)
-        const isAlignedBearish = fCurrent < sCurrent;
-        
-        // 2. Bounce Confirmation (close is at least bounce fraction below slow EMA)
-        const isBounceConfirmed = currentPrice <= sCurrent - bounceAtrFraction * currentAtr;
-        
-        // 3. Check for a recent crossover (fast EMA crossed below slow EMA within the last 3 candles)
-        let hasRecentCrossover = false;
-        for (let i = 0; i < 3; i++) {
-          const currIdx = lastIdx - i;
-          const prevIdx = currIdx - 1;
-          if (prevIdx >= 0 && fallbackFastSeries[currIdx] !== undefined && fallbackSlowSeries[currIdx] !== undefined) {
-            if (fallbackFastSeries[currIdx] < fallbackSlowSeries[currIdx] && fallbackFastSeries[prevIdx] >= fallbackSlowSeries[prevIdx]) {
-              hasRecentCrossover = true;
-              break;
-            }
-          }
-        }
-
-        // 4. Fallback Crossover Invalidation Check (only evaluates current price to allow retracement flexibility)
-        const isFallbackCrossoverInvalidated = currentPrice > sCurrent + invalidationAtrFraction * currentAtr;
-
-        // Crossover is valid if fast is below slow, price is bouncing or we had a recent crossover, and the current price is not above the invalidation threshold.
-        if (isAlignedBearish && (isBounceConfirmed || hasRecentCrossover) && !isFallbackCrossoverInvalidated) {
-          isFallbackCrossoverBearish = true;
-        }
-      }
-
-      const isEarlyEmaTouchHoldingShort = (touchesFirstEma || touchesSecondEma) && (isShortRejectionConfirmed || isShortCandleStabilized || isFallbackCrossoverBearish);
+      const isEarlyEmaTouchHoldingShort = (touchesFirstEma || touchesSecondEma) && (isShortRejectionConfirmed || isShortCandleStabilized);
       const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && (isShortRejectionConfirmed || isEarlyEmaTouchHoldingShort) && isShortCandleStabilized && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
-      // Ensure Fallback Micro EMA Momentum Bounce requires RECENT retracement and price proximity to the EMA zone
-      // (prevents taking late bounce entries when price has already drifted far below the EMA zone without candlestick rejection)
-      const maxEmaProximityAtr = (effectiveEmaMult || 0.40) + 0.40;
-      const isPriceNearEmaZone = (Math.max(firstEmaVal, secondEmaVal) - currentPrice) <= maxEmaProximityAtr * currentAtr;
-      const isFallbackEmaPushbackValid = isFallbackCrossoverBearish && isPriceNearEmaZone && isShortCandleStabilized && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
 
-      const isEmaPushbackValid = (isRegularEmaPushbackValid || isFallbackEmaPushbackValid) && !isSetup2Invalidated;
+      const isEmaPushbackValid = isRegularEmaPushbackValid && !isSetup2Invalidated;
       let emaPushbackMessage = "";
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
           const matchedEmaVal = touchesFirstEma ? firstEmaVal : (touchesSecondEma ? secondEmaVal : firstEmaVal);
-          const confirmType = (isShortRejectionConfirmed && (touchesFirstEma || touchesSecondEma))
-            ? `via [${shortRejectionType}]` 
-            : `via Fallback Micro EMA Momentum Bounce (${fallbackFastPeriod}/${fallbackSlowPeriod} EMA, -${bounceAtrFraction.toFixed(2)}xATR)`;
+          const confirmType = isShortRejectionConfirmed ? `via [${shortRejectionType}]` : "via dynamic resistance touch & hold";
           emaPushbackMessage = `${emaZoneLabel} Pushback confirmed ${confirmType}${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected/bounced off dynamic EMA resistance at $${matchedEmaVal.toFixed(2)} (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "PASS", reason: emaPushbackMessage };
         } else {
@@ -4731,7 +4636,7 @@ class TradingEngine {
         if (isSetup2Invalidated) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Blocked: Price broke above dynamic EMA invalidation ceiling $${emaInvalidationCeiling.toFixed(2)}.` };
         } else if (hasRetracedToEMA || touchesFirstEma || touchesSecondEma) {
-          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle or fallback micro EMA crossover/momentum bounce (${fallbackFastPeriod}/${fallbackSlowPeriod} EMA, -${bounceAtrFraction.toFixed(2)}xATR).` };
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle.` };
         } else {
           const thresholdVal = Math.min(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: `Skipped: Price has not recently retraced into dynamic EMA threshold level of $${thresholdVal.toFixed(2)}.` };
@@ -5689,7 +5594,7 @@ class TradingEngine {
     rangeHigh: number;
   } {
     const config = dbManager.getConfig();
-    const ms = config.market_structure || {};
+    const ms = config.market_structure || ({} as MarketStructureConfig);
     
     const currentPrice = this.currentPrice;
     if (lastIdx < 0 || this.candles1m.length === 0) {
@@ -5746,30 +5651,31 @@ class TradingEngine {
     const isImmediateRedOnResistance = (lastClosedCandle.close >= rangeResistanceThreshold || currentPrice >= rangeResistanceThreshold) && isClosedCandleRed && hasClosedBodyExpansion;
     
     // CONFIRMATION C: Micro EMA Crossover / Momentum Bounce
-    const microFastPeriod = 5;
-    const microSlowPeriod = 15;
+    const microFastPeriod = ms.micro_trend_fast_period || 5;
+    const microSlowPeriod = ms.micro_trend_slow_period || 15;
     const closes = this.candles1m.map(c => c.close);
-    const fallbackFastSeries = this.calculateEMA(closes, microFastPeriod);
-    const fallbackSlowSeries = this.calculateEMA(closes, microSlowPeriod);
+    const microFastSeries = this.calculateEMA(closes, microFastPeriod);
+    const microSlowSeries = this.calculateEMA(closes, microSlowPeriod);
     
     let hasRecentMicroBullishCrossover = false;
     let hasRecentMicroBearishCrossover = false;
+    const microCrossoverLookback = 5;
     
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < microCrossoverLookback; i++) {
       const currIdx = lastIdx - i;
       const prevIdx = currIdx - 1;
-      if (prevIdx >= 0 && fallbackFastSeries[currIdx] !== undefined && fallbackSlowSeries[currIdx] !== undefined) {
-        if (fallbackFastSeries[currIdx] > fallbackSlowSeries[currIdx] && fallbackFastSeries[prevIdx] <= fallbackSlowSeries[prevIdx]) {
+      if (prevIdx >= 0 && microFastSeries[currIdx] !== undefined && microSlowSeries[currIdx] !== undefined) {
+        if (microFastSeries[currIdx] > microSlowSeries[currIdx] && microFastSeries[prevIdx] <= microSlowSeries[prevIdx]) {
           hasRecentMicroBullishCrossover = true;
         }
-        if (fallbackFastSeries[currIdx] < fallbackSlowSeries[currIdx] && fallbackFastSeries[prevIdx] >= fallbackSlowSeries[prevIdx]) {
+        if (microFastSeries[currIdx] < microSlowSeries[currIdx] && microFastSeries[prevIdx] >= microSlowSeries[prevIdx]) {
           hasRecentMicroBearishCrossover = true;
         }
       }
     }
     
-    const isMicroEMAAlignedBullish = fallbackFastSeries[lastIdx] > fallbackSlowSeries[lastIdx];
-    const isMicroEMAAlignedBearish = fallbackFastSeries[lastIdx] < fallbackSlowSeries[lastIdx];
+    const isMicroEMAAlignedBullish = microFastSeries[lastIdx] > microSlowSeries[lastIdx];
+    const isMicroEMAAlignedBearish = microFastSeries[lastIdx] < microSlowSeries[lastIdx];
     
     // CONFIRMATION D: RSI Hook from oversold/overbought levels
     const rsi14 = this.calculateRSI(closes, 14);

@@ -287,11 +287,6 @@ export interface StrategyConfig {
     micro_trend_alignment_enabled?: boolean; // Enable Micro-Trend Alignment Filter (default: true)
     micro_trend_fast_period?: number; // Fast period for micro-trend tracking (default: 5)
     micro_trend_slow_period?: number; // Slow period for micro-trend tracking (default: 15)
-    fallback_crossover_enabled?: boolean; // Enable Fallback Crossover Confirmation (default: true)
-    fallback_crossover_fast_period?: number; // Fast period for fallback crossover (default: 5)
-    fallback_crossover_slow_period?: number; // Slow period for fallback crossover (default: 15)
-    fallback_crossover_bounce_atr_fraction?: number; // Bounce confirmation multiplier of ATR (default: 0.15)
-    fallback_crossover_invalidation_atr_fraction?: number; // Crossover invalidation multiplier of ATR (default: 0.25)
     crossover_only_strategy_enabled?: boolean; // Enable/disable isolated 5/15 crossover only strategy
     crossover_only_fast_period?: number; // Fast EMA period for the crossover-only strategy
     crossover_only_slow_period?: number; // Slow EMA period for the crossover-only strategy
@@ -378,6 +373,8 @@ export interface StrategyConfig {
     };
   };
 }
+
+export type MarketStructureConfig = StrategyConfig['market_structure'];
 
 export interface ConfigHistoryEntry {
   id: string;

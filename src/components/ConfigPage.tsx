@@ -290,11 +290,6 @@ export default function ConfigPage({
         micro_trend_alignment_enabled: true,
         micro_trend_fast_period: 5,
         micro_trend_slow_period: 15,
-        fallback_crossover_enabled: true,
-        fallback_crossover_fast_period: 5,
-        fallback_crossover_slow_period: 15,
-        fallback_crossover_bounce_atr_fraction: 0.15,
-        fallback_crossover_invalidation_atr_fraction: 0.25,
         crossover_only_strategy_enabled: false,
         crossover_only_fast_period: 5,
         crossover_only_slow_period: 15,
@@ -3127,99 +3122,6 @@ export default function ConfigPage({
                   </p>
                 </div>
 
-                <div className="space-y-1.5 md:col-span-2 border-t border-slate-100 pt-4">
-                  <h4 className="text-xs font-sans font-semibold text-slate-700 uppercase tracking-wider mb-1">Solution B: Setup 2 Fallback Crossover Configuration</h4>
-                </div>
-
-                <div className="space-y-1.5 flex items-center justify-between md:col-span-2 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-sans font-semibold text-slate-700">Enable Fallback Crossover Confirmation</span>
-                    <p className="text-[10px] text-slate-400 leading-relaxed">
-                      Validates retracement for dynamic EMA zones (50/100/200) using a micro EMA crossover as a fallback entry filter when single or multi-candle rejection patterns fail.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setMsConfig({ ...msConfig, fallback_crossover_enabled: !msConfig.fallback_crossover_enabled })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.fallback_crossover_enabled ? "bg-indigo-600" : "bg-slate-200"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.fallback_crossover_enabled ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Fallback Fast EMA Period</label>
-                  <input
-                    type="number"
-                    step="1"
-                    min="2"
-                    max="50"
-                    disabled={!msConfig.fallback_crossover_enabled}
-                    value={msConfig.fallback_crossover_fast_period || ""}
-                    onChange={(e) => setMsConfig({ ...msConfig, fallback_crossover_fast_period: parseInputNumber(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
-                  />
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Fast EMA period for the fallback crossover confirmation (Standard: 5).
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Fallback Slow EMA Period</label>
-                  <input
-                    type="number"
-                    step="1"
-                    min="5"
-                    max="100"
-                    disabled={!msConfig.fallback_crossover_enabled}
-                    value={msConfig.fallback_crossover_slow_period || ""}
-                    onChange={(e) => setMsConfig({ ...msConfig, fallback_crossover_slow_period: parseInputNumber(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
-                  />
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Slow EMA period for the fallback crossover confirmation (Standard: 15).
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Fallback Bounce ATR Fraction</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    max="1.0"
-                    disabled={!msConfig.fallback_crossover_enabled}
-                    value={msConfig.fallback_crossover_bounce_atr_fraction !== undefined ? msConfig.fallback_crossover_bounce_atr_fraction : 0.15}
-                    onChange={(e) => setMsConfig({ ...msConfig, fallback_crossover_bounce_atr_fraction: parseInputNumber(e.target.value, true) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
-                  />
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Required bounce off the dynamic EMA (expressed as a fraction of ATR) to confirm return of trend momentum (Standard: 0.15).
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Fallback Invalidation ATR Fraction</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    max="2.0"
-                    disabled={!msConfig.fallback_crossover_enabled}
-                    value={msConfig.fallback_crossover_invalidation_atr_fraction !== undefined ? msConfig.fallback_crossover_invalidation_atr_fraction : 0.25}
-                    onChange={(e) => setMsConfig({ ...msConfig, fallback_crossover_invalidation_atr_fraction: parseInputNumber(e.target.value, true) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
-                  />
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Maximum price breakout/retracement penetration below the slow fallback EMA (expressed as a fraction of ATR) before the setup is invalidated (Standard: 0.25).
-                  </p>
-                </div>
               </div>
             </div>
 

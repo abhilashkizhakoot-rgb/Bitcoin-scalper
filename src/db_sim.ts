@@ -247,11 +247,6 @@ const DEFAULT_CONFIG: StrategyConfig = {
     micro_trend_alignment_enabled: true,
     micro_trend_fast_period: 5,
     micro_trend_slow_period: 15,
-    fallback_crossover_enabled: true,
-    fallback_crossover_fast_period: 5,
-    fallback_crossover_slow_period: 15,
-    fallback_crossover_bounce_atr_fraction: 0.15,
-    fallback_crossover_invalidation_atr_fraction: 0.25,
     crossover_only_strategy_enabled: false,
     crossover_only_fast_period: 5,
     crossover_only_slow_period: 15,
@@ -1188,11 +1183,6 @@ class DatabaseManager {
       if (ms.micro_trend_alignment_enabled === undefined) { ms.micro_trend_alignment_enabled = def.micro_trend_alignment_enabled !== false; changed = true; }
       if (ms.micro_trend_fast_period === undefined) { ms.micro_trend_fast_period = def.micro_trend_fast_period || 5; changed = true; }
       if (ms.micro_trend_slow_period === undefined) { ms.micro_trend_slow_period = def.micro_trend_slow_period || 15; changed = true; }
-      if (ms.fallback_crossover_enabled === undefined) { ms.fallback_crossover_enabled = def.fallback_crossover_enabled !== false; changed = true; }
-      if (ms.fallback_crossover_fast_period === undefined) { ms.fallback_crossover_fast_period = def.fallback_crossover_fast_period || 5; changed = true; }
-      if (ms.fallback_crossover_slow_period === undefined) { ms.fallback_crossover_slow_period = def.fallback_crossover_slow_period || 15; changed = true; }
-      if (ms.fallback_crossover_bounce_atr_fraction === undefined) { ms.fallback_crossover_bounce_atr_fraction = def.fallback_crossover_bounce_atr_fraction ?? 0.15; changed = true; }
-      if (ms.fallback_crossover_invalidation_atr_fraction === undefined) { ms.fallback_crossover_invalidation_atr_fraction = def.fallback_crossover_invalidation_atr_fraction ?? 0.25; changed = true; }
       if (ms.crossover_only_strategy_enabled === undefined) { ms.crossover_only_strategy_enabled = def.crossover_only_strategy_enabled ?? false; changed = true; }
       if (ms.crossover_only_fast_period === undefined) { ms.crossover_only_fast_period = def.crossover_only_fast_period || 5; changed = true; }
       if (ms.crossover_only_slow_period === undefined) { ms.crossover_only_slow_period = def.crossover_only_slow_period || 15; changed = true; }

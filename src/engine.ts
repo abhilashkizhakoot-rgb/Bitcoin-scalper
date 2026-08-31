@@ -1329,14 +1329,13 @@ class TradingEngine {
         signalDirection = "NEUTRAL";
       }
     } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
-      // In low volatility compression, detect if Squeeze (Setup 6) or Trendline Breakout (Setup 7) fires
+      // In low volatility compression, detect if Trendline Breakout (Setup 7) fires
       const smcTlLong = this.evaluateTrendlineBreakoutSetup("LONG");
       const smcTlShort = this.evaluateTrendlineBreakoutSetup("SHORT");
-      const squeezeCheck = this.evaluateVolatilitySqueeze();
 
-      if (smcTlLong.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "LONG")) {
+      if (smcTlLong.isValid) {
         signalDirection = "LONG";
-      } else if (smcTlShort.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "SHORT")) {
+      } else if (smcTlShort.isValid) {
         signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
@@ -1381,7 +1380,6 @@ class TradingEngine {
       const smcFvgShort = this.evaluateFVGSetup("SHORT");
       const smcObLong = this.evaluateOrderBlockSetup("LONG");
       const smcObShort = this.evaluateOrderBlockSetup("SHORT");
-      const squeezeCheck = this.evaluateVolatilitySqueeze();
 
       const exhaustionLong = this.evaluateExhaustionReversalCondition("LONG", currentPrice, closes, lastIdx);
       const exhaustionShort = this.evaluateExhaustionReversalCondition("SHORT", currentPrice, closes, lastIdx);
@@ -1389,9 +1387,9 @@ class TradingEngine {
       const upperWickExhaustion = this.evaluateDirectionalExhaustionWicks("LONG");
       const lowerWickExhaustion = this.evaluateDirectionalExhaustionWicks("SHORT");
 
-      if (smcTlLong.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "LONG")) {
+      if (smcTlLong.isValid) {
         signalDirection = !upperWickExhaustion.isExhausted ? "LONG" : "NEUTRAL";
-      } else if (smcTlShort.isValid || (squeezeCheck.squeezeFired && squeezeCheck.squeezeFiredDirection === "SHORT")) {
+      } else if (smcTlShort.isValid) {
         signalDirection = !lowerWickExhaustion.isExhausted ? "SHORT" : "NEUTRAL";
       } else if (longSweepSignal.isSweep && probabilityLong >= 0.50) {
         signalDirection = "LONG";
@@ -4075,7 +4073,6 @@ class TradingEngine {
       "Liquidity Sweep Setup (Setup 3)": { status: "SKIP", reason: "No active liquidity sweep setup" },
       "Fair Value Gap Retest Setup (Setup 4)": { status: "SKIP", reason: "No active fair value gap setup" },
       "Institutional Order Block Setup (Setup 5)": { status: "SKIP", reason: "No active order block setup" },
-      "Volatility Squeeze Setup (Setup 6)": { status: "SKIP", reason: "No active volatility squeeze" },
       "Trendline Breakout Setup (Setup 7)": { status: "SKIP", reason: "No active trendline breakout setup" },
       "Micro-Trend Flag Breakout Setup (Setup 8)": { status: "SKIP", reason: "No active micro-flag setup" },
       "Range Failed Auction Reclaim Setup (Setup 9)": { status: "SKIP", reason: "No active range failed auction setup" },
@@ -4198,23 +4195,7 @@ class TradingEngine {
       condDict["Institutional Order Block Setup (Setup 5)"] = { status: "SKIP", reason: obResult.description || "No active order block setup" };
     }
 
-    // 4. Setup 6: Volatility Squeeze Breakout
-    const squeezeResult = this.evaluateVolatilitySqueeze();
-    const absorptionResult = this.detectOrderFlowAbsorption(direction);
-    const isSqueezeSetupValid = (squeezeResult.squeezeFired && squeezeResult.squeezeFiredDirection === direction) ||
-      (squeezeResult.isSqueezed && (hasHighHFPressure || absorptionResult.isAbsorption));
-    const sqDesc = squeezeResult.squeezeFired
-      ? `[Setup 6 - Volatility Squeeze Expansion Confirmed]: Momentum fired in direction of ${direction} from compressed Bollinger/Keltner base.`
-      : (squeezeResult.isSqueezed
-          ? `[Setup 6 - Pre-Breakout Squeeze Accumulation Confirmed]: Volatility tightly coiled with institutional order flow absorption (${absorptionResult.type || "High HF Pressure"}).`
-          : squeezeResult.description);
-    if (isSqueezeSetupValid) {
-      condDict["Volatility Squeeze Setup (Setup 6)"] = { status: isMtfAligned ? "PASS" : "FAIL", reason: isMtfAligned ? sqDesc : "Blocked by 5m MTF Trend conflict." };
-    } else {
-      condDict["Volatility Squeeze Setup (Setup 6)"] = { status: "SKIP", reason: squeezeResult.description || "No active volatility squeeze" };
-    }
-
-    // 5. Setup 7: Trendline Breakout
+    // 4. Setup 7: Trendline Breakout
     const tlResult = this.evaluateTrendlineBreakoutSetup(direction);
     if (tlResult.isValid) {
       condDict["Trendline Breakout Setup (Setup 7)"] = { status: isMtfAligned ? "PASS" : "FAIL", reason: isMtfAligned ? tlResult.description : "Blocked by 5m MTF Trend conflict." };
@@ -4315,20 +4296,6 @@ class TradingEngine {
         true,
         `[Setup 5 - Institutional Order Block Retest Confirmed] ${obResult.description}`
       );
-    }
-
-    if (isSqueezeSetupValid && isMtfAligned) {
-      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Volatility Squeeze Expansion Setup" };
-      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: "Squeeze release at compression origin" };
-      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Squeeze expansion candle" };
-      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Early squeeze entry" };
-      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "Compression baseline holding" };
-      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Squeeze entry at inflection" };
-      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Squeeze breakout volume valid" };
-      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Volatility Squeeze Setup (Setup 6)" };
-      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Volatility Squeeze Setup (Setup 6)" };
-
-      return getReturnObj(true, sqDesc);
     }
 
     if (tlResult.isValid && isMtfAligned) {
@@ -7428,7 +7395,6 @@ class TradingEngine {
     const isLiquiditySweep = msg.includes("liquidity sweep") || msg.includes("setup 3");
     const isFvg = msg.includes("fair value gap") || msg.includes("fvg") || msg.includes("setup 4");
     const isOrderBlock = msg.includes("order block") || msg.includes("setup 5");
-    const isSqueeze = msg.includes("squeeze") || msg.includes("setup 6");
     const isTrendlineBreakout = msg.includes("trendline breakout") || msg.includes("setup 7");
     const isMicroFlag = msg.includes("micro-flag") || msg.includes("micro-trend flag") || msg.includes("setup 8");
     const isFailedAuction = msg.includes("failed auction") || msg.includes("sfp") || msg.includes("setup 9");
@@ -7450,9 +7416,9 @@ class TradingEngine {
       setupCategory = "Trendline Breakout Expansion";
       targetRelVol = Math.max(1.15, Math.min(baseMinRelVol * 0.90, 1.25));
       categoryDescription = "Trendline Breakout / Breakdown: Confirmed break of descending resistance or ascending support requires momentum volume expansion (>= 1.20x).";
-    } else if (isSqueeze || (isBreakout && !isPullbackRetest)) {
+    } else if (isBreakout && !isPullbackRetest) {
       // High-Velocity Breakouts require real breakout volume expansion
-      setupCategory = "Momentum Breakout / Squeeze Expansion";
+      setupCategory = "Momentum Breakout Expansion";
       targetRelVol = Math.max(1.25, baseMinRelVol);
       categoryDescription = "Momentum Breakout: Demands high institutional expansion volume (>= 1.25x - 1.30x) to confirm genuine range expansion without false breakouts.";
     } else if (isPullbackRetest || isEmaRetrace) {

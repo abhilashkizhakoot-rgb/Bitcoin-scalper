@@ -1681,24 +1681,52 @@ class TradingEngine {
       softened: contextVolResult.softened,
     });
 
-    // Consolidated Pre-Flight Account & Operational Safety Gate (Capital Balance, API Status, Daily Trade Limit, Loss Cooldown)
+    // 1. Daily Trade Count Limit
     const timestamp = new Date().toISOString();
     const tradesToday = dbManager.getTrades().filter(
       (t) => t.entry_timestamp.split("T")[0] === timestamp.split("T")[0]
     );
     const maxDailyTrades = config.general.max_trades_per_day;
     const cbDailyTradesPass = tradesToday.length < maxDailyTrades;
+    conditions.push({
+      name: "Daily Trade Count Limit",
+      met: cbDailyTradesPass,
+      current_value: `${tradesToday.length}/${maxDailyTrades} Trades Today`,
+      required: `< ${maxDailyTrades} trades/day`,
+      description: "Ensures maximum trade frequency limits are not breached.",
+      priority: "CRITICAL",
+    });
 
+    // 2. Account Equity & API Connection Verification
     const apiCreds = dbManager.getCredentials();
     const balance = apiCreds.account_balance_usdt;
     const hasMinEquity = balance >= 100;
     const hasValidCreds = dbManager.isPaperMode() || (!!apiCreds.api_key && !!apiCreds.api_secret);
+    conditions.push({
+      name: "Account Equity & API Connection Verification",
+      met: hasMinEquity && hasValidCreds,
+      current_value: `Balance: $${balance.toFixed(2)} USDT | ${dbManager.isPaperMode() ? "Paper Mode Active" : (hasValidCreds ? "Keys Configured" : "Missing Keys")}`,
+      required: "Balance >= $100.00 USDT and valid live connection keys or Paper Mode active",
+      description: "Verifies account equity and trading API credentials.",
+      priority: "CRITICAL",
+    });
 
+    // 3. Loss Streak Cooldown Protection
     const lossCooldown = this.getConsecutiveLossesCooldownStatus();
     const lossCooldownPass = !lossCooldown.active;
+    conditions.push({
+      name: "Loss Streak Cooldown Protection",
+      met: lossCooldownPass,
+      current_value: lossCooldown.active
+        ? `Cooldown (Streak: ${lossCooldown.consecutiveLosses}, ${Math.ceil(lossCooldown.remainingSeconds / 60)}m left)`
+        : "Clear (0 Active Loss Streak)",
+      required: "No active cooldown from consecutive losses",
+      description: "Enforces a dynamic cooldown after consecutive losses to prevent revenge trading.",
+      priority: "CRITICAL",
+    });
 
+    // 4. Consolidated Pre-Flight Account & Operational Safety Gate
     const preFlightAllPass = cbDailyTradesPass && hasMinEquity && hasValidCreds && lossCooldownPass;
-
     const preFlightFailedDetails: string[] = [];
     if (!hasMinEquity) preFlightFailedDetails.push(`Equity ($${balance.toFixed(2)} < $100.00 USDT)`);
     if (!hasValidCreds) preFlightFailedDetails.push("API keys missing");

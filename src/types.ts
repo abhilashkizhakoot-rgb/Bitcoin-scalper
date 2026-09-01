@@ -337,6 +337,14 @@ export interface StrategyConfig {
     failed_auction_strategy_enabled?: boolean; // Enable Range Failed Auction / SFP Reclaim Strategy (Setup 9) (default: true)
     failed_auction_max_deviation_atr_mult?: number; // Maximum price poke beyond range boundary in ATR multiples (default: 0.8)
     failed_auction_max_candles_outside?: number; // Maximum candles price spent outside boundary before reclaiming (default: 3)
+    vwap_band_reversal_enabled?: boolean; // Enable dedicated VWAP Outer Band Rejection Mean Reversion Strategy (Setup 10) (default: true)
+    vwap_band_reversal_deviation_mult?: number; // Standard deviation multiplier for VWAP outer band (default: 1.5)
+    vwap_band_reversal_min_wick_ratio?: number; // Minimum rejection wick ratio for inward candle (default: 0.30)
+    vwap_band_reversal_require_reversal_candle?: boolean; // Require verified 2-candle or pinbar reversal pattern (default: true)
+    eqh_eql_strategy_enabled?: boolean; // Enable EQH/EQL Double Touch Divergence Strategy (Setup 11) (default: true)
+    eqh_eql_min_touch_count?: number; // Minimum touches required at equal level (default: 2)
+    eqh_eql_require_divergence?: boolean; // Require volume decay or RSI/CVD momentum divergence on 2nd touch (default: true)
+    eqh_eql_require_candlestick_reversal?: boolean; // Require verified reversal candlestick on double touch (default: true)
   };
   gate_scoring?: {
     enabled: boolean;

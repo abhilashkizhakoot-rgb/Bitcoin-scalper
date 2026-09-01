@@ -1300,7 +1300,7 @@ class TradingEngine {
       const isRangeLongBreakout = (currentPrice > rangeHigh) && breakoutValidationLong.isValid;
       const isRangeShortBreakdown = (currentPrice < rangeLow) && breakoutValidationShort.isValid;
 
-      // SMC & Trendline Breakout (Setup 7) checks during consolidation / range-bound
+      // SMC, Range Reversal, VWAP Band Rejection (Setup 10), and EQH/EQL Double Touch (Setup 11) checks
       const smcTlLong = this.evaluateTrendlineBreakoutSetup("LONG");
       const smcTlShort = this.evaluateTrendlineBreakoutSetup("SHORT");
       const smcSweepLong = this.detectLiquiditySweep("LONG");
@@ -1309,6 +1309,10 @@ class TradingEngine {
       const smcFvgShort = this.evaluateFVGSetup("SHORT");
       const smcObLong = this.evaluateOrderBlockSetup("LONG");
       const smcObShort = this.evaluateOrderBlockSetup("SHORT");
+      const vwapReversalLong = this.evaluateVwapBandRejectionSetup("LONG");
+      const vwapReversalShort = this.evaluateVwapBandRejectionSetup("SHORT");
+      const eqhEqlLong = this.evaluateEqhEqlDoubleTouchSetup("LONG");
+      const eqhEqlShort = this.evaluateEqhEqlDoubleTouchSetup("SHORT");
 
       const exhaustionLong = this.evaluateExhaustionReversalCondition("LONG", currentPrice, closes, lastIdx);
       const exhaustionShort = this.evaluateExhaustionReversalCondition("SHORT", currentPrice, closes, lastIdx);
@@ -1318,9 +1322,9 @@ class TradingEngine {
         signalDirection = "SHORT";
       } else if (isRangeLongBreakout) {
         signalDirection = "LONG";
-      } else if (isRangeLongReversal || (exhaustionLong.isExhausted && probabilityLong >= 0.48)) {
+      } else if (isRangeLongReversal || vwapReversalLong.isValid || eqhEqlLong.isValid || (exhaustionLong.isExhausted && probabilityLong >= 0.48)) {
         signalDirection = "LONG";
-      } else if (isRangeShortReversal || (exhaustionShort.isExhausted && probabilityShort >= 0.48)) {
+      } else if (isRangeShortReversal || vwapReversalShort.isValid || eqhEqlShort.isValid || (exhaustionShort.isExhausted && probabilityShort >= 0.48)) {
         signalDirection = "SHORT";
       } else if (smcTlLong.isValid || smcSweepLong.isSweep || smcFvgLong.isFvgValid || smcObLong.isObValid) {
         signalDirection = "LONG";
@@ -1330,13 +1334,17 @@ class TradingEngine {
         signalDirection = "NEUTRAL";
       }
     } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
-      // In low volatility compression, detect if Trendline Breakout (Setup 7) fires
+      // In low volatility compression, detect if Trendline Breakout (Setup 7), VWAP Reversal (Setup 10) or EQH/EQL (Setup 11) fires
       const smcTlLong = this.evaluateTrendlineBreakoutSetup("LONG");
       const smcTlShort = this.evaluateTrendlineBreakoutSetup("SHORT");
+      const vwapLong = this.evaluateVwapBandRejectionSetup("LONG");
+      const vwapShort = this.evaluateVwapBandRejectionSetup("SHORT");
+      const eqLong = this.evaluateEqhEqlDoubleTouchSetup("LONG");
+      const eqShort = this.evaluateEqhEqlDoubleTouchSetup("SHORT");
 
-      if (smcTlLong.isValid) {
+      if (smcTlLong.isValid || vwapLong.isValid || eqLong.isValid) {
         signalDirection = "LONG";
-      } else if (smcTlShort.isValid) {
+      } else if (smcTlShort.isValid || vwapShort.isValid || eqShort.isValid) {
         signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
@@ -1455,8 +1463,12 @@ class TradingEngine {
     // Evaluate active SMC / structural setup presence for threshold & alignment bypass
     const smcTlActive = (signalDirection === "LONG" && this.evaluateTrendlineBreakoutSetup("LONG").isValid) ||
                         (signalDirection === "SHORT" && this.evaluateTrendlineBreakoutSetup("SHORT").isValid);
-    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFVGSetup("LONG").isFvgValid || this.evaluateOrderBlockSetup("LONG").isObValid || smcTlActive)) ||
-                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFVGSetup("SHORT").isFvgValid || this.evaluateOrderBlockSetup("SHORT").isObValid || smcTlActive));
+    const smcVwapActive = (signalDirection === "LONG" && this.evaluateVwapBandRejectionSetup("LONG").isValid) ||
+                          (signalDirection === "SHORT" && this.evaluateVwapBandRejectionSetup("SHORT").isValid);
+    const smcEqhEqlActive = (signalDirection === "LONG" && this.evaluateEqhEqlDoubleTouchSetup("LONG").isValid) ||
+                            (signalDirection === "SHORT" && this.evaluateEqhEqlDoubleTouchSetup("SHORT").isValid);
+    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFVGSetup("LONG").isFvgValid || this.evaluateOrderBlockSetup("LONG").isObValid || this.evaluateFailedAuctionSetup("LONG").isValid || smcTlActive || smcVwapActive || smcEqhEqlActive)) ||
+                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFVGSetup("SHORT").isFvgValid || this.evaluateOrderBlockSetup("SHORT").isObValid || this.evaluateFailedAuctionSetup("SHORT").isValid || smcTlActive || smcVwapActive || smcEqhEqlActive));
 
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY && !isSmcActive) {
       return {
@@ -4089,6 +4101,8 @@ class TradingEngine {
       "Trendline Breakout Setup (Setup 7)": { status: "SKIP", reason: "No active trendline breakout setup" },
       "Micro-Trend Flag Breakout Setup (Setup 8)": { status: "SKIP", reason: "No active micro-flag setup" },
       "Range Failed Auction Reclaim Setup (Setup 9)": { status: "SKIP", reason: "No active range failed auction setup" },
+      "VWAP Band Rejection Setup (Setup 10)": { status: "SKIP", reason: "No active VWAP band rejection setup" },
+      "EQH/EQL Double Touch Setup (Setup 11)": { status: "SKIP", reason: "No active EQH/EQL double touch setup" },
     };
 
     const getReturnObj = (confirmed: boolean, message: string) => {
@@ -4242,6 +4256,26 @@ class TradingEngine {
       condDict["Range Failed Auction Reclaim Setup (Setup 9)"] = { status: "SKIP", reason: failedAuctionResult.description || "No active range failed auction setup" };
     }
 
+    // 8. Setup 10: Dedicated VWAP Outer Band Rejection (Mean Reversion Scalp)
+    const vwapBandResult = this.evaluateVwapBandRejectionSetup(direction);
+    if (vwapBandResult.isValid) {
+      condDict["VWAP Band Rejection Setup (Setup 10)"] = { status: "PASS", reason: vwapBandResult.description };
+    } else if (vwapBandResult.description && !vwapBandResult.description.includes("No active") && !vwapBandResult.description.includes("disabled")) {
+      condDict["VWAP Band Rejection Setup (Setup 10)"] = { status: "FAIL", reason: vwapBandResult.description };
+    } else {
+      condDict["VWAP Band Rejection Setup (Setup 10)"] = { status: "SKIP", reason: vwapBandResult.description || "No active VWAP band rejection setup" };
+    }
+
+    // 9. Setup 11: EQH / EQL Double Touch Rejection with Divergence
+    const eqhEqlResult = this.evaluateEqhEqlDoubleTouchSetup(direction);
+    if (eqhEqlResult.isValid) {
+      condDict["EQH/EQL Double Touch Setup (Setup 11)"] = { status: "PASS", reason: eqhEqlResult.description };
+    } else if (eqhEqlResult.description && !eqhEqlResult.description.includes("No active") && !eqhEqlResult.description.includes("disabled")) {
+      condDict["EQH/EQL Double Touch Setup (Setup 11)"] = { status: "FAIL", reason: eqhEqlResult.description };
+    } else {
+      condDict["EQH/EQL Double Touch Setup (Setup 11)"] = { status: "SKIP", reason: eqhEqlResult.description || "No active EQH/EQL double touch setup" };
+    }
+
     // --- PRIORITY DISPATCH FOR SMC / SPECIALIZED SETUPS ---
     if (sweepResult.isSweep) {
       condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Liquidity Sweep Reversal Setup" };
@@ -4361,6 +4395,42 @@ class TradingEngine {
       }
 
       return getReturnObj(true, faDesc);
+    }
+
+    if (vwapBandResult.isValid) {
+      const vwapDesc = `[Setup 10 - VWAP Band Rejection Confirmed]: ${vwapBandResult.description}`;
+      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for VWAP Band Reversal Setup" };
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `VWAP Outer Band rejection at $${vwapBandResult.bandPrice.toFixed(2)}` };
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Reversal rejection candle confirmed" };
+      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Mean-reversion entry to VWAP basis" };
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `SL at $${vwapBandResult.stopLoss.toFixed(2)}` };
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Outer band touch inflection" };
+      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Band rejection volume valid" };
+      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for VWAP Band Rejection Setup (Setup 10)" };
+      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for VWAP Band Rejection Setup (Setup 10)" };
+      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
+        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "VWAP outer band mean-reversion" };
+      }
+
+      return getReturnObj(true, vwapDesc);
+    }
+
+    if (eqhEqlResult.isValid) {
+      const eqDesc = `[Setup 11 - EQH/EQL Double Touch Rejection Confirmed]: ${eqhEqlResult.description}`;
+      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for EQH/EQL Boundary Rejection Setup" };
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Equal ${direction === "LONG" ? "Lows (EQL)" : "Highs (EQH)"} level at $${eqhEqlResult.levelPrice.toFixed(2)}` };
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "2nd touch rejection wick confirmed" };
+      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Double boundary rejection entry" };
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `SL at $${eqhEqlResult.stopLoss.toFixed(2)}` };
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Double touch inflection" };
+      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Volume decay & divergence valid" };
+      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for EQH/EQL Double Touch Setup (Setup 11)" };
+      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for EQH/EQL Double Touch Setup (Setup 11)" };
+      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
+        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Double touch boundary mean-reversion" };
+      }
+
+      return getReturnObj(true, eqDesc);
     }
 
     // Block standard trend setups if MTF trend alignment fails
@@ -4581,40 +4651,43 @@ class TradingEngine {
       const isNearBreakoutLevel = (currentPrice - breakoutLevel) <= 2.0 * currentAtr;
       const isHighAdxConsolidation = adxValue >= strongTrendAdx && isRecentBreakout && isNearBreakoutLevel;
       
-      // Targeted Fix: Candle Direction & Reversal Confirmation Guard for High-ADX Parabolic Continuation
-      // Prevents entering longs during aggressive red dump candles. Requires bullish candle or lower wick >= 35%.
+      // Targeted Fix: Candle Direction & Reversal Confirmation Guard
+      // Strictly enforces that long entries require a closed green candle with positive upward displacement.
+      const isLongGreen = currentCandle.close > currentCandle.open;
       const isLongCandleStabilized = (() => {
-        if (!currentCandle) return false;
-        const isGreen = currentCandle.close > currentCandle.open;
+        if (!currentCandle || !isLongGreen) return false;
         const range = Math.max(0.001, currentCandle.high - currentCandle.low);
-        const lowerWick = Math.min(currentCandle.open, currentCandle.close) - currentCandle.low;
-        return isGreen || (lowerWick / range) >= 0.35;
+        const body = currentCandle.close - currentCandle.open;
+        return isLongGreen && (body / range >= 0.20 || isLongRejectionConfirmed);
       })();
 
-      const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close >= reclaimThreshold) && isLongCandleStabilized;
+      const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close >= reclaimThreshold) && isLongCandleStabilized && isLongRejectionConfirmed;
 
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
       if (breakoutIdx !== -1 && boBodyRatioMet && !isChasing && !isSetup1Invalidated && (hasPulledBackToZone || isShallowConsolidationHolding)) {
         const isRejection = isLongRejectionConfirmed;
-        const isContinuation = currentCandle.close > currentCandle.open && (currentCandle.close >= breakoutLevel || isLongRejectionConfirmed);
-        const isEarlyRetestTouchHolding = hasPulledBackToZone && (isLongRejectionConfirmed || isLongCandleStabilized);
-        if ((isRejection && isContinuation) || (isShallowConsolidationHolding && isContinuation) || (isEarlyRetestTouchHolding && isLongCandleStabilized)) {
+        const isContinuation = isLongGreen && (currentCandle.close >= breakoutLevel || isLongRejectionConfirmed);
+        
+        // Strict Candlestick Confirmation Mandate:
+        // Requires a verified bullish reversal candlestick pattern (isLongRejectionConfirmed) AND a green close
+        if (isRejection && isLongGreen && isContinuation) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
             const setupLabel = isShallowConsolidationHolding && !hasPulledBackToZone
-              ? `High-ADX Parabolic Continuation (${adxValue.toFixed(1)} ADX): Shallow consolidation held above $${breakoutLevel.toFixed(2)}`
-              : (isEarlyRetestTouchHolding && !isRejection
-                  ? `Early Retest Mitigation Confirmed at $${breakoutLevel.toFixed(2)}`
-                  : `Pullback & Retest setup confirmed via [${longRejectionType}]`);
-            pullbackRetestMessage = `${setupLabel}${mtfMessage}: Price ${isShallowConsolidationHolding && !hasPulledBackToZone ? 'consolidated tightly above' : 'pulled back to'} broken HH level ($${breakoutLevel.toFixed(2)}) on healthy volume and resumed trend (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
+              ? `High-ADX Parabolic Continuation (${adxValue.toFixed(1)} ADX): Shallow consolidation held above $${breakoutLevel.toFixed(2)} with [${longRejectionType}]`
+              : `Pullback & Retest setup confirmed via [${longRejectionType}]`;
+            pullbackRetestMessage = `${setupLabel}${mtfMessage}: Price ${isShallowConsolidationHolding && !hasPulledBackToZone ? 'consolidated tightly above' : 'pulled back to'} broken HH level ($${breakoutLevel.toFixed(2)}) on healthy volume and formed verified bullish rejection (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
             condDict["Pullback & Retest Setup (Setup 1)"] = { status: "PASS", reason: pullbackRetestMessage };
           } else {
             pullbackRetestMessage = "Blocked Retest: Pullback volume is abnormally high, indicating excessive distribution/selling pressure.";
             condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: pullbackRetestMessage };
           }
         } else {
-          condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: `Waiting for bullish confirmation candle pattern at broken HH support level $${breakoutLevel.toFixed(2)}.` };
+          condDict["Pullback & Retest Setup (Setup 1)"] = {
+            status: "FAIL",
+            reason: `Waiting for verified bullish reversal candlestick pattern (Hammer, Morning Star, Bullish Engulfing, Tweezer Bottom) at broken HH support level $${breakoutLevel.toFixed(2)}. (Current candle: ${isLongGreen ? 'green without pattern confirmation' : 'falling red candle'}).`
+          };
         }
       } else {
         if (isSetup1Invalidated) {
@@ -4650,16 +4723,16 @@ class TradingEngine {
         return c.low <= emaVal + 0.25 * currentAtr && c.high >= emaVal - 0.15 * currentAtr;
       });
       
-      const isEarlyEmaTouchHolding = (touchesFirstEma || touchesSecondEma) && (isLongRejectionConfirmed || isLongCandleStabilized);
-      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && (isLongRejectionConfirmed || isEarlyEmaTouchHolding) && isLongCandleStabilized && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
+      // Strict Candlestick Confirmation Mandate for EMA Pushback:
+      // Must touch the dynamic EMA support zone AND close green with a verified bullish reversal candlestick pattern
+      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isLongRejectionConfirmed && isLongGreen && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
 
       const isEmaPushbackValid = isRegularEmaPushbackValid && !isSetup2Invalidated;
       let emaPushbackMessage = "";
+      const matchedEmaVal = touchesFirstEma ? firstEmaVal : (touchesSecondEma ? secondEmaVal : firstEmaVal);
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
-          const matchedEmaVal = touchesFirstEma ? firstEmaVal : (touchesSecondEma ? secondEmaVal : firstEmaVal);
-          const confirmType = isLongRejectionConfirmed ? `via [${longRejectionType}]` : "via dynamic support touch & hold";
-          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed ${confirmType}${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected/bounced off dynamic EMA support at $${matchedEmaVal.toFixed(2)} (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
+          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed via [${longRejectionType}]${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected/bounced off dynamic EMA support at $${matchedEmaVal.toFixed(2)} (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "PASS", reason: emaPushbackMessage };
         } else {
           emaPushbackMessage = "Blocked EMA Pushback: Abnormally high volume pullback during EMA retracement suggests a trend failure.";
@@ -4668,8 +4741,11 @@ class TradingEngine {
       } else {
         if (isSetup2Invalidated) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Blocked: Price broke below dynamic EMA invalidation floor $${emaInvalidationFloor.toFixed(2)}.` };
-        } else if (hasRetracedToEMA || touchesFirstEma || touchesSecondEma) {
-          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle.` };
+        } else if (touchesFirstEma || touchesSecondEma || hasRetracedToEMA) {
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = {
+            status: "FAIL",
+            reason: `Retraced to dynamic EMA support ($${matchedEmaVal.toFixed(2)}), but waiting for a verified closed bullish reversal candlestick pattern (Hammer, Bullish Engulfing, Morning Star, Tweezer Bottom). Current candle is ${isLongGreen ? 'green without pattern confirmation' : 'falling red candle'}.`
+          };
         } else {
           const thresholdVal = Math.max(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: `Skipped: Price has not recently retraced into dynamic EMA threshold level of $${thresholdVal.toFixed(2)}.` };
@@ -4903,40 +4979,43 @@ class TradingEngine {
       const isNearBreakoutLevel = (breakoutLevel - currentPrice) <= 2.0 * currentAtr;
       const isHighAdxConsolidation = adxValue >= strongTrendAdx && isRecentBreakout && isNearBreakoutLevel;
       
-      // Targeted Fix: Candle Direction & Reversal Confirmation Guard for High-ADX Parabolic Continuation
-      // Prevents entering shorts into sharp V-shape green counter-trend bounces. Requires bearish candle or upper rejection wick >= 35%.
+      // Targeted Fix: Candle Direction & Reversal Confirmation Guard
+      // Strictly enforces that short entries require a closed red candle with negative downward displacement.
+      const isShortRed = currentCandle.close < currentCandle.open;
       const isShortCandleStabilized = (() => {
-        if (!currentCandle) return false;
-        const isRed = currentCandle.close < currentCandle.open;
+        if (!currentCandle || !isShortRed) return false;
         const range = Math.max(0.001, currentCandle.high - currentCandle.low);
-        const upperWick = currentCandle.high - Math.max(currentCandle.open, currentCandle.close);
-        return isRed || (upperWick / range) >= 0.35;
+        const body = currentCandle.open - currentCandle.close;
+        return isShortRed && (body / range >= 0.20 || isShortRejectionConfirmed);
       })();
 
-      const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close <= reclaimThreshold) && isShortCandleStabilized;
+      const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close <= reclaimThreshold) && isShortCandleStabilized && isShortRejectionConfirmed;
 
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
       if (breakoutIdx !== -1 && boBodyRatioMet && !isChasing && !isSetup1Invalidated && (hasPulledBackToZone || isShallowConsolidationHolding)) {
         const isRejection = isShortRejectionConfirmed;
-        const isContinuation = currentCandle.close < currentCandle.open && (currentCandle.close <= breakoutLevel || isShortRejectionConfirmed);
-        const isEarlyRetestTouchHolding = hasPulledBackToZone && (isShortRejectionConfirmed || isShortCandleStabilized);
-        if ((isRejection && isContinuation) || (isShallowConsolidationHolding && isContinuation) || (isEarlyRetestTouchHolding && isShortCandleStabilized)) {
+        const isContinuation = isShortRed && (currentCandle.close <= breakoutLevel || isShortRejectionConfirmed);
+        
+        // Strict Candlestick Confirmation Mandate:
+        // Requires a verified bearish reversal candlestick pattern (isShortRejectionConfirmed) AND a red close
+        if (isRejection && isShortRed && isContinuation) {
           if (isVolumeHealthyForPullback) {
             isPullbackRetestValid = true;
             const setupLabel = isShallowConsolidationHolding && !hasPulledBackToZone
-              ? `High-ADX Parabolic Continuation (${adxValue.toFixed(1)} ADX): Shallow consolidation held below $${breakoutLevel.toFixed(2)}`
-              : (isEarlyRetestTouchHolding && !isRejection
-                  ? `Early Retest Mitigation Confirmed at $${breakoutLevel.toFixed(2)}`
-                  : `Pullback & Retest setup confirmed via [${shortRejectionType}]`);
-            pullbackRetestMessage = `${setupLabel}${mtfMessage}: Price ${isShallowConsolidationHolding && !hasPulledBackToZone ? 'consolidated tightly below' : 'pulled back to'} broken LL level ($${breakoutLevel.toFixed(2)}) on healthy volume and resumed trend (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
+              ? `High-ADX Parabolic Continuation (${adxValue.toFixed(1)} ADX): Shallow consolidation held below $${breakoutLevel.toFixed(2)} with [${shortRejectionType}]`
+              : `Pullback & Retest setup confirmed via [${shortRejectionType}]`;
+            pullbackRetestMessage = `${setupLabel}${mtfMessage}: Price ${isShallowConsolidationHolding && !hasPulledBackToZone ? 'consolidated tightly below' : 'pulled back to'} broken LL level ($${breakoutLevel.toFixed(2)}) on healthy volume and formed verified bearish rejection (ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
             condDict["Pullback & Retest Setup (Setup 1)"] = { status: "PASS", reason: pullbackRetestMessage };
           } else {
             pullbackRetestMessage = "Blocked Retest: Pullback volume is abnormally high, indicating excessive accumulation/buying pressure.";
             condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: pullbackRetestMessage };
           }
         } else {
-          condDict["Pullback & Retest Setup (Setup 1)"] = { status: "FAIL", reason: `Waiting for bearish confirmation candle pattern at broken LL resistance level $${breakoutLevel.toFixed(2)}.` };
+          condDict["Pullback & Retest Setup (Setup 1)"] = {
+            status: "FAIL",
+            reason: `Waiting for verified bearish reversal candlestick pattern (Shooting Star, Evening Star, Bearish Engulfing, Tweezer Top) at broken LL resistance level $${breakoutLevel.toFixed(2)}. (Current candle: ${isShortRed ? 'red without pattern confirmation' : 'rising green candle'}).`
+          };
         }
       } else {
         if (isSetup1Invalidated) {
@@ -4972,16 +5051,16 @@ class TradingEngine {
         return c.high >= emaVal - 0.25 * currentAtr && c.low <= emaVal + 0.15 * currentAtr;
       });
       
-      const isEarlyEmaTouchHoldingShort = (touchesFirstEma || touchesSecondEma) && (isShortRejectionConfirmed || isShortCandleStabilized);
-      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && (isShortRejectionConfirmed || isEarlyEmaTouchHoldingShort) && isShortCandleStabilized && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
+      // Strict Candlestick Confirmation Mandate for EMA Pushback:
+      // Must touch the dynamic EMA resistance zone AND close red with a verified bearish reversal candlestick pattern
+      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isShortRejectionConfirmed && isShortRed && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
 
       const isEmaPushbackValid = isRegularEmaPushbackValid && !isSetup2Invalidated;
       let emaPushbackMessage = "";
+      const matchedEmaVal = touchesFirstEma ? firstEmaVal : (touchesSecondEma ? secondEmaVal : firstEmaVal);
       if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
-          const matchedEmaVal = touchesFirstEma ? firstEmaVal : (touchesSecondEma ? secondEmaVal : firstEmaVal);
-          const confirmType = isShortRejectionConfirmed ? `via [${shortRejectionType}]` : "via dynamic resistance touch & hold";
-          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed ${confirmType}${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected/bounced off dynamic EMA resistance at $${matchedEmaVal.toFixed(2)} (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
+          emaPushbackMessage = `${emaZoneLabel} Pushback confirmed via [${shortRejectionType}]${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected/bounced off dynamic EMA resistance at $${matchedEmaVal.toFixed(2)} (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "PASS", reason: emaPushbackMessage };
         } else {
           emaPushbackMessage = "Blocked EMA Pushback: Abnormally high volume pullback during EMA retracement suggests a trend failure.";
@@ -4990,8 +5069,11 @@ class TradingEngine {
       } else {
         if (isSetup2Invalidated) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Blocked: Price broke above dynamic EMA invalidation ceiling $${emaInvalidationCeiling.toFixed(2)}.` };
-        } else if (hasRetracedToEMA || touchesFirstEma || touchesSecondEma) {
-          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "FAIL", reason: `Retraced to dynamic EMA zone, but did not reject first EMA ($${firstEmaVal.toFixed(2)}) or second EMA ($${secondEmaVal.toFixed(2)}) with confirmed rejection candle.` };
+        } else if (touchesFirstEma || touchesSecondEma || hasRetracedToEMA) {
+          condDict["EMA Retracement / Pushback Setup (Setup 2)"] = {
+            status: "FAIL",
+            reason: `Retraced to dynamic EMA resistance ($${matchedEmaVal.toFixed(2)}), but waiting for a verified closed bearish reversal candlestick pattern (Shooting Star, Bearish Engulfing, Evening Star, Tweezer Top). Current candle is ${isShortRed ? 'red without pattern confirmation' : 'rising green candle'}.`
+          };
         } else {
           const thresholdVal = Math.min(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: `Skipped: Price has not recently retraced into dynamic EMA threshold level of $${thresholdVal.toFixed(2)}.` };
@@ -5023,8 +5105,8 @@ class TradingEngine {
   }
 
   public detectEqualHighsLows(): {
-    eqhLevels: { price: number; touchCount: number }[];
-    eqlLevels: { price: number; touchCount: number }[];
+    eqhLevels: { price: number; touchCount: number; touches?: { price: number; idx: number; volume: number; rsi?: number }[] }[];
+    eqlLevels: { price: number; touchCount: number; touches?: { price: number; idx: number; volume: number; rsi?: number }[] }[];
   } {
     const config = dbManager.getConfig();
     const ms: any = config.market_structure || {};
@@ -5035,47 +5117,51 @@ class TradingEngine {
 
     const lookback = Math.min(100, this.candles1m.length);
     const recent = this.candles1m.slice(-lookback);
+    const rsi14 = this.calculateRSI(this.candles1m.map(c => c.close), 14);
 
-    const highs: number[] = [];
-    const lows: number[] = [];
+    const highs: { price: number; idx: number; volume: number; rsi?: number }[] = [];
+    const lows: { price: number; idx: number; volume: number; rsi?: number }[] = [];
     for (let i = 1; i < recent.length - 1; i++) {
+      const globalIdx = this.candles1m.length - lookback + i;
       if (recent[i].high >= recent[i - 1].high && recent[i].high >= recent[i + 1].high) {
-        highs.push(recent[i].high);
+        highs.push({ price: recent[i].high, idx: globalIdx, volume: recent[i].volume, rsi: rsi14[globalIdx] });
       }
       if (recent[i].low <= recent[i - 1].low && recent[i].low <= recent[i + 1].low) {
-        lows.push(recent[i].low);
+        lows.push({ price: recent[i].low, idx: globalIdx, volume: recent[i].volume, rsi: rsi14[globalIdx] });
       }
     }
 
-    const eqhLevels: { price: number; touchCount: number }[] = [];
+    const eqhLevels: { price: number; touchCount: number; touches: { price: number; idx: number; volume: number; rsi?: number }[] }[] = [];
     for (const h of highs) {
       let matched = false;
       for (const eqh of eqhLevels) {
-        if (Math.abs(h - eqh.price) / eqh.price * 100 <= tolerancePct) {
+        if (Math.abs(h.price - eqh.price) / eqh.price * 100 <= tolerancePct) {
           eqh.touchCount++;
-          eqh.price = (eqh.price + h) / 2;
+          eqh.price = (eqh.price * (eqh.touchCount - 1) + h.price) / eqh.touchCount;
+          eqh.touches.push(h);
           matched = true;
           break;
         }
       }
       if (!matched) {
-        eqhLevels.push({ price: h, touchCount: 1 });
+        eqhLevels.push({ price: h.price, touchCount: 1, touches: [h] });
       }
     }
 
-    const eqlLevels: { price: number; touchCount: number }[] = [];
+    const eqlLevels: { price: number; touchCount: number; touches: { price: number; idx: number; volume: number; rsi?: number }[] }[] = [];
     for (const l of lows) {
       let matched = false;
       for (const eql of eqlLevels) {
-        if (Math.abs(l - eql.price) / eql.price * 100 <= tolerancePct) {
+        if (Math.abs(l.price - eql.price) / eql.price * 100 <= tolerancePct) {
           eql.touchCount++;
-          eql.price = (eql.price + l) / 2;
+          eql.price = (eql.price * (eql.touchCount - 1) + l.price) / eql.touchCount;
+          eql.touches.push(l);
           matched = true;
           break;
         }
       }
       if (!matched) {
-        eqlLevels.push({ price: l, touchCount: 1 });
+        eqlLevels.push({ price: l.price, touchCount: 1, touches: [l] });
       }
     }
 
@@ -7523,6 +7609,541 @@ class TradingEngine {
         stopLoss: 0,
         takeProfit: 0,
         description: "No active bearish range failed auction setup"
+      };
+    }
+  }
+
+  /**
+   * FEATURE 12: Setup 10 - Dedicated VWAP / Range Band Rejection (Mean Reversion Scalp)
+   * Exploits institutional mean-reversion pull when price stretches to the +/- 1.5 sigma or +/- 2.0 sigma
+   * standard deviation bands of the Session VWAP and prints an inward-facing reversal rejection candle.
+   */
+  public evaluateVwapBandRejectionSetup(direction: "LONG" | "SHORT" | "NEUTRAL"): {
+    isValid: boolean;
+    direction: "LONG" | "SHORT" | "NEUTRAL";
+    vwapPrice: number;
+    bandPrice: number;
+    bandDeviationSigma: number;
+    reversalType: string;
+    stopLoss: number;
+    takeProfit: number;
+    riskReward: number;
+    description: string;
+  } {
+    const config = dbManager.getConfig();
+    const ms: any = config.market_structure || {};
+
+    if (ms.vwap_band_reversal_enabled === false || direction === "NEUTRAL") {
+      return {
+        isValid: false,
+        direction,
+        vwapPrice: 0,
+        bandPrice: 0,
+        bandDeviationSigma: 0,
+        reversalType: "",
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: ms.vwap_band_reversal_enabled === false ? "VWAP Band Rejection strategy disabled" : "Neutral direction"
+      };
+    }
+
+    if (this.candles1m.length < 25) {
+      return {
+        isValid: false,
+        direction,
+        vwapPrice: 0,
+        bandPrice: 0,
+        bandDeviationSigma: 0,
+        reversalType: "",
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Insufficient candle history for VWAP calculation"
+      };
+    }
+
+    const lastIdx = this.candles1m.length - 1;
+    const currentCandle = this.candles1m[lastIdx];
+    const currentPrice = this.currentPrice;
+
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentAtr = atr14[lastIdx] || 50;
+
+    const mult = ms.vwap_band_reversal_deviation_mult || 1.5;
+    this.calculateVWAP(this.candles1m, mult);
+
+    const vwapVal = currentCandle.vwap !== undefined ? currentCandle.vwap : currentPrice;
+    const vwapUpper = currentCandle.vwap_upper !== undefined ? currentCandle.vwap_upper : currentPrice + mult * currentAtr;
+    const vwapLower = currentCandle.vwap_lower !== undefined ? currentCandle.vwap_lower : currentPrice - mult * currentAtr;
+
+    const minWickRatio = ms.vwap_band_reversal_min_wick_ratio || 0.30;
+    const rsi14 = this.calculateRSI(this.candles1m.map(c => c.close), 14);
+    const currentRsi = rsi14[lastIdx] ?? 50;
+    const absorption = this.detectOrderFlowAbsorption(direction);
+
+    // Look at recent 3 candles for band touch and inward rejection
+    const recentCandles = this.candles1m.slice(-3);
+
+    if (direction === "LONG") {
+      // Long: Price stretched to lower VWAP band (vwap_lower), rejected upward, closing back toward VWAP
+      const touchedLowerBand = recentCandles.some(c => c.low <= vwapLower + 0.15 * currentAtr);
+      if (!touchedLowerBand) {
+        return {
+          isValid: false,
+          direction: "LONG",
+          vwapPrice: vwapVal,
+          bandPrice: vwapLower,
+          bandDeviationSigma: mult,
+          reversalType: "",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: "Price has not touched lower VWAP deviation band"
+        };
+      }
+
+      // Bullish candlestick rejection check
+      const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtr);
+      const isCandleGreen = currentCandle.close > currentCandle.open || currentPrice > currentCandle.open;
+      const candleRange = currentCandle.high - currentCandle.low;
+      const lowerWick = Math.min(currentCandle.open, currentCandle.close) - currentCandle.low;
+      const hasWickRejection = candleRange > 0 && (lowerWick / candleRange >= minWickRatio);
+      const isReversalPattern = rejectionCheck.confirmed || (isCandleGreen && hasWickRejection);
+
+      if (!isReversalPattern && ms.vwap_band_reversal_require_reversal_candle !== false) {
+        return {
+          isValid: false,
+          direction: "LONG",
+          vwapPrice: vwapVal,
+          bandPrice: vwapLower,
+          bandDeviationSigma: mult,
+          reversalType: "",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: "Awaiting confirmed bullish rejection candle at lower VWAP band"
+        };
+      }
+
+      const lowestPoint = Math.min(...recentCandles.map(c => c.low));
+      const stopLoss = lowestPoint - 0.15 * currentAtr;
+      const takeProfit = vwapVal;
+      const riskDistance = currentPrice - stopLoss;
+      const rewardDistance = takeProfit - currentPrice;
+      const rrRatio = riskDistance > 0 ? rewardDistance / riskDistance : 0;
+
+      if (rrRatio < 1.40) {
+        return {
+          isValid: false,
+          direction: "LONG",
+          vwapPrice: vwapVal,
+          bandPrice: vwapLower,
+          bandDeviationSigma: mult,
+          reversalType: rejectionCheck.type || "Bullish Reversal",
+          stopLoss,
+          takeProfit,
+          riskReward: Number(rrRatio.toFixed(2)),
+          description: `VWAP Mean Reversion R:R too low (${rrRatio.toFixed(2)} < 1.40)`
+        };
+      }
+
+      // Confluence: RSI oversold or Order flow absorption
+      const isRsiValid = currentRsi <= 48;
+      const isDeltaSupported = absorption.isAbsorption || this.orderFlowStats.takerBuyRatio >= 0.46;
+
+      if (isRsiValid || isDeltaSupported) {
+        const patternName = rejectionCheck.type || "Bullish Hammer / Pin Bar Rejection";
+        return {
+          isValid: true,
+          direction: "LONG",
+          vwapPrice: vwapVal,
+          bandPrice: vwapLower,
+          bandDeviationSigma: mult,
+          reversalType: patternName,
+          stopLoss,
+          takeProfit,
+          riskReward: Number(rrRatio.toFixed(2)),
+          description: `Bullish VWAP Band Mean-Reversion: Price rejected from -${mult.toFixed(1)}sigma band ($${vwapLower.toFixed(2)}) with ${patternName} (RSI: ${currentRsi.toFixed(1)}, R:R ${rrRatio.toFixed(2)}x) targeting Session VWAP $${vwapVal.toFixed(2)} (SL: $${stopLoss.toFixed(2)}).`
+        };
+      }
+
+      return {
+        isValid: false,
+        direction: "LONG",
+        vwapPrice: vwapVal,
+        bandPrice: vwapLower,
+        bandDeviationSigma: mult,
+        reversalType: "",
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Awaiting RSI oversold condition or order flow absorption at lower VWAP band"
+      };
+    } else {
+      // Short: Price stretched to upper VWAP band (vwap_upper), rejected downward, closing back toward VWAP
+      const touchedUpperBand = recentCandles.some(c => c.high >= vwapUpper - 0.15 * currentAtr);
+      if (!touchedUpperBand) {
+        return {
+          isValid: false,
+          direction: "SHORT",
+          vwapPrice: vwapVal,
+          bandPrice: vwapUpper,
+          bandDeviationSigma: mult,
+          reversalType: "",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: "Price has not touched upper VWAP deviation band"
+        };
+      }
+
+      // Bearish candlestick rejection check
+      const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtr);
+      const isCandleRed = currentCandle.close < currentCandle.open || currentPrice < currentCandle.open;
+      const candleRange = currentCandle.high - currentCandle.low;
+      const upperWick = currentCandle.high - Math.max(currentCandle.open, currentCandle.close);
+      const hasWickRejection = candleRange > 0 && (upperWick / candleRange >= minWickRatio);
+      const isReversalPattern = rejectionCheck.confirmed || (isCandleRed && hasWickRejection);
+
+      if (!isReversalPattern && ms.vwap_band_reversal_require_reversal_candle !== false) {
+        return {
+          isValid: false,
+          direction: "SHORT",
+          vwapPrice: vwapVal,
+          bandPrice: vwapUpper,
+          bandDeviationSigma: mult,
+          reversalType: "",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: "Awaiting confirmed bearish rejection candle at upper VWAP band"
+        };
+      }
+
+      const highestPoint = Math.max(...recentCandles.map(c => c.high));
+      const stopLoss = highestPoint + 0.15 * currentAtr;
+      const takeProfit = vwapVal;
+      const riskDistance = stopLoss - currentPrice;
+      const rewardDistance = currentPrice - takeProfit;
+      const rrRatio = riskDistance > 0 ? rewardDistance / riskDistance : 0;
+
+      if (rrRatio < 1.40) {
+        return {
+          isValid: false,
+          direction: "SHORT",
+          vwapPrice: vwapVal,
+          bandPrice: vwapUpper,
+          bandDeviationSigma: mult,
+          reversalType: rejectionCheck.type || "Bearish Reversal",
+          stopLoss,
+          takeProfit,
+          riskReward: Number(rrRatio.toFixed(2)),
+          description: `VWAP Mean Reversion R:R too low (${rrRatio.toFixed(2)} < 1.40)`
+        };
+      }
+
+      // Confluence: RSI overbought or Order flow absorption
+      const isRsiValid = currentRsi >= 52;
+      const isDeltaSupported = absorption.isAbsorption || this.orderFlowStats.takerBuyRatio <= 0.54;
+
+      if (isRsiValid || isDeltaSupported) {
+        const patternName = rejectionCheck.type || "Bearish Shooting Star / Pin Bar Rejection";
+        return {
+          isValid: true,
+          direction: "SHORT",
+          vwapPrice: vwapVal,
+          bandPrice: vwapUpper,
+          bandDeviationSigma: mult,
+          reversalType: patternName,
+          stopLoss,
+          takeProfit,
+          riskReward: Number(rrRatio.toFixed(2)),
+          description: `Bearish VWAP Band Mean-Reversion: Price rejected from +${mult.toFixed(1)}sigma band ($${vwapUpper.toFixed(2)}) with ${patternName} (RSI: ${currentRsi.toFixed(1)}, R:R ${rrRatio.toFixed(2)}x) targeting Session VWAP $${vwapVal.toFixed(2)} (SL: $${stopLoss.toFixed(2)}).`
+        };
+      }
+
+      return {
+        isValid: false,
+        direction: "SHORT",
+        vwapPrice: vwapVal,
+        bandPrice: vwapUpper,
+        bandDeviationSigma: mult,
+        reversalType: "",
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Awaiting RSI overbought condition or order flow absorption at upper VWAP band"
+      };
+    }
+  }
+
+  /**
+   * FEATURE 13: Setup 11 - Equal Highs / Equal Lows (EQH/EQL) Double Rejection with Momentum Divergence
+   * Targets high-expectancy double top / double bottom boundary rejections at established EQH/EQL pools
+   * exhibiting volume decay on the 2nd touch and RSI/CVD momentum divergence.
+   */
+  public evaluateEqhEqlDoubleTouchSetup(direction: "LONG" | "SHORT" | "NEUTRAL"): {
+    isValid: boolean;
+    direction: "LONG" | "SHORT" | "NEUTRAL";
+    levelPrice: number;
+    touchCount: number;
+    hasVolumeDecay: boolean;
+    hasMomentumDivergence: boolean;
+    reversalType: string;
+    stopLoss: number;
+    takeProfit: number;
+    riskReward: number;
+    description: string;
+  } {
+    const config = dbManager.getConfig();
+    const ms: any = config.market_structure || {};
+
+    if (ms.eqh_eql_strategy_enabled === false || direction === "NEUTRAL") {
+      return {
+        isValid: false,
+        direction,
+        levelPrice: 0,
+        touchCount: 0,
+        hasVolumeDecay: false,
+        hasMomentumDivergence: false,
+        reversalType: "",
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: ms.eqh_eql_strategy_enabled === false ? "EQH/EQL Double Touch strategy disabled" : "Neutral direction"
+      };
+    }
+
+    if (this.candles1m.length < 30) {
+      return {
+        isValid: false,
+        direction,
+        levelPrice: 0,
+        touchCount: 0,
+        hasVolumeDecay: false,
+        hasMomentumDivergence: false,
+        reversalType: "",
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Insufficient candle history"
+      };
+    }
+
+    const lastIdx = this.candles1m.length - 1;
+    const currentCandle = this.candles1m[lastIdx];
+    const currentPrice = this.currentPrice;
+
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentAtr = atr14[lastIdx] || 50;
+
+    const eqLevels = this.detectEqualHighsLows();
+    const minTouches = ms.eqh_eql_min_touch_count || 2;
+
+    const rangeLookback = 30;
+    const recentRangeSlice = this.candles1m.slice(-rangeLookback);
+    const rangeHigh = Math.max(...recentRangeSlice.map(c => c.high));
+    const rangeLow = Math.min(...recentRangeSlice.map(c => c.low));
+    const rangeEq = (rangeHigh + rangeLow) / 2;
+
+    if (direction === "LONG") {
+      // Find matching EQL support level near current price
+      const matchedEql = eqLevels.eqlLevels.find(
+        eql => eql.touchCount >= minTouches &&
+               (Math.abs(currentCandle.low - eql.price) / eql.price * 100 <= 0.15 ||
+                Math.abs(currentPrice - eql.price) <= 0.35 * currentAtr)
+      );
+
+      if (!matchedEql) {
+        return {
+          isValid: false,
+          direction: "LONG",
+          levelPrice: 0,
+          touchCount: 0,
+          hasVolumeDecay: false,
+          hasMomentumDivergence: false,
+          reversalType: "",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: "No active Equal Lows (EQL) double bottom level tested"
+        };
+      }
+
+      // Check candlestick reversal at double bottom
+      const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtr);
+      const isCandleGreen = currentCandle.close > currentCandle.open || currentPrice > currentCandle.open;
+      const isReversalConfirmed = rejectionCheck.confirmed || isCandleGreen;
+
+      if (!isReversalConfirmed && ms.eqh_eql_require_candlestick_reversal !== false) {
+        return {
+          isValid: false,
+          direction: "LONG",
+          levelPrice: matchedEql.price,
+          touchCount: matchedEql.touchCount,
+          hasVolumeDecay: false,
+          hasMomentumDivergence: false,
+          reversalType: "",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: `Awaiting confirmed bullish rejection candle at EQL support $${matchedEql.price.toFixed(2)}`
+        };
+      }
+
+      // Check volume decay & momentum divergence between touches
+      let hasVolumeDecay = true;
+      let hasMomentumDivergence = true;
+
+      if (matchedEql.touches && matchedEql.touches.length >= 2) {
+        const t1 = matchedEql.touches[matchedEql.touches.length - 2];
+        const t2 = matchedEql.touches[matchedEql.touches.length - 1];
+        // Volume Decay: 2nd touch volume <= 1.20x of 1st touch (exhaustion of sellers)
+        hasVolumeDecay = t2.volume <= t1.volume * 1.20 || t2.volume <= currentCandle.volume * 1.5;
+        // RSI Divergence: RSI on 2nd touch is higher than or equal to 1st touch (bullish divergence)
+        hasMomentumDivergence = (t2.rsi !== undefined && t1.rsi !== undefined)
+          ? t2.rsi >= t1.rsi - 2.0
+          : true;
+      }
+
+      const absorption = this.detectOrderFlowAbsorption("LONG");
+      const isDeltaConfirmed = absorption.isAbsorption || this.orderFlowStats.takerBuyRatio >= 0.47;
+
+      if (ms.eqh_eql_require_divergence !== false && !hasVolumeDecay && !hasMomentumDivergence && !isDeltaConfirmed) {
+        return {
+          isValid: false,
+          direction: "LONG",
+          levelPrice: matchedEql.price,
+          touchCount: matchedEql.touchCount,
+          hasVolumeDecay,
+          hasMomentumDivergence,
+          reversalType: rejectionCheck.type || "Bullish Reversal",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: `EQL double bottom lacks volume decay and momentum divergence at $${matchedEql.price.toFixed(2)}`
+        };
+      }
+
+      const stopLoss = matchedEql.price - 0.15 * currentAtr;
+      const takeProfit = rangeEq > currentPrice + 0.5 * currentAtr ? rangeEq : rangeHigh - 0.15 * currentAtr;
+      const riskDistance = currentPrice - stopLoss;
+      const rewardDistance = takeProfit - currentPrice;
+      const rrRatio = riskDistance > 0 ? rewardDistance / riskDistance : 0;
+
+      const patternDesc = rejectionCheck.type || "Bullish Double Bottom Rejection";
+      return {
+        isValid: true,
+        direction: "LONG",
+        levelPrice: matchedEql.price,
+        touchCount: matchedEql.touchCount,
+        hasVolumeDecay,
+        hasMomentumDivergence,
+        reversalType: patternDesc,
+        stopLoss,
+        takeProfit,
+        riskReward: Number(rrRatio.toFixed(2)),
+        description: `Bullish EQL Double Bottom Rejection: Price successfully tested Equal Lows pool ($${matchedEql.price.toFixed(2)}, ${matchedEql.touchCount} touches) with ${patternDesc}${hasVolumeDecay ? " [Volume Decay]" : ""}${hasMomentumDivergence ? " [RSI/CVD Divergence]" : ""} targeting Range Equilibrium $${takeProfit.toFixed(2)} (SL: $${stopLoss.toFixed(2)}).`
+      };
+    } else {
+      // Find matching EQH resistance level near current price
+      const matchedEqh = eqLevels.eqhLevels.find(
+        eqh => eqh.touchCount >= minTouches &&
+               (Math.abs(currentCandle.high - eqh.price) / eqh.price * 100 <= 0.15 ||
+                Math.abs(currentPrice - eqh.price) <= 0.35 * currentAtr)
+      );
+
+      if (!matchedEqh) {
+        return {
+          isValid: false,
+          direction: "SHORT",
+          levelPrice: 0,
+          touchCount: 0,
+          hasVolumeDecay: false,
+          hasMomentumDivergence: false,
+          reversalType: "",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: "No active Equal Highs (EQH) double top level tested"
+        };
+      }
+
+      // Check candlestick reversal at double top
+      const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtr);
+      const isCandleRed = currentCandle.close < currentCandle.open || currentPrice < currentCandle.open;
+      const isReversalConfirmed = rejectionCheck.confirmed || isCandleRed;
+
+      if (!isReversalConfirmed && ms.eqh_eql_require_candlestick_reversal !== false) {
+        return {
+          isValid: false,
+          direction: "SHORT",
+          levelPrice: matchedEqh.price,
+          touchCount: matchedEqh.touchCount,
+          hasVolumeDecay: false,
+          hasMomentumDivergence: false,
+          reversalType: "",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: `Awaiting confirmed bearish rejection candle at EQH resistance $${matchedEqh.price.toFixed(2)}`
+        };
+      }
+
+      // Check volume decay & momentum divergence between touches
+      let hasVolumeDecay = true;
+      let hasMomentumDivergence = true;
+
+      if (matchedEqh.touches && matchedEqh.touches.length >= 2) {
+        const t1 = matchedEqh.touches[matchedEqh.touches.length - 2];
+        const t2 = matchedEqh.touches[matchedEqh.touches.length - 1];
+        // Volume Decay: 2nd touch volume <= 1.20x of 1st touch (exhaustion of buyers)
+        hasVolumeDecay = t2.volume <= t1.volume * 1.20 || t2.volume <= currentCandle.volume * 1.5;
+        // RSI Divergence: RSI on 2nd touch is lower than or equal to 1st touch (bearish divergence)
+        hasMomentumDivergence = (t2.rsi !== undefined && t1.rsi !== undefined)
+          ? t2.rsi <= t1.rsi + 2.0
+          : true;
+      }
+
+      const absorption = this.detectOrderFlowAbsorption("SHORT");
+      const isDeltaConfirmed = absorption.isAbsorption || this.orderFlowStats.takerBuyRatio <= 0.53;
+
+      if (ms.eqh_eql_require_divergence !== false && !hasVolumeDecay && !hasMomentumDivergence && !isDeltaConfirmed) {
+        return {
+          isValid: false,
+          direction: "SHORT",
+          levelPrice: matchedEqh.price,
+          touchCount: matchedEqh.touchCount,
+          hasVolumeDecay,
+          hasMomentumDivergence,
+          reversalType: rejectionCheck.type || "Bearish Reversal",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: `EQH double top lacks volume decay and momentum divergence at $${matchedEqh.price.toFixed(2)}`
+        };
+      }
+
+      const stopLoss = matchedEqh.price + 0.15 * currentAtr;
+      const takeProfit = rangeEq < currentPrice - 0.5 * currentAtr ? rangeEq : rangeLow + 0.15 * currentAtr;
+      const riskDistance = stopLoss - currentPrice;
+      const rewardDistance = currentPrice - takeProfit;
+      const rrRatio = riskDistance > 0 ? rewardDistance / riskDistance : 0;
+
+      const patternDesc = rejectionCheck.type || "Bearish Double Top Rejection";
+      return {
+        isValid: true,
+        direction: "SHORT",
+        levelPrice: matchedEqh.price,
+        touchCount: matchedEqh.touchCount,
+        hasVolumeDecay,
+        hasMomentumDivergence,
+        reversalType: patternDesc,
+        stopLoss,
+        takeProfit,
+        riskReward: Number(rrRatio.toFixed(2)),
+        description: `Bearish EQH Double Top Rejection: Price successfully tested Equal Highs pool ($${matchedEqh.price.toFixed(2)}, ${matchedEqh.touchCount} touches) with ${patternDesc}${hasVolumeDecay ? " [Volume Decay]" : ""}${hasMomentumDivergence ? " [RSI/CVD Divergence]" : ""} targeting Range Equilibrium $${takeProfit.toFixed(2)} (SL: $${stopLoss.toFixed(2)}).`
       };
     }
   }

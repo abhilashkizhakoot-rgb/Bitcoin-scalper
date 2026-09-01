@@ -206,9 +206,11 @@ export interface StrategyConfig {
     enable_ranging_extreme_rsi_bypass?: boolean;
     ranging_rsi_overbought_threshold?: number;
     ranging_rsi_oversold_threshold?: number;
+    ranging_adx_ceiling?: number;
     enable_exhaustion_trend_bypass?: boolean;
     exhaustion_rsi_oversold_threshold?: number;
     exhaustion_rsi_overbought_threshold?: number;
+    exhaustion_max_adx?: number;
     exhaustion_lookback_candles?: number;
     exhaustion_require_structural_confluence?: boolean;
     enable_exhaustion_wick_filter?: boolean;

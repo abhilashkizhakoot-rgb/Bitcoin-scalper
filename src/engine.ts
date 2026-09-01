@@ -1569,9 +1569,16 @@ class TradingEngine {
     const isExhaustionActive = activeExhaustion.isExhausted;
     const isExhaustionBypassEnabled = (config.general.enable_exhaustion_trend_bypass ?? config.general.enable_ranging_extreme_rsi_bypass) !== false;
 
+    const maxRangingAdx = config.general.ranging_adx_ceiling ?? 25.0;
+    const maxExhaustionAdx = config.general.exhaustion_max_adx ?? 26.0;
+
     if (isSmcActive) {
-      trendAligned = true;
-      adxMet = adxValue >= hardFloorAdx;
+      if (this.currentRegime === MarketRegime.RANGE_BOUND) {
+        adxMet = adxValue >= hardFloorAdx && adxValue <= maxRangingAdx;
+      } else {
+        adxMet = adxValue >= hardFloorAdx;
+      }
+      trendAligned = adxMet;
       currentTrendStr = smcTlActive 
         ? "PASSING (Bypassed via Trendline Breakout Setup 7)" 
         : activeSweepSignal.isSweep 
@@ -1579,10 +1586,12 @@ class TradingEngine {
         : "PASSING (Bypassed via SMC Structural Setup)";
       requiredStr = "SMC / Trendline Breakout Setup Active";
     } else if (isExhaustionBypassEnabled && isExhaustionActive) {
-      trendAligned = true;
-      adxMet = true;
-      currentTrendStr = `PASSING (Bypassed via ${signalDirection === "LONG" ? "Oversold" : "Overbought"} Exhaustion Reversal: ${activeExhaustion.reasons.slice(0, 2).join(" + ")})`;
-      requiredStr = `Exhaustion Reversal Active (${activeExhaustion.description})`;
+      adxMet = adxValue >= hardFloorAdx && adxValue <= maxExhaustionAdx;
+      trendAligned = adxMet;
+      currentTrendStr = adxMet
+        ? `PASSING (Bypassed via ${signalDirection === "LONG" ? "Oversold" : "Overbought"} Exhaustion Reversal: ${activeExhaustion.reasons.slice(0, 2).join(" + ")})`
+        : `BLOCKED (ADX ${adxValue.toFixed(1)} exceeds safe exhaustion ceiling ${maxExhaustionAdx})`;
+      requiredStr = `Exhaustion Reversal Active (${activeExhaustion.description}) & ADX <= ${maxExhaustionAdx}`;
     } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
       const overboughtThresh = config.general.ranging_rsi_overbought_threshold ?? 75.0;
       const oversoldThresh = config.general.ranging_rsi_oversold_threshold ?? 25.0;
@@ -1591,7 +1600,7 @@ class TradingEngine {
 
       if (signalDirection === "LONG") {
         trendAligned = !isBearAligned;
-        if (!trendAligned && isExtremeOversold) {
+        if (!trendAligned && isExtremeOversold && adxValue <= maxExhaustionAdx) {
           trendAligned = true;
           currentTrendStr = `PASSING (Bypassed via Extreme Oversold RSI ${currentRsi.toFixed(1)} <= ${oversoldThresh})`;
         } else if (!trendAligned) {
@@ -1601,7 +1610,7 @@ class TradingEngine {
         }
       } else {
         trendAligned = !isBullAligned;
-        if (!trendAligned && isExtremeOverbought) {
+        if (!trendAligned && isExtremeOverbought && adxValue <= maxExhaustionAdx) {
           trendAligned = true;
           currentTrendStr = `PASSING (Bypassed via Extreme Overbought RSI ${currentRsi.toFixed(1)} >= ${overboughtThresh})`;
         } else if (!trendAligned) {
@@ -1610,8 +1619,8 @@ class TradingEngine {
           currentTrendStr = "PASSING (Not strongly bullish)";
         }
       }
-      adxMet = adxValue >= minRangingAdx;
-      requiredStr = `LONG: Not strongly bearish (isBearAligned) or RSI <= ${oversoldThresh}, SHORT: Not strongly bullish (isBullAligned) or RSI >= ${overboughtThresh} | Ranging ADX >= ${minRangingAdx.toFixed(1)}`;
+      adxMet = adxValue >= minRangingAdx && adxValue <= maxRangingAdx;
+      requiredStr = `LONG: Not strongly bearish (isBearAligned) or RSI <= ${oversoldThresh}, SHORT: Not strongly bullish (isBullAligned) or RSI >= ${overboughtThresh} | Ranging ADX between ${minRangingAdx.toFixed(1)} and ${maxRangingAdx.toFixed(1)}`;
     } else {
       if (hasExtremeRealtimePressure) {
         const fastEma = ms.fast_ema_period || 20;
@@ -1670,10 +1679,12 @@ class TradingEngine {
       adxValDisplay = `ADX BELOW HARD FLOOR - BLOCKED (${adxValue.toFixed(1)} < ${hardFloorAdx.toFixed(1)})`;
     } else if (this.currentRegime === MarketRegime.RANGE_BOUND && adxValue < minRangingAdx) {
       adxValDisplay = `RANGE-BOUND ADX BELOW FLOOR - BLOCKED (${adxValue.toFixed(1)} < ${minRangingAdx.toFixed(1)})`;
+    } else if (this.currentRegime === MarketRegime.RANGE_BOUND && adxValue > maxRangingAdx) {
+      adxValDisplay = `RANGE-BOUND ADX EXCEEDS CEILING - BLOCKED (${adxValue.toFixed(1)} > ${maxRangingAdx.toFixed(1)})`;
     }
 
     const adxReqDisplay = this.currentRegime === MarketRegime.RANGE_BOUND
-      ? `ADX >= ${minRangingAdx.toFixed(1)} (Range-Bound Floor, Hard Floor >= ${hardFloorAdx.toFixed(1)})`
+      ? `ADX between ${minRangingAdx.toFixed(1)} and ${maxRangingAdx.toFixed(1)} (Range-Bound Enforced)`
       : `ADX >= ${(hasExtremeRealtimePressure ? softenedAdxThreshold : standardAdxThreshold).toFixed(1)} (Hard Floor >= ${hardFloorAdx.toFixed(1)})`;
 
     conditions.push({
@@ -1681,7 +1692,7 @@ class TradingEngine {
       met: adxMet,
       current_value: adxValDisplay,
       required: adxReqDisplay,
-      description: `Confirms sufficient trend momentum/velocity. Hard floor blocks all entries if ADX < ${hardFloorAdx.toFixed(1)}, and range-bound regimes enforce ADX >= ${minRangingAdx.toFixed(1)}.`,
+      description: `Confirms appropriate momentum. Range-bound regimes require ADX between ${minRangingAdx.toFixed(1)} and ${maxRangingAdx.toFixed(1)} to prevent counter-trend falling knives.`,
       priority: "HIGH",
       softened: isTrendSoftened,
     });
@@ -6089,6 +6100,18 @@ class TradingEngine {
       return emptyResult;
     }
 
+    // --- Hard Safeguard 1: ADX Momentum Ceiling for Exhaustion Bypasses ---
+    const adx14 = this.calculateADX(this.candles1m, 14);
+    const currentAdx = (adx14 && adx14.length > lastIdx && adx14[lastIdx] !== undefined) ? adx14[lastIdx] : 20;
+    const maxExhaustionAdx = config.general.exhaustion_max_adx ?? 26.0;
+
+    if (currentAdx > maxExhaustionAdx) {
+      return {
+        ...emptyResult,
+        description: `Blocked: ADX (${currentAdx.toFixed(1)}) exceeds exhaustion safe ceiling (${maxExhaustionAdx}) - high-velocity trend active`,
+      };
+    }
+
     const lookback = config.general.exhaustion_lookback_candles ?? 6;
     const oversoldThresh = config.general.exhaustion_rsi_oversold_threshold ?? (config.general.ranging_rsi_oversold_threshold ?? 32.0);
     const overboughtThresh = config.general.exhaustion_rsi_overbought_threshold ?? (config.general.ranging_rsi_overbought_threshold ?? 68.0);
@@ -6110,11 +6133,13 @@ class TradingEngine {
     const bbWidth = Math.max(0.01, bb.upper - bb.lower);
     const percentB = (currentPrice - bb.lower) / bbWidth;
 
+    const ema9 = this.calculateEMA(closes, 9);
     const ema20 = this.calculateEMA(closes, 20);
     const ema50 = this.calculateEMA(closes, 50);
     const ema100 = this.calculateEMA(closes, Math.min(closes.length, 100));
     const ema200 = this.calculateEMA(closes, Math.min(closes.length, 200));
 
+    const ema9Val = ema9[lastIdx] !== undefined ? ema9[lastIdx] : currentPrice;
     const ema20Val = ema20[lastIdx] || currentPrice;
     const ema50Val = ema50[lastIdx] || currentPrice;
     const ema100Val = ema100[lastIdx] !== undefined ? ema100[lastIdx] : currentPrice;
@@ -6124,10 +6149,26 @@ class TradingEngine {
     const currentCandle = this.candles1m[lastIdx];
     const prevCandle = lastIdx > 0 ? this.candles1m[lastIdx - 1] : currentCandle;
 
+    // --- Hard Safeguard 2: Waterfall / Severe Expansion Momentum Locks ---
+    const closedIdx = (lastIdx === this.candles1m.length - 1 && this.candles1m.length >= 2) ? lastIdx - 1 : lastIdx;
+    const recent3Closed = this.candles1m.slice(Math.max(0, closedIdx - 2), closedIdx + 1);
+    const consecutiveRedExpansionCount = recent3Closed.filter(c => c.close < c.open && Math.abs(c.close - c.open) >= 0.30 * (c.high - c.low)).length;
+    const isSevereRedWaterfall = consecutiveRedExpansionCount >= 3 && currentPrice < ema9Val;
+
+    const consecutiveGreenExpansionCount = recent3Closed.filter(c => c.close > c.open && (c.close - c.open) >= 0.30 * (c.high - c.low)).length;
+    const isSevereGreenBlowoff = consecutiveGreenExpansionCount >= 3 && currentPrice > ema9Val;
+
     const reasons: string[] = [];
     let confluenceScore = 0;
 
     if (direction === "LONG") {
+      if (isSevereRedWaterfall) {
+        return {
+          ...emptyResult,
+          description: "Blocked: Consecutive bearish expansion waterfall active below EMA 9",
+        };
+      }
+
       // 1. Multi-Candle RSI Oversold & Hook Confirmation
       const isRsiDirectOversold = currentRsi <= oversoldThresh;
       const isRsiRecentOversold = minRecentRsi <= oversoldThresh || rsiSma <= (oversoldThresh + 2.0);
@@ -6196,7 +6237,8 @@ class TradingEngine {
         reasons.push(`Order Flow Absorption (Taker Buy Ratio: ${(this.orderFlowStats.takerBuyRatio * 100).toFixed(0)}%, Imbalance: ${this.orderBookStats.imbalanceRatio.toFixed(2)})`);
       }
 
-      const isExhausted = confluenceScore >= 3 || (rsiExhaustion && (structuralAnchor || isBbOversold));
+      // Reclaim confirmation: When price is below EMA 20, require either an active candlestick rejection or a confirmed RSI hook
+      const isExhausted = (confluenceScore >= 3 || (rsiExhaustion && (structuralAnchor || isBbOversold))) && (candlestickRejection || isRsiHookingUp);
 
       return {
         isExhausted,
@@ -6220,6 +6262,13 @@ class TradingEngine {
       };
     } else {
       // SHORT: Overbought Exhaustion & Rollback
+      if (isSevereGreenBlowoff) {
+        return {
+          ...emptyResult,
+          description: "Blocked: Consecutive bullish expansion blowoff active above EMA 9",
+        };
+      }
+
       // 1. Multi-Candle RSI Overbought & Hook Confirmation
       const isRsiDirectOverbought = currentRsi >= overboughtThresh;
       const isRsiRecentOverbought = maxRecentRsi >= overboughtThresh || rsiSma >= (overboughtThresh - 2.0);
@@ -6288,7 +6337,7 @@ class TradingEngine {
         reasons.push(`Order Flow Absorption (Taker Buy Ratio: ${(this.orderFlowStats.takerBuyRatio * 100).toFixed(0)}%, Imbalance: ${this.orderBookStats.imbalanceRatio.toFixed(2)})`);
       }
 
-      const isExhausted = confluenceScore >= 3 || (rsiExhaustion && (structuralAnchor || isBbOverbought));
+      const isExhausted = (confluenceScore >= 3 || (rsiExhaustion && (structuralAnchor || isBbOverbought))) && (candlestickRejection || isRsiHookingDown);
 
       return {
         isExhausted,
@@ -6343,7 +6392,23 @@ class TradingEngine {
     const atr14 = this.calculateATR(this.candles1m, 14);
     const currentAtr = atr14[lastIdx] || 50;
 
-    // Support/Resistance threshold uses fraction of range width and relative ATR (removing rigid 0.15% price cap)
+    // --- Hard Safeguard 1: ADX Range-Reversal Ceiling ---
+    const adx14 = this.calculateADX(this.candles1m, 14);
+    const currentAdx = (adx14 && adx14.length > lastIdx && adx14[lastIdx] !== undefined) ? adx14[lastIdx] : 20;
+    const maxRangingAdx = config.general.ranging_adx_ceiling ?? 25.0;
+
+    if (currentAdx > maxRangingAdx) {
+      return {
+        isLongReversal: false,
+        isShortReversal: false,
+        longReason: `Blocked: ADX (${currentAdx.toFixed(1)}) exceeds ranging ceiling (${maxRangingAdx.toFixed(1)}) - momentum expansion active`,
+        shortReason: `Blocked: ADX (${currentAdx.toFixed(1)}) exceeds ranging ceiling (${maxRangingAdx.toFixed(1)}) - momentum expansion active`,
+        rangeLow,
+        rangeHigh,
+      };
+    }
+
+    // Support/Resistance threshold uses fraction of range width and relative ATR
     const rangeSupportThreshold = rangeLow + Math.min(rangeWidth * 0.15, Math.max(rangeWidth * 0.08, 0.5 * currentAtr));
     const rangeResistanceThreshold = rangeHigh - Math.min(rangeWidth * 0.15, Math.max(rangeWidth * 0.08, 0.5 * currentAtr));
     
@@ -6415,6 +6480,26 @@ class TradingEngine {
     
     const isRsiHookedBullish = wasRsiOversold && currentRsi > recentRsiSlice[0] && isClosedCandleGreen;
     const isRsiHookedBearish = wasRsiOverbought && currentRsi < recentRsiSlice[0] && isClosedCandleRed;
+
+    // --- Hard Safeguard 2: EMA Trend & Slope Barrier for Counter-Trend Range Trades ---
+    const ema9Series = this.calculateEMA(closes, 9);
+    const ema20Series = this.calculateEMA(closes, 20);
+    const ema50Series = this.calculateEMA(closes, 50);
+
+    const ema9Val = ema9Series[lastIdx] !== undefined ? ema9Series[lastIdx] : currentPrice;
+    const ema20Val = ema20Series[lastIdx] !== undefined ? ema20Series[lastIdx] : currentPrice;
+    const ema50Val = ema50Series[lastIdx] !== undefined ? ema50Series[lastIdx] : currentPrice;
+
+    const isBearishEmaStructure = ema20Val < ema50Val;
+    const isBullishEmaStructure = ema20Val > ema50Val;
+
+    // Waterfall guard: 3 consecutive solid red candles without an EMA 9 reclaim
+    const recent3Candles = this.candles1m.slice(Math.max(0, closedIdx - 2), closedIdx + 1);
+    const consecutiveRedCount = recent3Candles.filter(c => c.close < c.open && Math.abs(c.close - c.open) >= 0.30 * (c.high - c.low)).length;
+    const isWaterfallDump = consecutiveRedCount >= 3 && currentPrice < ema9Val;
+
+    const consecutiveGreenCount = recent3Candles.filter(c => c.close > c.open && (c.close - c.open) >= 0.30 * (c.high - c.low)).length;
+    const isBlowoffPump = consecutiveGreenCount >= 3 && currentPrice > ema9Val;
     
     // --- 3. Evaluate Long Reversal ---
     let isLongReversal = false;
@@ -6424,18 +6509,23 @@ class TradingEngine {
     const rangeLongMinFloor = rangeLow - 0.75 * currentAtr;
     const isNotCrashingBreakdown = currentPrice >= rangeLongMinFloor || currentCandle.close >= rangeLow;
     const isPriceWithinLongZone = currentPrice <= maxLongPriceThreshold && isNotCrashingBreakdown;
+
+    // Long Reversal Filter: If market has bearish EMA stack (EMA 20 < EMA 50) and price is below EMA 20, require EMA 9 reclaim or confirmed 2-candle pattern
+    const canEnterLongReversal = !isWaterfallDump && (
+      (!isBearishEmaStructure || currentPrice >= ema9Val - 0.05 * currentAtr || hasRecentMicroBullishCrossover || isCandleReversalBullish)
+    );
     
-    if (hasTestedSupportRecently && isPriceWithinLongZone) {
+    if (hasTestedSupportRecently && isPriceWithinLongZone && canEnterLongReversal) {
       if (isCandleReversalBullish) {
         isLongReversal = true;
         longReason = `Confirmed via [${candlePatternTypeLong}] following recent support touch of $${rangeLow.toFixed(2)}`;
       } else if (hasRecentMicroBullishCrossover && isMicroEMAAlignedBullish) {
         isLongReversal = true;
         longReason = `Confirmed via Micro EMA Crossover (${microFastPeriod}/${microSlowPeriod} EMA) following recent support touch of $${rangeLow.toFixed(2)}`;
-      } else if (isRsiHookedBullish) {
+      } else if (isRsiHookedBullish && (!isBearishEmaStructure || currentPrice >= ema9Val)) {
         isLongReversal = true;
         longReason = `Confirmed via RSI Hook (${currentRsi.toFixed(1)}) from oversold following recent support touch of $${rangeLow.toFixed(2)}`;
-      } else if (isImmediateGreenOnSupport) {
+      } else if (isImmediateGreenOnSupport && (!isBearishEmaStructure && currentPrice >= ema9Val)) {
         isLongReversal = true;
         longReason = `Confirmed via Bullish close at/below support threshold ($${rangeSupportThreshold.toFixed(2)})`;
       }
@@ -6449,18 +6539,23 @@ class TradingEngine {
     const rangeShortMaxCeiling = rangeHigh + 0.75 * currentAtr;
     const isNotExplodingBreakout = currentPrice <= rangeShortMaxCeiling || currentCandle.close <= rangeHigh;
     const isPriceWithinShortZone = currentPrice >= minShortPriceThreshold && isNotExplodingBreakout;
+
+    // Short Reversal Filter: If market has bullish EMA stack (EMA 20 > EMA 50) and price is above EMA 20, require EMA 9 breakdown or confirmed 2-candle pattern
+    const canEnterShortReversal = !isBlowoffPump && (
+      (!isBullishEmaStructure || currentPrice <= ema9Val + 0.05 * currentAtr || hasRecentMicroBearishCrossover || isCandleReversalBearish)
+    );
     
-    if (hasTestedResistanceRecently && isPriceWithinShortZone) {
+    if (hasTestedResistanceRecently && isPriceWithinShortZone && canEnterShortReversal) {
       if (isCandleReversalBearish) {
         isShortReversal = true;
         shortReason = `Confirmed via [${candlePatternTypeShort}] following recent resistance touch of $${rangeHigh.toFixed(2)}`;
       } else if (hasRecentMicroBearishCrossover && isMicroEMAAlignedBearish) {
         isShortReversal = true;
         shortReason = `Confirmed via Micro EMA Crossover (${microFastPeriod}/${microSlowPeriod} EMA) following recent resistance touch of $${rangeHigh.toFixed(2)}`;
-      } else if (isRsiHookedBearish) {
+      } else if (isRsiHookedBearish && (!isBullishEmaStructure || currentPrice <= ema9Val)) {
         isShortReversal = true;
         shortReason = `Confirmed via RSI Hook (${currentRsi.toFixed(1)}) from overbought following recent resistance touch of $${rangeHigh.toFixed(2)}`;
-      } else if (isImmediateRedOnResistance) {
+      } else if (isImmediateRedOnResistance && (!isBullishEmaStructure && currentPrice <= ema9Val)) {
         isShortReversal = true;
         shortReason = `Confirmed via Bearish close at/above resistance threshold ($${rangeResistanceThreshold.toFixed(2)})`;
       }
@@ -8216,13 +8311,17 @@ class TradingEngine {
         const isMicroTrendBullish = emaFastVal > emaSlowVal;
         const isMicroTrendBearish = emaFastVal < emaSlowVal;
 
+        const prevEmaFastVal = lastIdx > 0 && emaFastList[lastIdx - 1] !== undefined ? emaFastList[lastIdx - 1] : emaFastVal;
+        const isFastEmaHookingUp = emaFastVal > prevEmaFastVal;
+        const isFastEmaHookingDown = emaFastVal < prevEmaFastVal;
+
         if (signalDirection === "LONG") {
-          // LONG reversal/breakout requires bullish micro-trend, price crossing above fast/slow EMA, or a confirmed range reversal bounce
-          microTrendAligned = isMicroTrendBullish || (currentPrice >= emaSlowVal) || (currentPrice >= emaFastVal) || isRangeLongReversal;
+          // LONG reversal/breakout requires bullish micro-trend, price above fast/slow EMA, or fast EMA hooking up off support
+          microTrendAligned = isMicroTrendBullish || (currentPrice >= emaSlowVal) || (currentPrice >= emaFastVal && isFastEmaHookingUp);
           microTrendDetails = `(Micro-Trend [EMA ${microFastPeriod}/${microSlowPeriod}]: Fast $${emaFastVal.toFixed(2)} vs Slow $${emaSlowVal.toFixed(2)} - ${isMicroTrendBullish ? "BULLISH" : "BEARISH"}${microTrendAligned ? " [ALIGNED]" : " [BLOCKED]"})`;
         } else if (signalDirection === "SHORT") {
-          // SHORT reversal/breakdown requires bearish micro-trend, price crossing below fast/slow EMA, or a confirmed range reversal bounce
-          microTrendAligned = isMicroTrendBearish || (currentPrice <= emaSlowVal) || (currentPrice <= emaFastVal) || isRangeShortReversal;
+          // SHORT reversal/breakdown requires bearish micro-trend, price below fast/slow EMA, or fast EMA hooking down off resistance
+          microTrendAligned = isMicroTrendBearish || (currentPrice <= emaSlowVal) || (currentPrice <= emaFastVal && isFastEmaHookingDown);
           microTrendDetails = `(Micro-Trend [EMA ${microFastPeriod}/${microSlowPeriod}]: Fast $${emaFastVal.toFixed(2)} vs Slow $${emaSlowVal.toFixed(2)} - ${isMicroTrendBearish ? "BEARISH" : "BULLISH"}${microTrendAligned ? " [ALIGNED]" : " [BLOCKED]"})`;
         }
       }

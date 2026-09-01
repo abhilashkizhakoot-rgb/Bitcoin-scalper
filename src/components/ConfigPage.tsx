@@ -1192,6 +1192,21 @@ export default function ConfigPage({
                         />
                         <p className="text-[9px] text-slate-400">Number of recent 1m candles scanned for extreme RSI inflection and candlestick rejection (Default: 6).</p>
                       </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-semibold text-slate-700">Exhaustion Max ADX Ceiling</label>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="15"
+                          max="50"
+                          value={generalConfig.exhaustion_max_adx !== undefined ? generalConfig.exhaustion_max_adx : 26.0}
+                          onChange={(e) => setGeneralConfig({ ...generalConfig, exhaustion_max_adx: parseInputNumber(e.target.value, true) })}
+                          className="w-full text-xs rounded border border-slate-300 px-3 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white font-mono"
+                          id="config-exhaustion-max-adx"
+                        />
+                        <p className="text-[9px] text-slate-400">Maximum ADX allowed to bypass trend filters on exhaustion. Blocks falling knife entries in strong trends (Default: 26.0).</p>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1200,8 +1215,8 @@ export default function ConfigPage({
                 <div className="md:col-span-2 border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                     <div>
-                      <span className="text-xs font-bold text-slate-800 font-sans block">Range Extreme RSI Trend Alignment Bypass</span>
-                      <span className="text-[10px] text-slate-500">Allows bypassing EMA trend alignment in Range-Bound regimes during extreme oversold (Long) or extreme overbought (Short) conditions.</span>
+                      <span className="text-xs font-bold text-slate-800 font-sans block">Range Extreme RSI Trend Alignment Bypass & ADX Ceiling</span>
+                      <span className="text-[10px] text-slate-500">Allows bypassing EMA trend alignment in Range-Bound regimes during extreme oversold/overbought conditions, protected by strict ADX and waterfall locks.</span>
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer select-none">
                       <input
@@ -1216,7 +1231,7 @@ export default function ConfigPage({
                   </div>
 
                   {generalConfig.enable_ranging_extreme_rsi_bypass === true && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
                       <div className="space-y-1">
                         <label className="block text-[11px] font-semibold text-slate-700">Extreme Overbought RSI Threshold (Short Bypass)</label>
                         <input
@@ -1245,6 +1260,21 @@ export default function ConfigPage({
                           id="config-ranging-rsi-oversold"
                         />
                         <p className="text-[9px] text-slate-400">RSI threshold below which LONG trend alignment blocks are bypassed in Range-Bound markets (Default: 25.0).</p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-semibold text-slate-700">Range Reversal ADX Ceiling</label>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="15"
+                          max="40"
+                          value={generalConfig.ranging_adx_ceiling !== undefined ? generalConfig.ranging_adx_ceiling : 25.0}
+                          onChange={(e) => setGeneralConfig({ ...generalConfig, ranging_adx_ceiling: parseInputNumber(e.target.value, true) })}
+                          className="w-full text-xs rounded border border-slate-300 px-3 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white font-mono"
+                          id="config-ranging-adx-ceiling"
+                        />
+                        <p className="text-[9px] text-slate-400">Maximum ADX for mean-reversion range bounce entries (Default: 25.0).</p>
                       </div>
                     </div>
                   )}

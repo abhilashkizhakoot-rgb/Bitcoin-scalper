@@ -1313,13 +1313,14 @@ class TradingEngine {
       const exhaustionLong = this.evaluateExhaustionReversalCondition("LONG", currentPrice, closes, lastIdx);
       const exhaustionShort = this.evaluateExhaustionReversalCondition("SHORT", currentPrice, closes, lastIdx);
 
-      if (isRangeLongReversal || (exhaustionLong.isExhausted && probabilityLong >= 0.48)) {
-        signalDirection = "LONG";
-      } else if (isRangeShortReversal || (exhaustionShort.isExhausted && probabilityShort >= 0.48)) {
+      // Priority 1: Range Breakout / Breakdown (when price escapes range boundaries)
+      if (isRangeShortBreakdown) {
         signalDirection = "SHORT";
       } else if (isRangeLongBreakout) {
         signalDirection = "LONG";
-      } else if (isRangeShortBreakdown) {
+      } else if (isRangeLongReversal || (exhaustionLong.isExhausted && probabilityLong >= 0.48)) {
+        signalDirection = "LONG";
+      } else if (isRangeShortReversal || (exhaustionShort.isExhausted && probabilityShort >= 0.48)) {
         signalDirection = "SHORT";
       } else if (smcTlLong.isValid || smcSweepLong.isSweep || smcFvgLong.isFvgValid || smcObLong.isObValid) {
         signalDirection = "LONG";
@@ -2083,7 +2084,8 @@ class TradingEngine {
     // C20: Regime Transition Cooldown
     const regimeCooldown = this.getRegimeChangeCooldownStatus();
     const regimeCooldownMins = config.general.regime_change_cooldown_minutes !== undefined ? config.general.regime_change_cooldown_minutes : 15;
-    const isHighConvictionShift = (relVolume >= 1.20 || adxValue >= 26 || structCheck.confirmed || hasExtremeRealtimePressure);
+    const isBreakoutOrStructure = structCheck.confirmed || isSmcActive || smcTlActive;
+    const isHighConvictionShift = (relVolume >= 1.15 || adxValue >= 24 || isBreakoutOrStructure || hasExtremeRealtimePressure);
     const isCooldownBypassed = regimeCooldown.active && isHighConvictionShift;
     const isRegimeCooldownMet = !regimeCooldown.active || isCooldownBypassed;
 
@@ -2092,10 +2094,10 @@ class TradingEngine {
       met: isRegimeCooldownMet,
       current_value: regimeCooldown.active
         ? (isCooldownBypassed 
-            ? `PASSING (Bypassed: High Conviction Volume ${relVolume.toFixed(2)}x / Momentum Override)` 
+            ? `PASSING (Bypassed: High Conviction Volume ${relVolume.toFixed(2)}x / Momentum / Structure Override)` 
             : `BLOCKED (Cooldown active: ${Math.ceil(regimeCooldown.remainingSeconds / 60)}m left)`)
         : "PASSING (No recent regime shift)",
-      required: `No regime transitions within the last ${regimeCooldownMins} minutes (or Volume >= 1.2x / Momentum Override)`,
+      required: `No regime transitions within the last ${regimeCooldownMins} minutes (or Volume >= 1.15x / Momentum / Breakout Override)`,
       description: "Applies a transition lock to entry signals whenever the dominant market regime shifts (e.g. from Strong Uptrend to Range Bound), protecting against high-frequency slippage and trend-reversal fakeouts during structural transitions.",
       priority: "CRITICAL",
       softened: isCooldownBypassed,
@@ -5733,34 +5735,42 @@ class TradingEngine {
       ? lastCandles.reduce((sum, c) => sum + (c.high - c.low), 0) / lastCandles.length
       : candleRange;
 
+    const config = dbManager.getConfig();
+    const minBreakoutVol = config.general.relative_volume_threshold ? Math.min(config.general.relative_volume_threshold, 1.20) : 1.15;
+
+    // Order flow context for breakout confirmation
+    const isTakerSellDominant = this.orderFlowStats.takerBuyRatio <= 0.42 || this.orderBookStats.imbalanceRatio <= -0.15;
+    const isTakerBuyDominant = this.orderFlowStats.takerBuyRatio >= 0.58 || this.orderBookStats.imbalanceRatio >= 0.15;
+    const isOrderFlowDominant = direction === "LONG" ? isTakerBuyDominant : isTakerSellDominant;
+    const effectiveMinVol = isOrderFlowDominant ? Math.min(minBreakoutVol, 1.05) : minBreakoutVol;
+
     if (direction === "LONG") {
       // 1. Must be a green candle
       if (currentCandle.close <= currentCandle.open) {
         return { isValid: false, reason: "Breakout candle is not bullish (red or doji)." };
       }
 
-      // 2. Volume Expansion: Require strong volume for range breakouts
-      const config = dbManager.getConfig();
-      const minBreakoutVol = config.general.relative_volume_threshold ? Math.min(config.general.relative_volume_threshold, 1.25) : 1.25;
-      if (relVolume < minBreakoutVol) {
-        return { isValid: false, reason: `Insufficient relative volume (${relVolume.toFixed(2)}x < ${minBreakoutVol.toFixed(2)}x).` };
+      // 2. Volume Expansion: Require strong volume or clear buyer orderflow dominance
+      if (relVolume < effectiveMinVol && !isOrderFlowDominant) {
+        return { isValid: false, reason: `Insufficient relative volume (${relVolume.toFixed(2)}x < ${effectiveMinVol.toFixed(2)}x).` };
       }
 
-      // 3. Candle Body Ratio: At least 45% of the candle range should be body
-      if (bodyRatio < 0.45) {
-        return { isValid: false, reason: `Weak candle body structure (body ratio ${bodyRatio.toFixed(2)} < 0.45).` };
+      // 3. Candle Body Ratio: At least 40% of the candle range should be body (35% on wide range expansion)
+      const minBodyRatio = candleRange > avgRange * 1.3 ? 0.35 : 0.40;
+      if (bodyRatio < minBodyRatio) {
+        return { isValid: false, reason: `Weak candle body structure (body ratio ${bodyRatio.toFixed(2)} < ${minBodyRatio.toFixed(2)}).` };
       }
 
-      // 4. Upper Wick Rejection: Upper wick should not exceed 30% of total candle range
+      // 4. Upper Wick Rejection: Upper wick should not exceed 35% of total candle range
       const upperWick = currentCandle.high - currentCandle.close;
       const upperWickRatio = upperWick / candleRange;
-      if (upperWickRatio > 0.30) {
-        return { isValid: false, reason: `Excessive upper wick rejection (${(upperWickRatio * 100).toFixed(1)}% > 30.0%) indicating a bull trap.` };
+      if (upperWickRatio > 0.35) {
+        return { isValid: false, reason: `Excessive upper wick rejection (${(upperWickRatio * 100).toFixed(1)}% > 35.0%) indicating a bull trap.` };
       }
 
       // 5. Candle Size Check: Prevent micro-candles from drifting above range resistance
-      if (candleRange < avgRange * 0.8) {
-        return { isValid: false, reason: `Breakout candle size is too small (${candleRange.toFixed(2)} < 80% of average range ${avgRange.toFixed(2)}).` };
+      if (candleRange < avgRange * 0.65) {
+        return { isValid: false, reason: `Breakout candle size is too small (${candleRange.toFixed(2)} < 65% of average range ${avgRange.toFixed(2)}).` };
       }
 
     } else {
@@ -5771,27 +5781,26 @@ class TradingEngine {
       }
 
       // 2. Volume Expansion
-      const config = dbManager.getConfig();
-      const minBreakoutVol = config.general.relative_volume_threshold ? Math.min(config.general.relative_volume_threshold, 1.25) : 1.25;
-      if (relVolume < minBreakoutVol) {
-        return { isValid: false, reason: `Insufficient relative volume (${relVolume.toFixed(2)}x < ${minBreakoutVol.toFixed(2)}x).` };
+      if (relVolume < effectiveMinVol && !isOrderFlowDominant) {
+        return { isValid: false, reason: `Insufficient relative volume (${relVolume.toFixed(2)}x < ${effectiveMinVol.toFixed(2)}x).` };
       }
 
       // 3. Candle Body Ratio
-      if (bodyRatio < 0.45) {
-        return { isValid: false, reason: `Weak candle body structure (body ratio ${bodyRatio.toFixed(2)} < 0.45).` };
+      const minBodyRatio = candleRange > avgRange * 1.3 ? 0.35 : 0.40;
+      if (bodyRatio < minBodyRatio) {
+        return { isValid: false, reason: `Weak candle body structure (body ratio ${bodyRatio.toFixed(2)} < ${minBodyRatio.toFixed(2)}).` };
       }
 
-      // 4. Lower Wick Rejection: Lower wick should not exceed 30% of total candle range
+      // 4. Lower Wick Rejection: Lower wick should not exceed 35% of total candle range
       const lowerWick = currentCandle.close - currentCandle.low;
       const lowerWickRatio = lowerWick / candleRange;
-      if (lowerWickRatio > 0.30) {
-        return { isValid: false, reason: `Excessive lower wick rejection (${(lowerWickRatio * 100).toFixed(1)}% > 30.0%) indicating a bear trap.` };
+      if (lowerWickRatio > 0.35) {
+        return { isValid: false, reason: `Excessive lower wick rejection (${(lowerWickRatio * 100).toFixed(1)}% > 35.0%) indicating a bear trap.` };
       }
 
       // 5. Candle Size Check
-      if (candleRange < avgRange * 0.8) {
-        return { isValid: false, reason: `Breakdown candle size is too small (${candleRange.toFixed(2)} < 80% of average range ${avgRange.toFixed(2)}).` };
+      if (candleRange < avgRange * 0.65) {
+        return { isValid: false, reason: `Breakdown candle size is too small (${candleRange.toFixed(2)} < 65% of average range ${avgRange.toFixed(2)}).` };
       }
     }
 
@@ -8344,7 +8353,9 @@ class TradingEngine {
           };
         } else if (isRangeLongBreakout) {
           const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.58;
-          if (probabilityLong < veryHighProbThreshold && relVolume < 1.15) {
+          const isTakerBuyDominant = this.orderFlowStats.takerBuyRatio >= 0.58 || this.orderBookStats.imbalanceRatio >= 0.15;
+          const isBreakoutMomentumStrong = relVolume >= 1.10 || isTakerBuyDominant;
+          if (probabilityLong < veryHighProbThreshold && !isBreakoutMomentumStrong) {
             return {
               confirmed: false,
               message: `Range LONG Breakout Blocked: Breakout probability is not high enough (P(LONG) = ${(probabilityLong * 100).toFixed(1)}% < ${(veryHighProbThreshold * 100).toFixed(1)}%). Waiting for range breakout pullback.`,
@@ -8362,7 +8373,7 @@ class TradingEngine {
           }
           return {
             confirmed: true,
-            message: `Ranging Bullish Breakout Confirmed. Price ($${currentPrice.toFixed(2)}) broke above major range resistance ($${rangeHigh.toFixed(2)}) on high relative volume (${relVolume.toFixed(2)}x) with high probability (${(probabilityLong * 100).toFixed(1)}%). ${microTrendDetails}`,
+            message: `Ranging Bullish Breakout Confirmed. Price ($${currentPrice.toFixed(2)}) broke above major range resistance ($${rangeHigh.toFixed(2)}) on relative volume (${relVolume.toFixed(2)}x) with P(LONG) = ${(probabilityLong * 100).toFixed(1)}%. ${microTrendDetails}`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -8415,7 +8426,9 @@ class TradingEngine {
         } else if (isRangeShortBreakdown) {
           const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.58;
           const probabilityShort = 1 - probabilityLong;
-          if (probabilityShort < veryHighProbThreshold && relVolume < 1.15) {
+          const isTakerSellDominant = this.orderFlowStats.takerBuyRatio <= 0.42 || this.orderBookStats.imbalanceRatio <= -0.15;
+          const isBreakdownMomentumStrong = relVolume >= 1.10 || isTakerSellDominant;
+          if (probabilityShort < veryHighProbThreshold && !isBreakdownMomentumStrong) {
             return {
               confirmed: false,
               message: `Range SHORT Breakdown Blocked: Breakdown probability is not high enough (P(SHORT) = ${(probabilityShort * 100).toFixed(1)}% < ${(veryHighProbThreshold * 100).toFixed(1)}%). Waiting for range breakdown pullback.`,
@@ -8433,7 +8446,7 @@ class TradingEngine {
           }
           return {
             confirmed: true,
-            message: `Ranging Bearish Breakdown Confirmed. Price ($${currentPrice.toFixed(2)}) broke below major range support ($${rangeLow.toFixed(2)}) on high relative volume (${relVolume.toFixed(2)}x) with high probability (${(probabilityShort * 100).toFixed(1)}%). ${microTrendDetails}`,
+            message: `Ranging Bearish Breakdown Confirmed. Price ($${currentPrice.toFixed(2)}) broke below major range support ($${rangeLow.toFixed(2)}) on relative volume (${relVolume.toFixed(2)}x) with P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%. ${microTrendDetails}`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -9095,7 +9108,7 @@ class TradingEngine {
       regime = MarketRegime.HIGH_VOLATILITY;
       confidence = 0.7 + (atrExpansionRatio - 1.5) * 0.2;
     } 
-    // Step 2: Compression Intercept (NEW)
+    // Step 2: Compression Intercept
     else if (isSlopeFlat && isRibbonCompressed) {
       regime = MarketRegime.RANGE_BOUND;
       confidence = 0.8 + (1 - normalizedSpread / compressionThreshold) * 0.15;
@@ -9112,6 +9125,33 @@ class TradingEngine {
     else {
       regime = MarketRegime.RANGE_BOUND;
       confidence = 0.5 + (1 - (currentAdx / 100)) * 0.3;
+    }
+
+    // Step 5: 1-Minute Fast-Track Momentum Acceleration Override
+    // Instantly transitions regime to STRONG_DOWNTREND or STRONG_UPTREND on 1m momentum bursts before multi-minute aggregator catches up
+    if (this.candles1m.length >= 25 && regime !== MarketRegime.HIGH_VOLATILITY) {
+      const c1m = this.candles1m;
+      const l1m = c1m.length - 1;
+      const closes1m = c1m.map(c => c.close);
+      const ema9List1m = this.calculateEMA(closes1m, 9);
+      const ema21List1m = this.calculateEMA(closes1m, 21);
+      const ema50List1m = this.calculateEMA(closes1m, 50);
+      const ema9_1m = ema9List1m[l1m];
+      const ema21_1m = ema21List1m[l1m];
+      const ema50_1m = ema50List1m[l1m];
+      const adx1mList = this.calculateADX(c1m, 14);
+      const adx1m = adx1mList[l1m] || 20;
+
+      const is1mBearWaterfall = (ema9_1m < ema21_1m && ema21_1m < ema50_1m && adx1m >= 24.0 && closes1m[l1m] < ema50_1m);
+      const is1mBullRocket = (ema9_1m > ema21_1m && ema21_1m > ema50_1m && adx1m >= 24.0 && closes1m[l1m] > ema50_1m);
+
+      if (is1mBearWaterfall) {
+        regime = MarketRegime.STRONG_DOWNTREND;
+        confidence = Math.max(confidence, 0.75 + (adx1m / 100) * 0.2);
+      } else if (is1mBullRocket) {
+        regime = MarketRegime.STRONG_UPTREND;
+        confidence = Math.max(confidence, 0.75 + (adx1m / 100) * 0.2);
+      }
     }
 
     confidence = Math.min(confidence, 0.99);

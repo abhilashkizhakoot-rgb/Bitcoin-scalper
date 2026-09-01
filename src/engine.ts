@@ -1521,23 +1521,19 @@ class TradingEngine {
     // C1: CatBoost AI Prediction
     const pbTrendStatus = this.detectPullbackTrendlineBreak();
     const isEnteringPullback = true;
-    const isContraryAiPrediction = (signalDirection === "SHORT" && probabilityLong >= 0.65) ||
-                                  (signalDirection === "LONG" && probabilityShort >= 0.65);
 
     const catboostThreshold = (this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) 
       ? 0.50 
       : 0.55;
-    const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold && !isContraryAiPrediction) : false;
-    const pShortMet = signalDirection === "SHORT" ? (probabilityShort >= catboostThreshold && !isContraryAiPrediction) : false;
+    const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold) : false;
+    const pShortMet = signalDirection === "SHORT" ? (probabilityShort >= catboostThreshold) : false;
     conditions.push({
       name: "CatBoost AI Prediction",
       met: (pLongMet || pShortMet),
-      current_value: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}% | P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%${isContraryAiPrediction ? " [HARD CONTRARY LOCK]" : ""}`,
-      required: isContraryAiPrediction
-        ? (signalDirection === "SHORT" ? `BLOCKED: P(LONG)=${(probabilityLong * 100).toFixed(1)}% >= 65% opposes SHORT` : `BLOCKED: P(SHORT)=${(probabilityShort * 100).toFixed(1)}% >= 65% opposes LONG`)
-        : (signalDirection === "LONG"
-          ? `P(LONG) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "55"}% (Evaluating LONG Trade)`
-          : `P(SHORT) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "55"}% (Evaluating SHORT Trade)`),
+      current_value: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}% | P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%`,
+      required: signalDirection === "LONG"
+        ? `P(LONG) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "55"}% (Evaluating LONG Trade)`
+        : `P(SHORT) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "55"}% (Evaluating SHORT Trade)`,
       description: "Uses pre-trained ensemble trees mapping momentum, EMA spreads, and ATR volatility expansion.",
       priority: "CRITICAL",
     });
@@ -2330,21 +2326,7 @@ class TradingEngine {
         }
       }
 
-      // Protection 2: Hard Contrary AI Lock (CatBoost Override Guard)
-      if (isContraryAiPrediction) {
-        allConditionsMet = false;
-        const contraryLockReason = signalDirection === "SHORT"
-          ? `Hard Contrary AI Lock: P(LONG) = ${(probabilityLong * 100).toFixed(1)}% strongly opposes SHORT entry`
-          : `Hard Contrary AI Lock: P(SHORT) = ${(probabilityShort * 100).toFixed(1)}% strongly opposes LONG entry`;
-        if (!failedConditions.includes("CatBoost AI Prediction")) {
-          failedConditions.unshift("CatBoost AI Prediction");
-        }
-        if (!failedConditions.includes(contraryLockReason)) {
-          failedConditions.push(contraryLockReason);
-        }
-      } else {
-        allConditionsMet = allSafetyPassed && marketStructurePassed && tacticalConfidenceMet && isMtfVpPassedIfRequired;
-      }
+      allConditionsMet = allSafetyPassed && marketStructurePassed && tacticalConfidenceMet && isMtfVpPassedIfRequired;
 
       failedConditions = conditions.filter((c) => {
         if (safetyGates.includes(c.name)) {
@@ -2359,18 +2341,6 @@ class TradingEngine {
         return false;
       }).map((c) => c.name);
 
-      if (isContraryAiPrediction) {
-        const contraryLockReason = signalDirection === "SHORT"
-          ? `Hard Contrary AI Lock: P(LONG) = ${(probabilityLong * 100).toFixed(1)}% strongly opposes SHORT entry`
-          : `Hard Contrary AI Lock: P(SHORT) = ${(probabilityShort * 100).toFixed(1)}% strongly opposes LONG entry`;
-        if (!failedConditions.includes("CatBoost AI Prediction")) {
-          failedConditions.unshift("CatBoost AI Prediction");
-        }
-        if (!failedConditions.includes(contraryLockReason)) {
-          failedConditions.push(contraryLockReason);
-        }
-      }
-
       if (!tacticalConfidenceMet) {
         failedConditions.push(`Cumulative Tactical Confidence (${confidenceScore}% < ${confidenceThreshold}%)`);
       }
@@ -2380,19 +2350,8 @@ class TradingEngine {
       if (trendAligned || !this.isGateActive(config, "Exponential Trend Alignment")) entryScore += 15;
       if (adxMet || !this.isGateActive(config, "ADX Trend Strength Filter")) entryScore += 15;
       if (contextVolResult.met || !this.isGateActive(config, "Relative Volume Confirmation")) entryScore += 10;
-      allConditionsMet = conditions.every((c) => c.met) && !isContraryAiPrediction;
+      allConditionsMet = conditions.every((c) => c.met);
       failedConditions = conditions.filter((c) => !c.met).map((c) => c.name);
-      if (isContraryAiPrediction) {
-        const contraryLockReason = signalDirection === "SHORT"
-          ? `Hard Contrary AI Lock: P(LONG) = ${(probabilityLong * 100).toFixed(1)}% strongly opposes SHORT entry`
-          : `Hard Contrary AI Lock: P(SHORT) = ${(probabilityShort * 100).toFixed(1)}% strongly opposes LONG entry`;
-        if (!failedConditions.includes("CatBoost AI Prediction")) {
-          failedConditions.unshift("CatBoost AI Prediction");
-        }
-        if (!failedConditions.includes(contraryLockReason)) {
-          failedConditions.push(contraryLockReason);
-        }
-      }
     }
 
     return {

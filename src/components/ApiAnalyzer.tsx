@@ -59,13 +59,6 @@ export default function ApiAnalyzer({ isPaperMode = true }: ApiAnalyzerProps) {
 
   const selectedLog = logs.find((l) => l.id === selectedLogId) || (logs.length > 0 ? logs[0] : null);
 
-  // Auto-select first log if none is selected
-  useEffect(() => {
-    if (logs.length > 0 && !selectedLogId) {
-      setSelectedLogId(logs[0].id);
-    }
-  }, [logs, selectedLogId]);
-
   const filteredLogs = logs.filter((log) => {
     const matchesSearch =
       log.url.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -228,7 +221,7 @@ export default function ApiAnalyzer({ isPaperMode = true }: ApiAnalyzerProps) {
         {/* Requests List */}
         <div className="flex-1 overflow-y-auto divide-y divide-slate-100 min-h-0">
           {filteredLogs.map((log) => {
-            const isSelected = selectedLogId === log.id;
+            const isSelected = selectedLog?.id === log.id;
             const isSuccess = log.response_status >= 200 && log.response_status < 300;
             return (
               <div

@@ -118,9 +118,7 @@ export default function App() {
   // Exchange Config Panel visibility
   const [showExchangePanel, setShowExchangePanel] = useState(false);
   const showExchangePanelRef = useRef(showExchangePanel);
-  useEffect(() => {
-    showExchangePanelRef.current = showExchangePanel;
-  }, [showExchangePanel]);
+  showExchangePanelRef.current = showExchangePanel;
 
   const [formApiKey, setFormApiKey] = useState("");
   const [formApiSecret, setFormApiSecret] = useState("");

@@ -103,7 +103,7 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
   // Calculator State
   const [calcRewardRatio, setCalcRewardRatio] = useState<string>("3.0");
   const [calcQuantity, setCalcQuantity] = useState<string>("0.01");
-  const [calcPrice, setCalcPrice] = useState<string>("");
+  const [calcPrice, setCalcPrice] = useState<string>(() => currentPrice ? currentPrice.toString() : "");
   const [calcDirection, setCalcDirection] = useState<"LONG" | "SHORT">("LONG");
   const [calcAtrSource, setCalcAtrSource] = useState<"auto" | "manual">("auto");
   const [calcAtrOverride, setCalcAtrOverride] = useState<string>("");
@@ -114,19 +114,6 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
   );
   const [calcUseFees, setCalcUseFees] = useState<boolean>(true);
 
-  // Initialize calcPrice and sync fields from config
-  useEffect(() => {
-    if (currentPrice && !calcPrice) {
-      setCalcPrice(currentPrice.toString());
-    }
-  }, [currentPrice]);
-
-  useEffect(() => {
-    if (config?.risk_management?.stop_loss_atr_multiplier !== undefined) {
-      setCalcSlMultiplier(config.risk_management.stop_loss_atr_multiplier.toString());
-    }
-  }, [config?.risk_management?.stop_loss_atr_multiplier]);
-
   // Form State
   const [direction, setDirection] = useState<"LONG" | "SHORT">("LONG");
   const [leverage, setLeverage] = useState<number>(config?.risk_management?.leverage || 20);
@@ -135,6 +122,34 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
       ? config.risk_management.default_quantity_btc.toString() 
       : "0.001"
   );
+
+  // Stop Loss State
+  const [useSl, setUseSl] = useState<boolean>(true);
+  const [slType, setSlType] = useState<"price" | "offset">("offset");
+  const [slPriceStr, setSlPriceStr] = useState<string>(() => currentPrice ? (currentPrice - 500).toFixed(2) : "");
+  const [slOffsetStr, setSlOffsetStr] = useState<string>("500");
+
+  // Take Profit State
+  const [useTp, setUseTp] = useState<boolean>(true);
+  const [tpType, setTpType] = useState<"price" | "offset">("offset");
+  const [tpPriceStr, setTpPriceStr] = useState<string>(() => currentPrice ? (currentPrice + 1000).toFixed(2) : "");
+  const [tpOffsetStr, setTpOffsetStr] = useState<string>("1000");
+
+  // General Status State
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // One-time initialization of price inputs when currentPrice becomes available
+  const hasInitializedPricesRef = useRef(!!currentPrice);
+  useEffect(() => {
+    if (currentPrice && !hasInitializedPricesRef.current) {
+      hasInitializedPricesRef.current = true;
+      setCalcPrice((prev) => prev || currentPrice.toString());
+      setSlPriceStr((prev) => prev || (direction === "LONG" ? currentPrice - 500 : currentPrice + 500).toFixed(2));
+      setTpPriceStr((prev) => prev || (direction === "LONG" ? currentPrice + 1000 : currentPrice - 1000).toFixed(2));
+    }
+  }, [currentPrice]);
 
   // Update leverage and default quantity when config loads or changes
   useEffect(() => {
@@ -145,43 +160,11 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
       if (config.risk_management.default_quantity_btc !== undefined) {
         setQuantityStr(config.risk_management.default_quantity_btc.toString());
       }
-    }
-  }, [config?.risk_management?.default_quantity_btc, config?.risk_management?.leverage]);
-
-  // Stop Loss State
-  const [useSl, setUseSl] = useState<boolean>(true);
-  const [slType, setSlType] = useState<"price" | "offset">("offset");
-  const [slPriceStr, setSlPriceStr] = useState<string>("");
-  const [slOffsetStr, setSlOffsetStr] = useState<string>("500");
-
-  // Take Profit State
-  const [useTp, setUseTp] = useState<boolean>(true);
-  const [tpType, setTpType] = useState<"price" | "offset">("offset");
-  const [tpPriceStr, setTpPriceStr] = useState<string>("");
-  const [tpOffsetStr, setTpOffsetStr] = useState<string>("1000");
-
-  // General Status State
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // Initialize prices ONCE when currentPrice first becomes available
-  const hasInitializedPricesRef = useRef(false);
-  useEffect(() => {
-    if (currentPrice && !hasInitializedPricesRef.current) {
-      hasInitializedPricesRef.current = true;
-      if (!slPriceStr) {
-        setSlPriceStr(
-          (direction === "LONG" ? currentPrice - 500 : currentPrice + 500).toFixed(2)
-        );
-      }
-      if (!tpPriceStr) {
-        setTpPriceStr(
-          (direction === "LONG" ? currentPrice + 1000 : currentPrice - 1000).toFixed(2)
-        );
+      if (config.risk_management.stop_loss_atr_multiplier !== undefined) {
+        setCalcSlMultiplier(config.risk_management.stop_loss_atr_multiplier.toString());
       }
     }
-  }, [currentPrice, direction]);
+  }, [config?.risk_management?.default_quantity_btc, config?.risk_management?.leverage, config?.risk_management?.stop_loss_atr_multiplier]);
 
   // Handle preset quantities based on balance percentage
   const handleQuantityPct = (pct: number) => {

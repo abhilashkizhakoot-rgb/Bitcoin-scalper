@@ -1521,18 +1521,23 @@ class TradingEngine {
     // C1: CatBoost AI Prediction
     const pbTrendStatus = this.detectPullbackTrendlineBreak();
     const isEnteringPullback = true;
+    const isContraryAiPrediction = (signalDirection === "SHORT" && probabilityLong >= 0.65) ||
+                                  (signalDirection === "LONG" && probabilityShort >= 0.65);
+
     const catboostThreshold = (this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) 
       ? 0.50 
       : 0.55;
-    const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold) : false;
-    const pShortMet = signalDirection === "SHORT" ? (probabilityShort >= catboostThreshold) : false;
+    const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold && !isContraryAiPrediction) : false;
+    const pShortMet = signalDirection === "SHORT" ? (probabilityShort >= catboostThreshold && !isContraryAiPrediction) : false;
     conditions.push({
       name: "CatBoost AI Prediction",
       met: (pLongMet || pShortMet),
-      current_value: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}% | P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%`,
-      required: signalDirection === "LONG"
-        ? `P(LONG) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "55"}% (Evaluating LONG Trade)`
-        : `P(SHORT) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "55"}% (Evaluating SHORT Trade)`,
+      current_value: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}% | P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%${isContraryAiPrediction ? " [HARD CONTRARY LOCK]" : ""}`,
+      required: isContraryAiPrediction
+        ? (signalDirection === "SHORT" ? `BLOCKED: P(LONG)=${(probabilityLong * 100).toFixed(1)}% >= 65% opposes SHORT` : `BLOCKED: P(SHORT)=${(probabilityShort * 100).toFixed(1)}% >= 65% opposes LONG`)
+        : (signalDirection === "LONG"
+          ? `P(LONG) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "55"}% (Evaluating LONG Trade)`
+          : `P(SHORT) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "55"}% (Evaluating SHORT Trade)`),
       description: "Uses pre-trained ensemble trees mapping momentum, EMA spreads, and ATR volatility expansion.",
       priority: "CRITICAL",
     });
@@ -2325,7 +2330,21 @@ class TradingEngine {
         }
       }
 
-      allConditionsMet = allSafetyPassed && marketStructurePassed && tacticalConfidenceMet && isMtfVpPassedIfRequired;
+      // Protection 2: Hard Contrary AI Lock (CatBoost Override Guard)
+      if (isContraryAiPrediction) {
+        allConditionsMet = false;
+        const contraryLockReason = signalDirection === "SHORT"
+          ? `Hard Contrary AI Lock: P(LONG) = ${(probabilityLong * 100).toFixed(1)}% strongly opposes SHORT entry`
+          : `Hard Contrary AI Lock: P(SHORT) = ${(probabilityShort * 100).toFixed(1)}% strongly opposes LONG entry`;
+        if (!failedConditions.includes("CatBoost AI Prediction")) {
+          failedConditions.unshift("CatBoost AI Prediction");
+        }
+        if (!failedConditions.includes(contraryLockReason)) {
+          failedConditions.push(contraryLockReason);
+        }
+      } else {
+        allConditionsMet = allSafetyPassed && marketStructurePassed && tacticalConfidenceMet && isMtfVpPassedIfRequired;
+      }
 
       failedConditions = conditions.filter((c) => {
         if (safetyGates.includes(c.name)) {
@@ -2340,6 +2359,18 @@ class TradingEngine {
         return false;
       }).map((c) => c.name);
 
+      if (isContraryAiPrediction) {
+        const contraryLockReason = signalDirection === "SHORT"
+          ? `Hard Contrary AI Lock: P(LONG) = ${(probabilityLong * 100).toFixed(1)}% strongly opposes SHORT entry`
+          : `Hard Contrary AI Lock: P(SHORT) = ${(probabilityShort * 100).toFixed(1)}% strongly opposes LONG entry`;
+        if (!failedConditions.includes("CatBoost AI Prediction")) {
+          failedConditions.unshift("CatBoost AI Prediction");
+        }
+        if (!failedConditions.includes(contraryLockReason)) {
+          failedConditions.push(contraryLockReason);
+        }
+      }
+
       if (!tacticalConfidenceMet) {
         failedConditions.push(`Cumulative Tactical Confidence (${confidenceScore}% < ${confidenceThreshold}%)`);
       }
@@ -2349,8 +2380,19 @@ class TradingEngine {
       if (trendAligned || !this.isGateActive(config, "Exponential Trend Alignment")) entryScore += 15;
       if (adxMet || !this.isGateActive(config, "ADX Trend Strength Filter")) entryScore += 15;
       if (contextVolResult.met || !this.isGateActive(config, "Relative Volume Confirmation")) entryScore += 10;
-      allConditionsMet = conditions.every((c) => c.met);
+      allConditionsMet = conditions.every((c) => c.met) && !isContraryAiPrediction;
       failedConditions = conditions.filter((c) => !c.met).map((c) => c.name);
+      if (isContraryAiPrediction) {
+        const contraryLockReason = signalDirection === "SHORT"
+          ? `Hard Contrary AI Lock: P(LONG) = ${(probabilityLong * 100).toFixed(1)}% strongly opposes SHORT entry`
+          : `Hard Contrary AI Lock: P(SHORT) = ${(probabilityShort * 100).toFixed(1)}% strongly opposes LONG entry`;
+        if (!failedConditions.includes("CatBoost AI Prediction")) {
+          failedConditions.unshift("CatBoost AI Prediction");
+        }
+        if (!failedConditions.includes(contraryLockReason)) {
+          failedConditions.push(contraryLockReason);
+        }
+      }
     }
 
     return {
@@ -5131,11 +5173,23 @@ class TradingEngine {
       }
     }
 
+    const minBarSeparation = ms.eqh_eql_min_bar_separation || 3;
+
     const eqhLevels: { price: number; touchCount: number; touches: { price: number; idx: number; volume: number; rsi?: number }[] }[] = [];
     for (const h of highs) {
       let matched = false;
       for (const eqh of eqhLevels) {
         if (Math.abs(h.price - eqh.price) / eqh.price * 100 <= tolerancePct) {
+          const lastTouch = eqh.touches[eqh.touches.length - 1];
+          if (lastTouch && (h.idx - lastTouch.idx < minBarSeparation)) {
+            // Touch too close to previous touch (e.g. adjacent bars in chop); update price to highest without inflating touch count
+            if (h.price > lastTouch.price) {
+              lastTouch.price = h.price;
+              lastTouch.idx = h.idx;
+            }
+            matched = true;
+            break;
+          }
           eqh.touchCount++;
           eqh.price = (eqh.price * (eqh.touchCount - 1) + h.price) / eqh.touchCount;
           eqh.touches.push(h);
@@ -5153,6 +5207,16 @@ class TradingEngine {
       let matched = false;
       for (const eql of eqlLevels) {
         if (Math.abs(l.price - eql.price) / eql.price * 100 <= tolerancePct) {
+          const lastTouch = eql.touches[eql.touches.length - 1];
+          if (lastTouch && (l.idx - lastTouch.idx < minBarSeparation)) {
+            // Touch too close to previous touch; update price to lowest without inflating touch count
+            if (l.price < lastTouch.price) {
+              lastTouch.price = l.price;
+              lastTouch.idx = l.idx;
+            }
+            matched = true;
+            break;
+          }
           eql.touchCount++;
           eql.price = (eql.price * (eql.touchCount - 1) + l.price) / eql.touchCount;
           eql.touches.push(l);
@@ -7648,6 +7712,36 @@ class TradingEngine {
       };
     }
 
+    // Protection 1: Block counter-trend execution during strongly trending regimes
+    if (direction === "SHORT" && this.currentRegime === MarketRegime.STRONG_UPTREND) {
+      return {
+        isValid: false,
+        direction: "SHORT",
+        vwapPrice: 0,
+        bandPrice: 0,
+        bandDeviationSigma: 0,
+        reversalType: "",
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Blocked: Counter-trend Bearish VWAP Band Short prohibited in STRONG_UPTREND regime."
+      };
+    }
+    if (direction === "LONG" && this.currentRegime === MarketRegime.STRONG_DOWNTREND) {
+      return {
+        isValid: false,
+        direction: "LONG",
+        vwapPrice: 0,
+        bandPrice: 0,
+        bandDeviationSigma: 0,
+        reversalType: "",
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Blocked: Counter-trend Bullish VWAP Band Long prohibited in STRONG_DOWNTREND regime."
+      };
+    }
+
     if (this.candles1m.length < 25) {
       return {
         isValid: false,
@@ -7915,6 +8009,38 @@ class TradingEngine {
       };
     }
 
+    // Protection 1: Block counter-trend execution during strongly trending regimes
+    if (direction === "SHORT" && this.currentRegime === MarketRegime.STRONG_UPTREND) {
+      return {
+        isValid: false,
+        direction: "SHORT",
+        levelPrice: 0,
+        touchCount: 0,
+        hasVolumeDecay: false,
+        hasMomentumDivergence: false,
+        reversalType: "",
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Blocked: Counter-trend Bearish EQH Double Top Short prohibited in STRONG_UPTREND regime."
+      };
+    }
+    if (direction === "LONG" && this.currentRegime === MarketRegime.STRONG_DOWNTREND) {
+      return {
+        isValid: false,
+        direction: "LONG",
+        levelPrice: 0,
+        touchCount: 0,
+        hasVolumeDecay: false,
+        hasMomentumDivergence: false,
+        reversalType: "",
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Blocked: Counter-trend Bullish EQL Double Bottom Long prohibited in STRONG_DOWNTREND regime."
+      };
+    }
+
     if (this.candles1m.length < 30) {
       return {
         isValid: false,
@@ -7937,6 +8063,7 @@ class TradingEngine {
 
     const atr14 = this.calculateATR(this.candles1m, 14);
     const currentAtr = atr14[lastIdx] || 50;
+    const ema9 = this.calculateEMA(this.candles1m.map(c => c.close), 9);
 
     const eqLevels = this.detectEqualHighsLows();
     const minTouches = ms.eqh_eql_min_touch_count || 2;
@@ -7971,12 +8098,10 @@ class TradingEngine {
         };
       }
 
-      // Check candlestick reversal at double bottom
-      const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtr);
-      const isCandleGreen = currentCandle.close > currentCandle.open || currentPrice > currentCandle.open;
-      const isReversalConfirmed = rejectionCheck.confirmed || isCandleGreen;
-
-      if (!isReversalConfirmed && ms.eqh_eql_require_candlestick_reversal !== false) {
+      // Protection 3: Micro-trend 9 EMA momentum guard - don't catch falling knives
+      const isEma9Falling = lastIdx >= 1 && ema9[lastIdx] < ema9[lastIdx - 1];
+      const isDroppingBelowEma9 = isEma9Falling && currentCandle.close <= ema9[lastIdx];
+      if (isDroppingBelowEma9) {
         return {
           isValid: false,
           direction: "LONG",
@@ -7988,7 +8113,29 @@ class TradingEngine {
           stopLoss: 0,
           takeProfit: 0,
           riskReward: 0,
-          description: `Awaiting confirmed bullish rejection candle at EQL support $${matchedEql.price.toFixed(2)}`
+          description: "Blocked: Price is falling below declining 9 EMA during EQL test (downward micro-trend active)"
+        };
+      }
+
+      // Check candlestick reversal at double bottom (must strictly close green and hold above EQL support)
+      const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtr);
+      const isCandleGreen = currentCandle.close > currentCandle.open;
+      const isAboveEql = currentCandle.close > matchedEql.price;
+      const isReversalConfirmed = rejectionCheck.confirmed || (isCandleGreen && isAboveEql);
+
+      if ((!isReversalConfirmed || !isCandleGreen || !isAboveEql) && ms.eqh_eql_require_candlestick_reversal !== false) {
+        return {
+          isValid: false,
+          direction: "LONG",
+          levelPrice: matchedEql.price,
+          touchCount: matchedEql.touchCount,
+          hasVolumeDecay: false,
+          hasMomentumDivergence: false,
+          reversalType: "",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: `Awaiting confirmed bullish green rejection candle closing above EQL support $${matchedEql.price.toFixed(2)}`
         };
       }
 
@@ -8070,12 +8217,10 @@ class TradingEngine {
         };
       }
 
-      // Check candlestick reversal at double top
-      const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtr);
-      const isCandleRed = currentCandle.close < currentCandle.open || currentPrice < currentCandle.open;
-      const isReversalConfirmed = rejectionCheck.confirmed || isCandleRed;
-
-      if (!isReversalConfirmed && ms.eqh_eql_require_candlestick_reversal !== false) {
+      // Protection 3: Micro-trend 9 EMA momentum guard - don't short into surging green impulse
+      const isEma9Rising = lastIdx >= 1 && ema9[lastIdx] > ema9[lastIdx - 1];
+      const isRidingAboveEma9 = isEma9Rising && currentCandle.close >= ema9[lastIdx];
+      if (isRidingAboveEma9) {
         return {
           isValid: false,
           direction: "SHORT",
@@ -8087,7 +8232,29 @@ class TradingEngine {
           stopLoss: 0,
           takeProfit: 0,
           riskReward: 0,
-          description: `Awaiting confirmed bearish rejection candle at EQH resistance $${matchedEqh.price.toFixed(2)}`
+          description: "Blocked: Price is riding above rising 9 EMA during EQH test (upward micro-trend active)"
+        };
+      }
+
+      // Check candlestick reversal at double top (must strictly close red and stay below EQH resistance)
+      const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtr);
+      const isCandleRed = currentCandle.close < currentCandle.open;
+      const isBelowEqh = currentCandle.close < matchedEqh.price;
+      const isReversalConfirmed = rejectionCheck.confirmed || (isCandleRed && isBelowEqh);
+
+      if ((!isReversalConfirmed || !isCandleRed || !isBelowEqh) && ms.eqh_eql_require_candlestick_reversal !== false) {
+        return {
+          isValid: false,
+          direction: "SHORT",
+          levelPrice: matchedEqh.price,
+          touchCount: matchedEqh.touchCount,
+          hasVolumeDecay: false,
+          hasMomentumDivergence: false,
+          reversalType: "",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: `Awaiting confirmed bearish red rejection candle closing below EQH resistance $${matchedEqh.price.toFixed(2)}`
         };
       }
 

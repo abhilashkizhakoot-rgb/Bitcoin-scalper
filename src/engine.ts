@@ -4155,19 +4155,23 @@ class TradingEngine {
         const ema15_5m_val = ema15_5m[last5mIdx];
         const isMtfLong = ema5_5m_val > ema15_5m_val;
 
-        if (direction === "LONG" && !isMtfLong && !hasHighHFPressure) {
+        const isCounterTrend = (direction === "LONG" && this.currentRegime === MarketRegime.STRONG_DOWNTREND) ||
+                               (direction === "SHORT" && this.currentRegime === MarketRegime.STRONG_UPTREND);
+        const canBypassMtf = hasHighHFPressure && !isCounterTrend;
+
+        if (direction === "LONG" && !isMtfLong && !canBypassMtf) {
           isMtfAligned = false;
           const mtfMsg = `Conflicting Trend: Multi-timeframe (5m) trend is bearish (5m EMA 5: $${ema5_5m_val.toFixed(2)} <= EMA 15: $${ema15_5m_val.toFixed(2)}).`;
           condDict["Multi-Timeframe Trend Alignment"] = { status: "FAIL", reason: mtfMsg };
-        } else if (direction === "SHORT" && isMtfLong && !hasHighHFPressure) {
+        } else if (direction === "SHORT" && isMtfLong && !canBypassMtf) {
           isMtfAligned = false;
           const mtfMsg = `Conflicting Trend: Multi-timeframe (5m) trend is bullish (5m EMA 5: $${ema5_5m_val.toFixed(2)} >= EMA 15: $${ema15_5m_val.toFixed(2)}).`;
           condDict["Multi-Timeframe Trend Alignment"] = { status: "FAIL", reason: mtfMsg };
         } else {
-          mtfMessage = hasHighHFPressure ? " | MTF Bypassed (High HF Pressure)" : " | MTF Aligned";
+          mtfMessage = canBypassMtf ? " | MTF Bypassed (High HF Pressure)" : " | MTF Aligned";
           condDict["Multi-Timeframe Trend Alignment"] = {
             status: "PASS",
-            reason: hasHighHFPressure ? "Bypassed due to high HF pressure" : `5m EMA5 ($${ema5_5m_val.toFixed(2)}) ${isMtfLong ? ">" : "<"} EMA15 ($${ema15_5m_val.toFixed(2)})`
+            reason: canBypassMtf ? "Bypassed due to high HF pressure" : `5m EMA5 ($${ema5_5m_val.toFixed(2)}) ${isMtfLong ? ">" : "<"} EMA15 ($${ema15_5m_val.toFixed(2)})`
           };
         }
       } else {
@@ -5231,6 +5235,19 @@ class TradingEngine {
               const isCandleHoldingSupport = confirmCandle ? confirmCandle.close >= fvgBottom - 0.10 * currentAtr : true;
 
               if (rejectionCheck.confirmed && isRejectionAtFvg && isCandleHoldingSupport) {
+                // In STRONG_DOWNTREND, Long FVG requires confirmed Market Structure Shift (MSS/CHoCH)
+                if (this.currentRegime === MarketRegime.STRONG_DOWNTREND && !hasStructureShift) {
+                  return {
+                    isFvgValid: false,
+                    fvgLevel: targetEntry,
+                    consequentEncroachment: ce,
+                    fvgBottom,
+                    fvgTop,
+                    isDisplacementConfirmed: isDisplacement,
+                    hasStructureShift,
+                    description: `Counter-Trend Bullish FVG Blocked in STRONG_DOWNTREND: Awaiting verified Market Structure Shift (MSS/CHoCH) break above swing high.`,
+                  };
+                }
                 const shiftText = hasStructureShift ? " [MSS/BOS Aligned]" : "";
                 const dispText = isDisplacement ? " [Displacement Confirmed]" : "";
                 return {
@@ -5323,6 +5340,19 @@ class TradingEngine {
               const isCandleHoldingResistance = confirmCandle ? confirmCandle.close <= fvgTop + 0.10 * currentAtr : true;
 
               if (rejectionCheck.confirmed && isRejectionAtFvg && isCandleHoldingResistance) {
+                // In STRONG_UPTREND, Short FVG requires confirmed Market Structure Shift (MSS/CHoCH)
+                if (this.currentRegime === MarketRegime.STRONG_UPTREND && !hasStructureShift) {
+                  return {
+                    isFvgValid: false,
+                    fvgLevel: targetEntry,
+                    consequentEncroachment: ce,
+                    fvgBottom,
+                    fvgTop,
+                    isDisplacementConfirmed: isDisplacement,
+                    hasStructureShift,
+                    description: `Counter-Trend Bearish FVG Blocked in STRONG_UPTREND: Awaiting verified Market Structure Shift (MSS/CHoCH) break below swing low.`,
+                  };
+                }
                 const shiftText = hasStructureShift ? " [MSS/BOS Aligned]" : "";
                 const dispText = isDisplacement ? " [Displacement Confirmed]" : "";
                 return {
@@ -5451,6 +5481,18 @@ class TradingEngine {
               const isCandleHoldingSupport = confirmCandle ? confirmCandle.close >= obLow - 0.10 * currentAtr : true;
 
               if (rejectionCheck.confirmed && isRejectionAtOb && isCandleHoldingSupport) {
+                // In STRONG_DOWNTREND, Long Order Block requires confirmed Market Structure Break (BOS/MSS)
+                if (this.currentRegime === MarketRegime.STRONG_DOWNTREND && !hasStructureBreak) {
+                  return {
+                    isObValid: false,
+                    obHigh,
+                    obLow,
+                    isDisplacementConfirmed: isStrongExpansionUp,
+                    hasStructureBreak,
+                    hasFvgImbalance,
+                    description: `Counter-Trend Bullish Order Block Blocked in STRONG_DOWNTREND: Awaiting verified Market Structure Shift / Break (BOS/MSS) above swing high.`,
+                  };
+                }
                 const bosText = hasStructureBreak ? " [BOS/MSS Shift]" : "";
                 const imbText = hasFvgImbalance ? " [Imbalance Validated]" : "";
                 return {
@@ -5538,6 +5580,18 @@ class TradingEngine {
               const isCandleHoldingResistance = confirmCandle ? confirmCandle.close <= obHigh + 0.10 * currentAtr : true;
 
               if (rejectionCheck.confirmed && isRejectionAtOb && isCandleHoldingResistance) {
+                // In STRONG_UPTREND, Short Order Block requires confirmed Market Structure Break (BOS/MSS)
+                if (this.currentRegime === MarketRegime.STRONG_UPTREND && !hasStructureBreak) {
+                  return {
+                    isObValid: false,
+                    obHigh,
+                    obLow,
+                    isDisplacementConfirmed: isStrongExpansionDown,
+                    hasStructureBreak,
+                    hasFvgImbalance,
+                    description: `Counter-Trend Bearish Order Block Blocked in STRONG_UPTREND: Awaiting verified Market Structure Shift / Break (BOS/MSS) below swing low.`,
+                  };
+                }
                 const bosText = hasStructureBreak ? " [BOS/MSS Shift]" : "";
                 const imbText = hasFvgImbalance ? " [Imbalance Validated]" : "";
                 return {
@@ -7738,35 +7792,34 @@ class TradingEngine {
     }
 
     // Institutional Order Flow Absorption and Early Wick Rejection Checks
-    // NOTE: Order flow metrics (CVD / order book imbalance) must NOT bypass candlestick confirmation on falling red candles.
-    // Price must confirm with a green close OR a lower rejection wick >= 35% of the candle range.
-    const isCandleBullishOrWickSupported = confirmCandle.close > confirmCandle.open || (confirmRange > 0 && confirmLowerWick / confirmRange >= 0.35);
+    // NOTE: Order flow metrics (CVD / order book imbalance) must NEVER bypass candlestick confirmation on falling red candles.
+    // Bullish reversal confirmation STRICTLY requires a completed, closed GREEN candle (close > open) with positive upward displacement.
     const absorptionLong = this.detectOrderFlowAbsorption("LONG");
-    if (absorptionLong.isAbsorption && isCandleBullishOrWickSupported) {
-      return { confirmed: true, type: absorptionLong.type };
+    if (absorptionLong.isAbsorption && isBullish && (confirmLowerWick / (confirmRange || 1) >= 0.25 || confirmBody >= 0.20 * currentAtr)) {
+      return { confirmed: true, type: `${absorptionLong.type} with Green Reversal Close` };
     }
-    const isEarlyWickAbsorption = confirmRange > 0 && (confirmLowerWick / confirmRange >= 0.38) && (confirmCandle.close >= confirmCandle.open - 0.15 * confirmRange);
-    if (isEarlyWickAbsorption && (confirmCandle.close >= confirmCandle.open || confirmBody <= 0.35 * confirmRange)) {
+    const isEarlyWickAbsorption = isBullish && confirmRange > 0 && (confirmLowerWick / confirmRange >= 0.38) && confirmBody >= 0.20 * confirmRange;
+    if (isEarlyWickAbsorption) {
       return { confirmed: true, type: "Early Lower Wick Absorption Support Rejection" };
     }
 
-    // Priority Check
+    // Priority Check: Every pattern MUST be supported by a green close (isBullish) or verified 2-candle confirmation
     if (isConfirmedBullishPinBar) return { confirmed: true, type: "2-Candle Confirmed Bullish Pin Bar" };
     if (isConfirmedMajorWickRejection) return { confirmed: true, type: "2-Candle Confirmed 65%+ Lower Wick Rejection" };
     if (isBullishEngulfing) return { confirmed: !isIndecision, type: "Bullish Engulfing Pattern" };
-    if (hasMultiWickRejection) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
-    if (isTweezerBottom) return { confirmed: !isIndecision, type: "Tweezer Bottom Reversal Pattern" };
+    if (hasMultiWickRejection && isBullish) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
+    if (isTweezerBottom && isBullish) return { confirmed: !isIndecision, type: "Tweezer Bottom Reversal Pattern" };
     if (isPiercingLine) return { confirmed: !isIndecision, type: "Piercing Line Reversal Pattern" };
     if (isBullishHarami) return { confirmed: !isIndecision, type: "Bullish Harami Reversal Pattern" };
     if (isMorningStar) return { confirmed: !isIndecision, type: "Morning Star Reversal Pattern" };
     if (isThreeWhiteSoldiers) return { confirmed: !isIndecision, type: "Three White Soldiers Continuation Pattern" };
-    if (isMomentumCandle && hasStrongClose) return { confirmed: !isIndecision, type: "Bullish Momentum Candle" };
-    if (hasStrongClose && (confirmLowerWick > confirmUpperWick || isBullish)) return { confirmed: !isIndecision, type: "Strong Close Support Rejection" };
+    if (isMomentumCandle && hasStrongClose && isBullish) return { confirmed: !isIndecision, type: "Bullish Momentum Candle" };
+    if (hasStrongClose && isBullish && confirmLowerWick > confirmUpperWick) return { confirmed: !isIndecision, type: "Strong Close Support Rejection" };
 
-    // If 2-candle confirmation is DISABLED, allow legacy immediate 1-candle entry
+    // If 2-candle confirmation is DISABLED, allow legacy immediate 1-candle entry (strictly requiring green close)
     if (!requirePinBarConfirmation) {
-      if (isPinBar && hasStrongClose) return { confirmed: !isIndecision, type: "Bullish Pin Bar (Legacy 1-Candle)" };
-      if (isMajorWickRejection && hasStrongClose) return { confirmed: true, type: "65%+ Wick-to-Range Lower Rejection (Legacy 1-Candle)" };
+      if (isPinBar && hasStrongClose && isBullish) return { confirmed: !isIndecision, type: "Bullish Pin Bar (Legacy 1-Candle)" };
+      if (isMajorWickRejection && isBullish && hasStrongClose) return { confirmed: true, type: "65%+ Wick-to-Range Lower Rejection (Legacy 1-Candle)" };
     }
 
     return { confirmed: false, type: "" };
@@ -7945,35 +7998,34 @@ class TradingEngine {
     }
 
     // Institutional Order Flow Absorption and Early Wick Rejection Checks
-    // NOTE: Order flow metrics (CVD / order book imbalance) must NOT bypass candlestick confirmation on rising green candles.
-    // Price must confirm with a red close OR an upper rejection wick >= 35% of the candle range.
-    const isCandleBearishOrWickSupported = confirmCandle.close < confirmCandle.open || (confirmRange > 0 && confirmUpperWick / confirmRange >= 0.35);
+    // NOTE: Order flow metrics (CVD / order book imbalance) must NEVER bypass candlestick confirmation on rising green candles.
+    // Bearish reversal confirmation STRICTLY requires a completed, closed RED candle (close < open) with negative downward displacement.
     const absorptionShort = this.detectOrderFlowAbsorption("SHORT");
-    if (absorptionShort.isAbsorption && isCandleBearishOrWickSupported) {
-      return { confirmed: true, type: absorptionShort.type };
+    if (absorptionShort.isAbsorption && isBearish && (confirmUpperWick / (confirmRange || 1) >= 0.25 || confirmBody >= 0.20 * currentAtr)) {
+      return { confirmed: true, type: `${absorptionShort.type} with Red Reversal Close` };
     }
-    const isEarlyWickAbsorptionShort = confirmRange > 0 && (confirmUpperWick / confirmRange >= 0.38) && (confirmCandle.close <= confirmCandle.open + 0.15 * confirmRange);
-    if (isEarlyWickAbsorptionShort && (confirmCandle.close <= confirmCandle.open || confirmBody <= 0.35 * confirmRange)) {
+    const isEarlyWickAbsorptionShort = isBearish && confirmRange > 0 && (confirmUpperWick / confirmRange >= 0.38) && confirmBody >= 0.20 * confirmRange;
+    if (isEarlyWickAbsorptionShort) {
       return { confirmed: true, type: "Early Upper Wick Absorption Resistance Rejection" };
     }
 
-    // Priority Check
+    // Priority Check: Every pattern MUST be supported by a red close (isBearish) or verified 2-candle confirmation
     if (isConfirmedBearishPinBar) return { confirmed: true, type: "2-Candle Confirmed Bearish Pin Bar" };
     if (isConfirmedMajorWickRejection) return { confirmed: true, type: "2-Candle Confirmed 65%+ Upper Wick Rejection" };
     if (isBearishEngulfing) return { confirmed: !isIndecision, type: "Bearish Engulfing Pattern" };
-    if (hasMultiWickRejection) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
-    if (isTweezerTop) return { confirmed: !isIndecision, type: "Tweezer Top Reversal Pattern" };
+    if (hasMultiWickRejection && isBearish) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
+    if (isTweezerTop && isBearish) return { confirmed: !isIndecision, type: "Tweezer Top Reversal Pattern" };
     if (isDarkCloudCover) return { confirmed: !isIndecision, type: "Dark Cloud Cover Reversal Pattern" };
     if (isBearishHarami) return { confirmed: !isIndecision, type: "Bearish Harami Reversal Pattern" };
     if (isEveningStar) return { confirmed: !isIndecision, type: "Evening Star Reversal Pattern" };
     if (isThreeBlackCrows) return { confirmed: !isIndecision, type: "Three Black Crows Continuation Pattern" };
-    if (isMomentumCandle && hasStrongClose) return { confirmed: !isIndecision, type: "Bearish Momentum Candle" };
-    if (hasStrongClose && (confirmUpperWick > confirmLowerWick || isBearish)) return { confirmed: !isIndecision, type: "Strong Close Resistance Rejection" };
+    if (isMomentumCandle && hasStrongClose && isBearish) return { confirmed: !isIndecision, type: "Bearish Momentum Candle" };
+    if (hasStrongClose && isBearish && confirmUpperWick > confirmLowerWick) return { confirmed: !isIndecision, type: "Strong Close Resistance Rejection" };
 
-    // If 2-candle confirmation is DISABLED, allow legacy immediate 1-candle entry
+    // If 2-candle confirmation is DISABLED, allow legacy immediate 1-candle entry (strictly requiring red close)
     if (!requirePinBarConfirmation) {
-      if (isPinBar && hasStrongClose) return { confirmed: !isIndecision, type: "Bearish Pin Bar (Legacy 1-Candle)" };
-      if (isMajorWickRejection && hasStrongClose) return { confirmed: true, type: "65%+ Wick-to-Range Upper Rejection (Legacy 1-Candle)" };
+      if (isPinBar && hasStrongClose && isBearish) return { confirmed: !isIndecision, type: "Bearish Pin Bar (Legacy 1-Candle)" };
+      if (isMajorWickRejection && isBearish && hasStrongClose) return { confirmed: true, type: "65%+ Wick-to-Range Upper Rejection (Legacy 1-Candle)" };
     }
 
     return { confirmed: false, type: "" };

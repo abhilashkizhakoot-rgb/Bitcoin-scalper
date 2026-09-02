@@ -3547,7 +3547,7 @@ export default function ConfigPage({
                   Smart Money Concepts & Liquidity Grab Trading Strategy
                 </h4>
                 <p className="text-xs text-slate-500 font-sans mt-1">
-                  Integrates institutional liquidity sweep detection, Change of Character (CHoCH) structural shifts, 3-candle Fair Value Gap (FVG) inefficiencies, Equal Highs/Lows (EQH/EQL) liquidity pools, Order Blocks, and Asian session range sweeps.
+                  Integrates institutional liquidity sweep detection, Change of Character (CHoCH) structural shifts, 3-candle Fair Value Gap (FVG) inefficiencies, Equal Highs/Lows (EQH/EQL) liquidity pools, and Asian session range sweeps.
                 </p>
               </div>
 
@@ -3621,9 +3621,9 @@ export default function ConfigPage({
                 </div>
               </div>
 
-              {/* Grid 2: FVG and Order Blocks */}
+              {/* Grid 2: Fair Value Gap (FVG) Strategy */}
               <div className="border-t border-slate-100 pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
                   <div className="space-y-0.5">
                     <span className="text-xs font-sans font-semibold text-slate-800">Enable Fair Value Gap (FVG) Strategy (Setup 4)</span>
                     <p className="text-[10px] text-slate-400">Detects 3-candle price inefficiencies and trades retests into the FVG gap zone.</p>
@@ -3638,26 +3638,6 @@ export default function ConfigPage({
                     <span
                       className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
                         msConfig.fvg_strategy_enabled !== false ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-sans font-semibold text-slate-800">Enable Order Block Strategy (Setup 5)</span>
-                    <p className="text-[10px] text-slate-400">Identifies institutional up/down manipulation candles prior to displacement moves.</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setMsConfig({ ...msConfig, order_block_strategy_enabled: !msConfig.order_block_strategy_enabled })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.order_block_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.order_block_strategy_enabled !== false ? "translate-x-5" : "translate-x-0"
                       }`}
                     />
                   </button>
@@ -3769,26 +3749,6 @@ export default function ConfigPage({
                     />
                   </button>
                 </div>
-                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-sans font-semibold text-slate-800">Require Rejection Candlestick on Order Block Retest</span>
-                    <p className="text-[10px] text-slate-400">Demands a confirmed rejection candlestick pattern (e.g. Pin Bar, Engulfing, Harami, Hammer) inside the Order Block zone before market execution.</p>
-                  </div>
-                  <button
-                    id="order_block_require_candlestick_rejection_toggle"
-                    type="button"
-                    onClick={() => setMsConfig({ ...msConfig, order_block_require_candlestick_rejection: msConfig.order_block_require_candlestick_rejection === false ? true : false })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.order_block_require_candlestick_rejection !== false ? "bg-indigo-600" : "bg-slate-200"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.order_block_require_candlestick_rejection !== false ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
               </div>
 
               {/* Grid 3: EQH/EQL, Asian Session Range, and SMC TP */}
@@ -3891,189 +3851,7 @@ export default function ConfigPage({
                 </div>
               </div>
 
-              {/* Grid 5: Trendline Breakout / Breakdown Setup (Setup 7) */}
-              <div className="border-t border-slate-100 pt-4 space-y-4">
-                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-sans font-semibold text-slate-800">Enable Trendline Breakout Strategy (Setup 7)</span>
-                    <p className="text-[10px] text-slate-400">Detects descending resistance / ascending support trendlines (minimum 2 touches, sustainable 10°-55° slope) and trades decisive candle closes or retest & rejections with minimum R:R ratio.</p>
-                  </div>
-                  <button
-                    id="trendline_breakout_toggle"
-                    type="button"
-                    onClick={() => setMsConfig({ ...msConfig, trendline_breakout_enabled: msConfig.trendline_breakout_enabled === false ? true : false })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.trendline_breakout_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.trendline_breakout_enabled !== false ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Min Touch Points</label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="2"
-                      max="6"
-                      value={msConfig.trendline_min_touch_points ?? 2}
-                      onChange={(e) => setMsConfig({ ...msConfig, trendline_min_touch_points: parseInputNumber(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                    />
-                    <p className="text-[10px] text-slate-400">Minimum number of distinct pivot swing touches required to validate trendline (Standard: 2).</p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Min Breakout Vol Ratio</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min="1.0"
-                      max="3.0"
-                      value={msConfig.trendline_min_volume_ratio ?? 1.20}
-                      onChange={(e) => setMsConfig({ ...msConfig, trendline_min_volume_ratio: parseInputNumber(e.target.value, true) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                    />
-                    <p className="text-[10px] text-slate-400">Relative transaction volume expansion multiplier required on breakout candle (Standard: 1.20x).</p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Min Risk:Reward (R:R)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="1.0"
-                      max="5.0"
-                      value={msConfig.trendline_min_rr_ratio ?? 1.80}
-                      onChange={(e) => setMsConfig({ ...msConfig, trendline_min_rr_ratio: parseInputNumber(e.target.value, true) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                    />
-                    <p className="text-[10px] text-slate-400">Minimum reward-to-risk ratio required between trigger, SL, and target TP (Standard: 1.80x).</p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Max Slope Angle (Deg)</label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="20"
-                      max="75"
-                      value={msConfig.trendline_max_slope_deg ?? 55}
-                      onChange={(e) => setMsConfig({ ...msConfig, trendline_max_slope_deg: parseInputNumber(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                    />
-                    <p className="text-[10px] text-slate-400">Maximum sustainable angle in degrees. Filters out vertical/blow-off lines (Standard: 55°).</p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Trendline Lookback Candles</label>
-                    <input
-                      type="number"
-                      step="5"
-                      min="15"
-                      max="120"
-                      value={msConfig.trendline_lookback_candles ?? 45}
-                      onChange={(e) => setMsConfig({ ...msConfig, trendline_lookback_candles: parseInputNumber(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                    />
-                    <p className="text-[10px] text-slate-400">Candle lookback window for identifying recent swing pivot highs and lows (Standard: 45 candles).</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Grid 6: Micro Bull/Bear Flag Breakout (Setup 8) */}
-              <div className="border-t border-slate-100 pt-4 space-y-4">
-                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-sans font-semibold text-slate-800">Enable Micro Bull/Bear Flag Strategy (Setup 8)</span>
-                    <p className="text-[10px] text-slate-400">Captures high-momentum shallow retracements in strong 1m trending markets without requiring deep EMA/swing pullbacks.</p>
-                  </div>
-                  <button
-                    id="micro_flag_toggle"
-                    type="button"
-                    onClick={() => setMsConfig({ ...msConfig, micro_flag_strategy_enabled: msConfig.micro_flag_strategy_enabled === false ? true : false })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.micro_flag_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.micro_flag_strategy_enabled !== false ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Min Pole ATR Multiple</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.8"
-                      max="4.0"
-                      disabled={msConfig.micro_flag_strategy_enabled === false}
-                      value={msConfig.micro_flag_min_pole_atr_mult ?? 1.5}
-                      onChange={(e) => setMsConfig({ ...msConfig, micro_flag_min_pole_atr_mult: parseInputNumber(e.target.value, true) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
-                    />
-                    <p className="text-[10px] text-slate-400">Minimum impulsive displacement height of the flag pole in ATR multiples (Standard: 1.5x ATR).</p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Max Retrace % of Pole</label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="15"
-                      max="60"
-                      disabled={msConfig.micro_flag_strategy_enabled === false}
-                      value={msConfig.micro_flag_max_retrace_pct ?? 38.2}
-                      onChange={(e) => setMsConfig({ ...msConfig, micro_flag_max_retrace_pct: parseInputNumber(e.target.value, true) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
-                    />
-                    <p className="text-[10px] text-slate-400">Maximum shallow retrace depth allowed inside the flag before invalidation (Standard: 38.2%).</p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Max Consolidation Candles</label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="2"
-                      max="10"
-                      disabled={msConfig.micro_flag_strategy_enabled === false}
-                      value={msConfig.micro_flag_consolidation_max_candles ?? 6}
-                      onChange={(e) => setMsConfig({ ...msConfig, micro_flag_consolidation_max_candles: parseInputNumber(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
-                    />
-                    <p className="text-[10px] text-slate-400">Maximum candle count in flag consolidation to ensure tight momentum (Standard: 6 candles).</p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Min Breakout Vol Ratio</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min="1.0"
-                      max="3.0"
-                      disabled={msConfig.micro_flag_strategy_enabled === false}
-                      value={msConfig.micro_flag_min_breakout_volume_ratio ?? 1.25}
-                      onChange={(e) => setMsConfig({ ...msConfig, micro_flag_min_breakout_volume_ratio: parseInputNumber(e.target.value, true) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
-                    />
-                    <p className="text-[10px] text-slate-400">Relative volume expansion multiplier required on the flag breakout candle (Standard: 1.25x).</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Grid 7: Range Failed Auction / SFP Reclaim (Setup 9) */}
+              {/* Grid 5: Range Failed Auction / SFP Reclaim (Setup 9) */}
               <div className="border-t border-slate-100 pt-4 space-y-4">
                 <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
                   <div className="space-y-0.5">
@@ -4125,6 +3903,148 @@ export default function ConfigPage({
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
                     />
                     <p className="text-[10px] text-slate-400">Maximum number of candles allowed outside the range before failing back inside (Standard: 3 candles).</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid 6: Setup 12 - CVD Absorption & Delta Divergence */}
+              <div className="border-t border-slate-100 pt-4 space-y-4">
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Enable CVD Absorption & Delta Divergence Strategy (Setup 12)</span>
+                    <p className="text-[10px] text-slate-400">Monitors institutional passive iceberg absorption at structural swing extremes when retail aggression exhausts.</p>
+                  </div>
+                  <button
+                    id="cvd_divergence_toggle"
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, cvd_divergence_strategy_enabled: msConfig.cvd_divergence_strategy_enabled === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.cvd_divergence_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.cvd_divergence_strategy_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Rejection Wick %</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="20"
+                      max="65"
+                      disabled={msConfig.cvd_divergence_strategy_enabled === false}
+                      value={msConfig.cvd_divergence_min_rejection_wick_pct ?? 35}
+                      onChange={(e) => setMsConfig({ ...msConfig, cvd_divergence_min_rejection_wick_pct: parseInputNumber(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Minimum wick proportion of the absorption candle (Standard: 35%).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Imbalance Ratio</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.51"
+                      max="0.80"
+                      disabled={msConfig.cvd_divergence_strategy_enabled === false}
+                      value={msConfig.cvd_divergence_min_delta_imbalance_ratio ?? 0.55}
+                      onChange={(e) => setMsConfig({ ...msConfig, cvd_divergence_min_delta_imbalance_ratio: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Threshold for aggressive taker imbalance being absorbed (Standard: 0.55 / 55%).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Lookback Candles</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="10"
+                      max="50"
+                      disabled={msConfig.cvd_divergence_strategy_enabled === false}
+                      value={msConfig.cvd_divergence_lookback_candles ?? 20}
+                      onChange={(e) => setMsConfig({ ...msConfig, cvd_divergence_lookback_candles: parseInputNumber(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Lookback for establishing structural swing high/low boundaries (Standard: 20 candles).</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid 7: Setup 13 - Open Interest (OI) Flush & Cascade Fade */}
+              <div className="border-t border-slate-100 pt-4 space-y-4">
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Enable OI Flush & Cascade Fade Strategy (Setup 13)</span>
+                    <p className="text-[10px] text-slate-400">Detects liquidation cascade spikes with sharp Open Interest contraction and fades the exhaustion air pocket.</p>
+                  </div>
+                  <button
+                    id="oi_flush_toggle"
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, oi_flush_strategy_enabled: msConfig.oi_flush_strategy_enabled === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.oi_flush_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.oi_flush_strategy_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min OI Contraction %</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.3"
+                      max="5.0"
+                      disabled={msConfig.oi_flush_strategy_enabled === false}
+                      value={msConfig.oi_flush_min_contraction_pct ?? 1.0}
+                      onChange={(e) => setMsConfig({ ...msConfig, oi_flush_min_contraction_pct: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Minimum sudden drop in Open Interest confirming forced liquidation wipes (Standard: 1.0%).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Volume Surge Mult</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="1.2"
+                      max="4.0"
+                      disabled={msConfig.oi_flush_strategy_enabled === false}
+                      value={msConfig.oi_flush_min_vol_mult ?? 1.8}
+                      onChange={(e) => setMsConfig({ ...msConfig, oi_flush_min_vol_mult: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Volume surge multiplier above 20-period average during the flush (Standard: 1.8x).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Reversal Wick %</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="25"
+                      max="75"
+                      disabled={msConfig.oi_flush_strategy_enabled === false}
+                      value={msConfig.oi_flush_min_reversal_wick_pct ?? 45}
+                      onChange={(e) => setMsConfig({ ...msConfig, oi_flush_min_reversal_wick_pct: parseInputNumber(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Minimum rejection wick ratio confirming exhaustion of the liquidation cascade (Standard: 45%).</p>
                   </div>
                 </div>
               </div>

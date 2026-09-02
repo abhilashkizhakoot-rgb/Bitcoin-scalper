@@ -288,23 +288,10 @@ const DEFAULT_CONFIG: StrategyConfig = {
     fvg_structural_stop_loss_enabled: true,
     eqh_eql_detection_enabled: true,
     eqh_eql_tolerance_pct: 0.08,
-    order_block_strategy_enabled: false,
-    order_block_require_candlestick_rejection: true,
     asian_session_sweep_enabled: true,
     smc_tp_targeting_enabled: true,
     pinbar_two_candle_confirmation_enabled: true,
     pinbar_min_wick_ratio: 0.50,
-    trendline_breakout_enabled: true,
-    trendline_min_touch_points: 2,
-    trendline_min_volume_ratio: 1.20,
-    trendline_min_rr_ratio: 1.80,
-    trendline_max_slope_deg: 55,
-    trendline_lookback_candles: 45,
-    micro_flag_strategy_enabled: true,
-    micro_flag_min_pole_atr_mult: 1.5,
-    micro_flag_max_retrace_pct: 38.2,
-    micro_flag_consolidation_max_candles: 6,
-    micro_flag_min_breakout_volume_ratio: 1.25,
     failed_auction_strategy_enabled: true,
     failed_auction_max_deviation_atr_mult: 0.8,
     failed_auction_max_candles_outside: 3,
@@ -316,6 +303,16 @@ const DEFAULT_CONFIG: StrategyConfig = {
     eqh_eql_min_touch_count: 2,
     eqh_eql_require_divergence: true,
     eqh_eql_require_candlestick_reversal: true,
+    cvd_divergence_strategy_enabled: true,
+    cvd_divergence_min_rejection_wick_pct: 35,
+    cvd_divergence_min_delta_imbalance_ratio: 0.55,
+    cvd_divergence_lookback_candles: 20,
+    cvd_divergence_require_structural_extreme: true,
+    oi_flush_strategy_enabled: true,
+    oi_flush_min_contraction_pct: 1.0,
+    oi_flush_min_vol_mult: 1.8,
+    oi_flush_min_reversal_wick_pct: 45,
+    oi_flush_require_second_candle_confirmation: true,
   },
   gate_scoring: {
     enabled: true,
@@ -1255,14 +1252,19 @@ class DatabaseManager {
       if (ms.liquidity_sweep_volume_mult === undefined) { ms.liquidity_sweep_volume_mult = def.liquidity_sweep_volume_mult || 1.0; changed = true; }
       if (ms.pinbar_two_candle_confirmation_enabled === undefined) { ms.pinbar_two_candle_confirmation_enabled = def.pinbar_two_candle_confirmation_enabled !== undefined ? def.pinbar_two_candle_confirmation_enabled : true; changed = true; }
       if (ms.pinbar_min_wick_ratio === undefined) { ms.pinbar_min_wick_ratio = def.pinbar_min_wick_ratio || 0.50; changed = true; }
-      if (ms.micro_flag_strategy_enabled === undefined) { ms.micro_flag_strategy_enabled = def.micro_flag_strategy_enabled !== false; changed = true; }
-      if (ms.micro_flag_min_pole_atr_mult === undefined) { ms.micro_flag_min_pole_atr_mult = def.micro_flag_min_pole_atr_mult || 1.5; changed = true; }
-      if (ms.micro_flag_max_retrace_pct === undefined) { ms.micro_flag_max_retrace_pct = def.micro_flag_max_retrace_pct || 38.2; changed = true; }
-      if (ms.micro_flag_consolidation_max_candles === undefined) { ms.micro_flag_consolidation_max_candles = def.micro_flag_consolidation_max_candles || 6; changed = true; }
-      if (ms.micro_flag_min_breakout_volume_ratio === undefined) { ms.micro_flag_min_breakout_volume_ratio = def.micro_flag_min_breakout_volume_ratio || 1.25; changed = true; }
       if (ms.failed_auction_strategy_enabled === undefined) { ms.failed_auction_strategy_enabled = def.failed_auction_strategy_enabled !== false; changed = true; }
       if (ms.failed_auction_max_deviation_atr_mult === undefined) { ms.failed_auction_max_deviation_atr_mult = def.failed_auction_max_deviation_atr_mult || 0.8; changed = true; }
       if (ms.failed_auction_max_candles_outside === undefined) { ms.failed_auction_max_candles_outside = def.failed_auction_max_candles_outside || 3; changed = true; }
+      if (ms.cvd_divergence_strategy_enabled === undefined) { ms.cvd_divergence_strategy_enabled = def.cvd_divergence_strategy_enabled !== false; changed = true; }
+      if (ms.cvd_divergence_min_rejection_wick_pct === undefined) { ms.cvd_divergence_min_rejection_wick_pct = def.cvd_divergence_min_rejection_wick_pct || 35; changed = true; }
+      if (ms.cvd_divergence_min_delta_imbalance_ratio === undefined) { ms.cvd_divergence_min_delta_imbalance_ratio = def.cvd_divergence_min_delta_imbalance_ratio || 0.55; changed = true; }
+      if (ms.cvd_divergence_lookback_candles === undefined) { ms.cvd_divergence_lookback_candles = def.cvd_divergence_lookback_candles || 20; changed = true; }
+      if (ms.cvd_divergence_require_structural_extreme === undefined) { ms.cvd_divergence_require_structural_extreme = def.cvd_divergence_require_structural_extreme !== false; changed = true; }
+      if (ms.oi_flush_strategy_enabled === undefined) { ms.oi_flush_strategy_enabled = def.oi_flush_strategy_enabled !== false; changed = true; }
+      if (ms.oi_flush_min_contraction_pct === undefined) { ms.oi_flush_min_contraction_pct = def.oi_flush_min_contraction_pct || 1.0; changed = true; }
+      if (ms.oi_flush_min_vol_mult === undefined) { ms.oi_flush_min_vol_mult = def.oi_flush_min_vol_mult || 1.8; changed = true; }
+      if (ms.oi_flush_min_reversal_wick_pct === undefined) { ms.oi_flush_min_reversal_wick_pct = def.oi_flush_min_reversal_wick_pct || 45; changed = true; }
+      if (ms.oi_flush_require_second_candle_confirmation === undefined) { ms.oi_flush_require_second_candle_confirmation = def.oi_flush_require_second_candle_confirmation !== false; changed = true; }
     }
 
     if (!this.cache?.config?.gate_scoring) {

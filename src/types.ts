@@ -328,23 +328,10 @@ export interface StrategyConfig {
     fvg_structural_stop_loss_enabled?: boolean; // Anchor Stop Loss structurally beyond FVG boundary (default: true)
     eqh_eql_detection_enabled?: boolean; // Enable Equal Highs / Equal Lows Liquidity Pool Detector
     eqh_eql_tolerance_pct?: number; // Tolerance % for EQH/EQL touches (default 0.08%)
-    order_block_strategy_enabled?: boolean; // Enable Institutional Order Block (OB) Retest Strategy
-    order_block_require_candlestick_rejection?: boolean; // Require Rejection Candlestick Pattern on Order Block Retest (default: true)
     asian_session_sweep_enabled?: boolean; // Enable Asian Session High/Low Sweep Strategy
     smc_tp_targeting_enabled?: boolean; // Enable SMC Dynamic Take-Profit targeting opposing liquidity
     pinbar_two_candle_confirmation_enabled?: boolean; // Require 2-candle confirmation for Pin Bars / Rejection Wicks (default: true)
     pinbar_min_wick_ratio?: number; // Minimum wick ratio to qualify as a pin bar (default: 0.50)
-    trendline_breakout_enabled?: boolean; // Enable Trendline Breakout / Breakdown Strategy (Setup 7) (default: true)
-    trendline_min_touch_points?: number; // Minimum distinct pivot touches to form valid trendline (default: 2)
-    trendline_min_volume_ratio?: number; // Minimum relative volume multiplier for breakout validation (default: 1.20)
-    trendline_min_rr_ratio?: number; // Minimum Risk-to-Reward ratio required for trendline breakout trade (default: 1.80)
-    trendline_max_slope_deg?: number; // Maximum sustainable slope angle (degrees) to avoid cliff breakouts (default: 55)
-    trendline_lookback_candles?: number; // Lookback window in 1m candles to scan for pivot trendlines (default: 45)
-    micro_flag_strategy_enabled?: boolean; // Enable Micro Bull/Bear Flag Breakout Strategy (Setup 8) (default: true)
-    micro_flag_min_pole_atr_mult?: number; // Minimum impulsive pole size relative to ATR (default: 1.5)
-    micro_flag_max_retrace_pct?: number; // Maximum allowed retracement percentage of pole height (default: 38.2%)
-    micro_flag_consolidation_max_candles?: number; // Maximum candles inside the flag consolidation (default: 6)
-    micro_flag_min_breakout_volume_ratio?: number; // Minimum volume ratio on breakout candle (default: 1.25)
     failed_auction_strategy_enabled?: boolean; // Enable Range Failed Auction / SFP Reclaim Strategy (Setup 9) (default: true)
     failed_auction_max_deviation_atr_mult?: number; // Maximum price poke beyond range boundary in ATR multiples (default: 0.8)
     failed_auction_max_candles_outside?: number; // Maximum candles price spent outside boundary before reclaiming (default: 3)
@@ -356,6 +343,16 @@ export interface StrategyConfig {
     eqh_eql_min_touch_count?: number; // Minimum touches required at equal level (default: 2)
     eqh_eql_require_divergence?: boolean; // Require volume decay or RSI/CVD momentum divergence on 2nd touch (default: true)
     eqh_eql_require_candlestick_reversal?: boolean; // Require verified reversal candlestick on double touch (default: true)
+    cvd_divergence_strategy_enabled?: boolean; // Enable CVD Absorption & Delta Divergence Strategy (Setup 12) (default: true)
+    cvd_divergence_min_rejection_wick_pct?: number; // Minimum rejection wick ratio % on absorption candle (default: 35%)
+    cvd_divergence_min_delta_imbalance_ratio?: number; // Minimum delta imbalance ratio for aggressive absorption (default: 0.55 for short, 0.45 for long)
+    cvd_divergence_lookback_candles?: number; // Lookback candles to identify prior swing high/low for CVD comparison (default: 20)
+    cvd_divergence_require_structural_extreme?: boolean; // Require divergence to occur at structural swing high/low or range boundary (default: true)
+    oi_flush_strategy_enabled?: boolean; // Enable Open Interest (OI) Flush & Cascade Fade Strategy (Setup 13) (default: true)
+    oi_flush_min_contraction_pct?: number; // Minimum percentage drop in Open Interest over 1m-3m to qualify as flush (default: 1.0%)
+    oi_flush_min_vol_mult?: number; // Minimum volume multiplier on the flush impulse candle relative to 20-period SMA (default: 1.8x)
+    oi_flush_min_reversal_wick_pct?: number; // Minimum reversal wick percentage on the liquidation flush candle (default: 45%)
+    oi_flush_require_second_candle_confirmation?: boolean; // Require 2nd candle or delta stabilization confirmation before entering cascade fade (default: true)
   };
   gate_scoring?: {
     enabled: boolean;

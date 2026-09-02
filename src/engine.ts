@@ -3363,6 +3363,21 @@ class TradingEngine {
         }
       }
 
+      // FIX 2: Check headroom proximity to local swing high ceiling (prevent entering long squeezed < 0.85x ATR under resistance)
+      const headroomToCeiling = localHigh - this.currentPrice;
+      if (qualifyingWicks.length >= 1 && headroomToCeiling > 0 && headroomToCeiling < 0.85 * currentAtr) {
+        return {
+          isExhausted: true,
+          wickCount: qualifyingWicks.length,
+          totalCandlesScanned: scanCandles.length,
+          highestWickHigh: localHigh,
+          lowestWickLow: localLow,
+          dominantWickZone: { min: localHigh - currentAtr * 0.5, max: localHigh },
+          qualifyingCandleIndices: qualifyingWicks.map((w) => w.index),
+          description: `Blocked: Insufficient headroom to overhead resistance ceiling ($${headroomToCeiling.toFixed(1)} < 0.85x ATR to $${localHigh.toFixed(1)}) with active upper rejection wick present.`,
+        };
+      }
+
       return {
         isExhausted: false,
         wickCount: qualifyingWicks.length,
@@ -3426,6 +3441,21 @@ class TradingEngine {
             description: desc,
           };
         }
+      }
+
+      // FIX 2: Check headroom proximity to local swing low floor (prevent entering short squeezed < 0.85x ATR above demand)
+      const headroomToFloor = this.currentPrice - localLow;
+      if (qualifyingWicks.length >= 1 && headroomToFloor > 0 && headroomToFloor < 0.85 * currentAtr) {
+        return {
+          isExhausted: true,
+          wickCount: qualifyingWicks.length,
+          totalCandlesScanned: scanCandles.length,
+          highestWickHigh: localHigh,
+          lowestWickLow: localLow,
+          dominantWickZone: { min: localLow, max: localLow + currentAtr * 0.5 },
+          qualifyingCandleIndices: qualifyingWicks.map((w) => w.index),
+          description: `Blocked: Insufficient headroom to demand floor ($${headroomToFloor.toFixed(1)} < 0.85x ATR to $${localLow.toFixed(1)}) with active lower rejection wick present.`,
+        };
       }
 
       return {
@@ -8023,6 +8053,8 @@ class TradingEngine {
     const atr14 = this.calculateATR(this.candles1m, 14);
     const currentAtr = atr14[lastIdx] || 50;
     const ema9 = this.calculateEMA(this.candles1m.map(c => c.close), 9);
+    const ema21 = this.calculateEMA(this.candles1m.map(c => c.close), 21);
+    const ema100 = this.calculateEMA(this.candles1m.map(c => c.close), 100);
 
     const eqLevels = this.detectEqualHighsLows();
     const minTouches = ms.eqh_eql_min_touch_count || 2;
@@ -8054,6 +8086,28 @@ class TradingEngine {
           takeProfit: 0,
           riskReward: 0,
           description: "No active Equal Lows (EQL) double bottom level tested"
+        };
+      }
+
+      // FIX 1: Block EQL setups at overextended trend tops (price extended far above 21/100 EMA)
+      const currentEma21 = ema21[lastIdx] || currentPrice;
+      const currentEma100 = ema100[lastIdx] || currentPrice;
+      const distAboveEma21 = currentPrice - currentEma21;
+      const distAboveEma100 = currentPrice - currentEma100;
+      const isOverextendedAboveEmas = distAboveEma21 > 2.0 * currentAtr || (currentAtr > 0 && distAboveEma100 > 2.5 * currentAtr);
+      if (isOverextendedAboveEmas) {
+        return {
+          isValid: false,
+          direction: "LONG",
+          levelPrice: matchedEql.price,
+          touchCount: matchedEql.touchCount,
+          hasVolumeDecay: false,
+          hasMomentumDivergence: false,
+          reversalType: "",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: `Blocked: EQL Double Bottom invalidated by top-of-trend overextension (+$${distAboveEma21.toFixed(1)} above 21 EMA, +$${distAboveEma100.toFixed(1)} above 100 EMA)`
         };
       }
 
@@ -8173,6 +8227,28 @@ class TradingEngine {
           takeProfit: 0,
           riskReward: 0,
           description: "No active Equal Highs (EQH) double top level tested"
+        };
+      }
+
+      // FIX 1: Block EQH setups at overextended trend bottoms (price extended far below 21/100 EMA)
+      const currentEma21 = ema21[lastIdx] || currentPrice;
+      const currentEma100 = ema100[lastIdx] || currentPrice;
+      const distBelowEma21 = currentEma21 - currentPrice;
+      const distBelowEma100 = currentEma100 - currentPrice;
+      const isOverextendedBelowEmas = distBelowEma21 > 2.0 * currentAtr || (currentAtr > 0 && distBelowEma100 > 2.5 * currentAtr);
+      if (isOverextendedBelowEmas) {
+        return {
+          isValid: false,
+          direction: "SHORT",
+          levelPrice: matchedEqh.price,
+          touchCount: matchedEqh.touchCount,
+          hasVolumeDecay: false,
+          hasMomentumDivergence: false,
+          reversalType: "",
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: `Blocked: EQH Double Top invalidated by bottom-of-trend overextension (-$${distBelowEma21.toFixed(1)} below 21 EMA, -$${distBelowEma100.toFixed(1)} below 100 EMA)`
         };
       }
 
@@ -8389,7 +8465,9 @@ class TradingEngine {
     const isMajorWickRejection = confirmRange > 0 && confirmLowerWick >= 0.65 * confirmRange;
     const hasStrongClose = confirmRange > 0 && (confirmCandle.close - confirmCandle.low) / confirmRange >= 0.70;
     const isMomentumCandle = isBullish && confirmBody >= 0.7 * currentAtr;
-    const isIndecision = confirmRange > 0 && (confirmBody / confirmRange < 0.15) && !isPinBar && !isMajorWickRejection;
+    const isIndecision = confirmRange > 0 && 
+      ((confirmBody / confirmRange < 0.20) || (confirmRange < 0.25 * currentAtr && !isPinBar && !isMajorWickRejection)) && 
+      !isPinBar && !isMajorWickRejection;
 
     // 2-Candle Confirmed Bullish Pin Bar / Major Wick Rejection:
     // Candle 0 (setupCandle) forms the rejection wick, and Candle 1 (confirmCandle) MUST be finished and closed GREEN with verified body expansion
@@ -8451,7 +8529,7 @@ class TradingEngine {
       const matchingLows = Math.abs(confirmCandle.low - setupCandle.low) < 0.05 * currentAtr;
       const currentHasLowerWick = confirmRange > 0 && confirmLowerWick >= 0.25 * confirmRange;
       const prevHasLowerWick = prevRange > 0 && prevLowerWick >= 0.25 * prevRange;
-      const hasPositiveClose = isBullish && confirmBody >= 0.20 * confirmRange;
+      const hasPositiveClose = isBullish && (confirmBody >= 0.20 * confirmRange || confirmBody >= 0.20 * currentAtr);
       if (matchingLows && currentHasLowerWick && prevHasLowerWick && (hasPositiveClose || hasStrongClose)) {
         isTweezerBottom = true;
       }
@@ -8465,7 +8543,7 @@ class TradingEngine {
       const isPrevStrongBearish = setupCandle.close < setupCandle.open && prevBody >= 0.3 * prevRange;
       const opensBelowPrevClose = confirmCandle.open < setupCandle.close + 0.05 * currentAtr;
       const closesAboveMidpoint = confirmCandle.close >= (setupCandle.open + setupCandle.close) / 2;
-      const hasPiercingBody = isBullish && confirmBody >= 0.25 * confirmRange;
+      const hasPiercingBody = isBullish && confirmBody >= 0.25 * confirmRange && confirmBody >= 0.20 * currentAtr;
       if (isPrevStrongBearish && opensBelowPrevClose && closesAboveMidpoint && hasPiercingBody && confirmCandle.close < setupCandle.open) {
         isPiercingLine = true;
       }
@@ -8476,11 +8554,16 @@ class TradingEngine {
     if (setupCandle) {
       const prevRange = setupCandle.high - setupCandle.low;
       const prevBody = setupCandle.open - setupCandle.close;
-      const isPrevBearish = setupCandle.close < setupCandle.open && prevBody >= 0.25 * prevRange;
+      // Mother candle must be a decisive bearish candle
+      const isPrevBearish = setupCandle.close < setupCandle.open && prevBody >= 0.30 * prevRange && prevBody >= 0.25 * currentAtr;
       const opensInsideMotherBody = confirmCandle.open >= setupCandle.close - 0.05 * currentAtr;
       const closesInsideMotherBody = confirmCandle.close <= setupCandle.open + 0.05 * currentAtr;
-      const isInsideMotherRange = confirmCandle.high <= setupCandle.high + 0.08 * currentAtr && confirmCandle.low >= setupCandle.low - 0.08 * currentAtr;
-      const hasPositiveDisplacement = isBullish && confirmBody >= 0.15 * confirmRange;
+      const isInsideMotherRange = confirmCandle.high <= setupCandle.high + 0.05 * currentAtr && confirmCandle.low >= setupCandle.low - 0.05 * currentAtr;
+      
+      // Confirmation candle MUST show real upward buying displacement (not a tiny 1-2 tick doji)
+      const hasMeaningfulBody = confirmBody >= 0.25 * currentAtr || (confirmRange > 0 && confirmBody >= 0.35 * confirmRange && confirmRange >= 0.30 * currentAtr);
+      const hasRetracedMotherBar = confirmBody >= 0.25 * prevBody || confirmCandle.close >= setupCandle.close + (prevBody * 0.25);
+      const hasPositiveDisplacement = isBullish && hasMeaningfulBody && hasRetracedMotherBar;
 
       if (isPrevBearish && isBullish && opensInsideMotherBody && closesInsideMotherBody && isInsideMotherRange && hasPositiveDisplacement) {
         isBullishHarami = true;
@@ -8595,7 +8678,9 @@ class TradingEngine {
     const isMajorWickRejection = confirmRange > 0 && confirmUpperWick >= 0.65 * confirmRange;
     const hasStrongClose = confirmRange > 0 && (confirmCandle.high - confirmCandle.close) / confirmRange >= 0.70;
     const isMomentumCandle = isBearish && confirmBody >= 0.7 * currentAtr;
-    const isIndecision = confirmRange > 0 && (confirmBody / confirmRange < 0.15) && !isPinBar && !isMajorWickRejection;
+    const isIndecision = confirmRange > 0 && 
+      ((confirmBody / confirmRange < 0.20) || (confirmRange < 0.25 * currentAtr && !isPinBar && !isMajorWickRejection)) && 
+      !isPinBar && !isMajorWickRejection;
 
     // 2-Candle Confirmed Bearish Pin Bar / Major Wick Rejection:
     // Candle 0 (setupCandle) forms the upper rejection wick, and Candle 1 (confirmCandle) MUST be finished and closed RED with verified body expansion
@@ -8657,7 +8742,7 @@ class TradingEngine {
       const matchingHighs = Math.abs(confirmCandle.high - setupCandle.high) < 0.05 * currentAtr;
       const currentHasUpperWick = confirmRange > 0 && confirmUpperWick >= 0.25 * confirmRange;
       const prevHasUpperWick = prevRange > 0 && prevUpperWick >= 0.25 * prevRange;
-      const hasNegativeClose = isBearish && confirmBody >= 0.20 * confirmRange;
+      const hasNegativeClose = isBearish && (confirmBody >= 0.20 * confirmRange || confirmBody >= 0.20 * currentAtr);
       if (matchingHighs && currentHasUpperWick && prevHasUpperWick && (hasNegativeClose || hasStrongClose)) {
         isTweezerTop = true;
       }
@@ -8671,7 +8756,7 @@ class TradingEngine {
       const isPrevStrongBullish = setupCandle.close > setupCandle.open && prevBody >= 0.3 * prevRange;
       const opensAbovePrevClose = confirmCandle.open > setupCandle.close - 0.05 * currentAtr;
       const closesBelowMidpoint = confirmCandle.close <= (setupCandle.open + setupCandle.close) / 2;
-      const hasDarkCloudBody = isBearish && confirmBody >= 0.25 * confirmRange;
+      const hasDarkCloudBody = isBearish && confirmBody >= 0.25 * confirmRange && confirmBody >= 0.20 * currentAtr;
       if (isPrevStrongBullish && opensAbovePrevClose && closesBelowMidpoint && hasDarkCloudBody && confirmCandle.close > setupCandle.open) {
         isDarkCloudCover = true;
       }
@@ -8682,11 +8767,16 @@ class TradingEngine {
     if (setupCandle) {
       const prevRange = setupCandle.high - setupCandle.low;
       const prevBody = setupCandle.close - setupCandle.open;
-      const isPrevBullish = setupCandle.close > setupCandle.open && prevBody >= 0.25 * prevRange;
+      // Mother candle must be a decisive bullish candle
+      const isPrevBullish = setupCandle.close > setupCandle.open && prevBody >= 0.30 * prevRange && prevBody >= 0.25 * currentAtr;
       const opensInsideMotherBody = confirmCandle.open <= setupCandle.close + 0.05 * currentAtr;
       const closesInsideMotherBody = confirmCandle.close >= setupCandle.open - 0.05 * currentAtr;
-      const isInsideMotherRange = confirmCandle.high <= setupCandle.high + 0.08 * currentAtr && confirmCandle.low >= setupCandle.low - 0.08 * currentAtr;
-      const hasNegativeDisplacement = isBearish && confirmBody >= 0.15 * confirmRange;
+      const isInsideMotherRange = confirmCandle.high <= setupCandle.high + 0.05 * currentAtr && confirmCandle.low >= setupCandle.low - 0.05 * currentAtr;
+      
+      // Confirmation candle MUST show real downward selling displacement (not a tiny 1-2 tick doji)
+      const hasMeaningfulBody = confirmBody >= 0.25 * currentAtr || (confirmRange > 0 && confirmBody >= 0.35 * confirmRange && confirmRange >= 0.30 * currentAtr);
+      const hasRetracedMotherBar = confirmBody >= 0.25 * prevBody || confirmCandle.close <= setupCandle.close - (prevBody * 0.25);
+      const hasNegativeDisplacement = isBearish && hasMeaningfulBody && hasRetracedMotherBar;
 
       if (isPrevBullish && isBearish && opensInsideMotherBody && closesInsideMotherBody && isInsideMotherRange && hasNegativeDisplacement) {
         isBearishHarami = true;

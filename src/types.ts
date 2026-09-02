@@ -274,6 +274,14 @@ export interface StrategyConfig {
     overextension_vwap_trending_multiplier?: number; // VWAP band multiplier in trending markets (default: 1.5)
     overextension_vwap_ranging_multiplier?: number; // VWAP band multiplier in ranging/other markets (default: 1.0)
     max_allowed_z_dist?: number; // Maximum allowed composite Z-score distance (|Z_dist|) cap (default: 2.20)
+    enable_regime_adaptive_sl_tp?: boolean; // Enable regime-specific dynamic SL and TP calibration
+    min_rr_ratio_floor?: number; // Minimum guaranteed Risk-to-Reward ratio floor for Take Profit (e.g. 1.25x)
+    sl_atr_multiplier_trending?: number; // Stop Loss ATR multiplier in trending markets (e.g. 1.25x)
+    sl_atr_multiplier_ranging?: number; // Stop Loss ATR multiplier in range-bound markets (e.g. 1.15x)
+    sl_atr_multiplier_volatile?: number; // Stop Loss ATR multiplier in high volatility markets (e.g. 1.45x)
+    tp_atr_multiplier_trending?: number; // Take Profit ATR multiplier in trending markets (e.g. 1.50x)
+    tp_atr_multiplier_ranging?: number; // Take Profit ATR multiplier in range-bound markets (e.g. 1.15x)
+    tp_atr_multiplier_volatile?: number; // Take Profit ATR multiplier in high volatility markets (e.g. 1.75x)
   };
   market_structure: {
     min_breakout_body_ratio: number; // e.g. 0.22 (22% body ratio)

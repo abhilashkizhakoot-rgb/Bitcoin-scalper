@@ -6610,9 +6610,18 @@ class TradingEngine {
       };
     }
 
-    // Support/Resistance threshold uses fraction of range width and relative ATR
-    const rangeSupportThreshold = rangeLow + Math.min(rangeWidth * 0.15, Math.max(rangeWidth * 0.08, 0.5 * currentAtr));
-    const rangeResistanceThreshold = rangeHigh - Math.min(rangeWidth * 0.15, Math.max(rangeWidth * 0.08, 0.5 * currentAtr));
+    // --- Hard Safeguard 2: Bollinger Band PercentB Outer-Boundary Filter ---
+    // In a ranging market, true mean-reversion MUST enter at outer extremities (bottom 28% for Long, top 28% for Short).
+    // Entering at the 50% midpoint (equilibrium chop) has zero directional edge and gets chopped up by intertwined EMAs.
+    const bb = this.calculateBollingerBands(this.candles1m.map(c => c.close), 20, 2.0);
+    const bbUpper = bb.upper[lastIdx] || rangeHigh;
+    const bbLower = bb.lower[lastIdx] || rangeLow;
+    const bbBandwidth = bbUpper - bbLower;
+    const percentB = bbBandwidth > 0 ? (currentPrice - bbLower) / bbBandwidth : 0.5;
+
+    // Support/Resistance threshold uses fraction of range width and relative ATR (strictly in the outer boundary)
+    const rangeSupportThreshold = rangeLow + Math.min(rangeWidth * 0.20, Math.max(rangeWidth * 0.08, 0.45 * currentAtr));
+    const rangeResistanceThreshold = rangeHigh - Math.min(rangeWidth * 0.20, Math.max(rangeWidth * 0.08, 0.45 * currentAtr));
     
     // --- 1. Recent Touch Check (Lookback Window) ---
     const retestLookback = 5;
@@ -6707,10 +6716,12 @@ class TradingEngine {
     let isLongReversal = false;
     let longReason = "";
     
-    const maxLongPriceThreshold = rangeLow + Math.max(rangeWidth * 0.40, 0.30 * currentAtr);
+    // Strict range boundary: Must be in lower 28% of range and Bollinger Band percentB <= 0.30
+    const maxLongPriceThreshold = rangeLow + Math.min(rangeWidth * 0.28, Math.max(rangeWidth * 0.15, 0.45 * currentAtr));
     const rangeLongMinFloor = rangeLow - 0.75 * currentAtr;
     const isNotCrashingBreakdown = currentPrice >= rangeLongMinFloor || currentCandle.close >= rangeLow;
-    const isPriceWithinLongZone = currentPrice <= maxLongPriceThreshold && isNotCrashingBreakdown;
+    const isWithinBbLowerZone = percentB <= 0.32;
+    const isPriceWithinLongZone = currentPrice <= maxLongPriceThreshold && isNotCrashingBreakdown && isWithinBbLowerZone;
 
     // Long Reversal Filter: If market has bearish EMA stack (EMA 20 < EMA 50) and price is below EMA 20, require EMA 9 reclaim or confirmed 2-candle pattern
     const canEnterLongReversal = !isWaterfallDump && (
@@ -6737,10 +6748,12 @@ class TradingEngine {
     let isShortReversal = false;
     let shortReason = "";
     
-    const minShortPriceThreshold = rangeHigh - Math.max(rangeWidth * 0.40, 0.30 * currentAtr);
+    // Strict range boundary: Must be in upper 28% of range and Bollinger Band percentB >= 0.68
+    const minShortPriceThreshold = rangeHigh - Math.min(rangeWidth * 0.28, Math.max(rangeWidth * 0.15, 0.45 * currentAtr));
     const rangeShortMaxCeiling = rangeHigh + 0.75 * currentAtr;
     const isNotExplodingBreakout = currentPrice <= rangeShortMaxCeiling || currentCandle.close <= rangeHigh;
-    const isPriceWithinShortZone = currentPrice >= minShortPriceThreshold && isNotExplodingBreakout;
+    const isWithinBbUpperZone = percentB >= 0.68;
+    const isPriceWithinShortZone = currentPrice >= minShortPriceThreshold && isNotExplodingBreakout && isWithinBbUpperZone;
 
     // Short Reversal Filter: If market has bullish EMA stack (EMA 20 > EMA 50) and price is above EMA 20, require EMA 9 breakdown or confirmed 2-candle pattern
     const canEnterShortReversal = !isBlowoffPump && (
@@ -10438,9 +10451,43 @@ class TradingEngine {
       }
     }
 
-    // Enforce a minimum stop loss distance floor to prevent excessively tight stop losses in BTC
-    const usdFloor = config.risk_management.min_stop_loss_distance_usd !== undefined ? config.risk_management.min_stop_loss_distance_usd : 80;
-    const pctFloorVal = config.risk_management.min_stop_loss_distance_pct !== undefined ? config.risk_management.min_stop_loss_distance_pct : 0.12;
+    // Regime-Adaptive Dynamic Stop Loss ATR Multiplier
+    // Trending: 1.25x ATR (clean directional trends have low MAE < 0.8x ATR)
+    // Range-Bound: 1.15x ATR (tight invalidation beyond local boundary)
+    // High Volatility: 1.45x ATR (allows necessary breathing room for volatile expansions)
+    let effectiveSlAtrMult = config.risk_management.stop_loss_atr_multiplier || 1.25;
+    let effectiveTpAtrMult = config.risk_management.take_profit_atr_multiplier !== undefined
+      ? config.risk_management.take_profit_atr_multiplier
+      : 1.35;
+
+    if (config.risk_management.enable_regime_adaptive_sl_tp !== false) {
+      if (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.STRONG_DOWNTREND) {
+        effectiveSlAtrMult = config.risk_management.sl_atr_multiplier_trending !== undefined
+          ? config.risk_management.sl_atr_multiplier_trending
+          : 1.25;
+        effectiveTpAtrMult = config.risk_management.tp_atr_multiplier_trending !== undefined
+          ? config.risk_management.tp_atr_multiplier_trending
+          : 1.50;
+      } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
+        effectiveSlAtrMult = config.risk_management.sl_atr_multiplier_ranging !== undefined
+          ? config.risk_management.sl_atr_multiplier_ranging
+          : 1.15;
+        effectiveTpAtrMult = config.risk_management.tp_atr_multiplier_ranging !== undefined
+          ? config.risk_management.tp_atr_multiplier_ranging
+          : 1.15;
+      } else if (this.currentRegime === MarketRegime.HIGH_VOLATILITY) {
+        effectiveSlAtrMult = config.risk_management.sl_atr_multiplier_volatile !== undefined
+          ? config.risk_management.sl_atr_multiplier_volatile
+          : 1.45;
+        effectiveTpAtrMult = config.risk_management.tp_atr_multiplier_volatile !== undefined
+          ? config.risk_management.tp_atr_multiplier_volatile
+          : 1.75;
+      }
+    }
+
+    // Enforce a sensible minimum stop loss distance floor to prevent sub-tick anomalies without overriding ATR scaling
+    const usdFloor = config.risk_management.min_stop_loss_distance_usd !== undefined ? config.risk_management.min_stop_loss_distance_usd : 25;
+    const pctFloorVal = config.risk_management.min_stop_loss_distance_pct !== undefined ? config.risk_management.min_stop_loss_distance_pct : 0.035;
     const minSlDistance = Math.max(usdFloor, currentPrice * (pctFloorVal / 100));
     
     const isStaticSl = config.risk_management.static_stop_loss_enabled === true;
@@ -10449,7 +10496,7 @@ class TradingEngine {
     const stopLossDistance = isStaticSl
       ? staticSlVal
       : Math.max(
-          stopLossAtr * config.risk_management.stop_loss_atr_multiplier,
+          stopLossAtr * effectiveSlAtrMult,
           minSlDistance
         );
 
@@ -10459,15 +10506,24 @@ class TradingEngine {
     const positionQtyBtc = Number((baseQty * sizeMultiplier).toFixed(5));
     const leverage = config.risk_management.leverage || 20;
 
-    // Fix 1: Scalp Take-Profit Calibration (1.2x - 1.5x ATR Horizon)
-    // Directly targets the natural 1-minute single-impulse horizon to secure high win-rate profits before counter-trend pullbacks
-    const tpAtrMult = config.risk_management.take_profit_atr_multiplier !== undefined
-      ? config.risk_management.take_profit_atr_multiplier
-      : 1.35;
+    // Fee-Aware Take Profit Target Floor:
+    // Estimate round-trip exchange fees (taker ~0.05% entry + 0.05% exit + GST ≈ 0.10 - 0.118%).
+    // Minimum Take Profit distance must cover at least 1.5x the round-trip fee distance so net profit is always solidly positive (> +$0.03 to +$0.06+).
+    const estRoundTripFeeRate = config.risk_management.delta_india_gst_enabled ? 0.00118 : 0.0010;
+    const minFeeCoverDistance = currentPrice * estRoundTripFeeRate * 1.5;
+
+    // Positive R:R Guarantee:
+    // Ensure planned TP Distance is at least 1.25x - 1.35x of Stop Loss Distance (preventing 1 SL from wiping multiple TPs)
+    const minRRMultiplier = config.risk_management.min_rr_ratio_floor !== undefined
+      ? config.risk_management.min_rr_ratio_floor
+      : (this.currentRegime === MarketRegime.RANGE_BOUND ? 1.15 : 1.35);
+
     const isAtrScalpMode = config.risk_management.take_profit_mode !== "RR_RATIO";
-    const takeProfitDistance = isAtrScalpMode
-      ? Math.max(lastAtr * tpAtrMult, stopLossDistance * 0.8)
-      : stopLossDistance * config.risk_management.take_profit_ratio;
+    const rawTpDist = isAtrScalpMode
+      ? Math.max(lastAtr * effectiveTpAtrMult, stopLossDistance * minRRMultiplier)
+      : stopLossDistance * Math.max(config.risk_management.take_profit_ratio, minRRMultiplier);
+
+    const takeProfitDistance = Math.max(rawTpDist, minFeeCoverDistance);
 
     // --- CONTEXT-AWARE VOLUME PROFILE SL / TP TARGETING ---
     // Align TP with next opposing High-Volume Node (POC/HVN) and SL behind local supporting Volume Node
@@ -10503,9 +10559,9 @@ class TradingEngine {
     this.log(
       `Computed Execution Parameters (${execDirection}${isInverted ? " - INVERTED" : ""}): Entry=$${currentPrice.toFixed(2)}, StopLoss=$${stopLossPrice.toFixed(2)} (Dist: $${actualSLDistance.toFixed(
         2
-      )}), TakeProfit=$${takeProfitPrice.toFixed(2)} (Dist: $${actualTPDistance.toFixed(
+      )} [${effectiveSlAtrMult}x ATR | Regime: ${this.currentRegime}]), TakeProfit=$${takeProfitPrice.toFixed(2)} (Dist: $${actualTPDistance.toFixed(
         2
-      )} [Mode: ${isAtrScalpMode ? `${tpAtrMult}x ATR Scalp` : `${config.risk_management.take_profit_ratio}x R:R`} | VP Anchor: ${vpCheck.nearestBarrierPrice ? `$${vpCheck.nearestBarrierPrice.toFixed(0)}` : "Standard"}]), Qty=${positionQtyBtc} BTC, Leverage=${leverage}x`
+      )} [Mode: ${isAtrScalpMode ? `${effectiveTpAtrMult}x ATR Scalp` : `${config.risk_management.take_profit_ratio}x R:R`} | VP Anchor: ${vpCheck.nearestBarrierPrice ? `$${vpCheck.nearestBarrierPrice.toFixed(0)}` : "Standard"}]), Qty=${positionQtyBtc} BTC, Leverage=${leverage}x`
     );
 
     // Create the Trade record
@@ -10648,9 +10704,9 @@ class TradingEngine {
       }
     }
 
-    // Apply the same minimum stop-loss distance floor to prevent excessively tight SL on historical/active trades
-    const usdFloor = config.risk_management.min_stop_loss_distance_usd !== undefined ? config.risk_management.min_stop_loss_distance_usd : 80;
-    const pctFloorVal = config.risk_management.min_stop_loss_distance_pct !== undefined ? config.risk_management.min_stop_loss_distance_pct : 0.12;
+    // Apply the same sensible minimum stop-loss distance floor to prevent excessively tight SL on historical/active trades
+    const usdFloor = config.risk_management.min_stop_loss_distance_usd !== undefined ? config.risk_management.min_stop_loss_distance_usd : 25;
+    const pctFloorVal = config.risk_management.min_stop_loss_distance_pct !== undefined ? config.risk_management.min_stop_loss_distance_pct : 0.035;
     const minSlDistance = Math.max(usdFloor, entryPrice * (pctFloorVal / 100));
     
     const isStaticSl = config.risk_management.static_stop_loss_enabled === true;
@@ -10662,14 +10718,23 @@ class TradingEngine {
           stopLossAtr * config.risk_management.stop_loss_atr_multiplier,
           minSlDistance
         );
-    // Fix 1: Scalp Take-Profit Calibration (1.2x - 1.5x ATR Horizon)
+
+    // Fee-aware minimum distance and positive R:R guarantee
+    const estRoundTripFeeRate = config.risk_management.delta_india_gst_enabled ? 0.00118 : 0.0010;
+    const minFeeCoverDistance = entryPrice * estRoundTripFeeRate * 1.5;
+    const minRRMultiplier = config.risk_management.min_rr_ratio_floor !== undefined
+      ? config.risk_management.min_rr_ratio_floor
+      : (this.currentRegime === MarketRegime.RANGE_BOUND ? 1.15 : 1.35);
+
+    // Take-Profit Calibration: Ensure TP is at least minRRMultiplier x SL distance and covers round-trip fees
     const tpAtrMult = config.risk_management.take_profit_atr_multiplier !== undefined
       ? config.risk_management.take_profit_atr_multiplier
-      : 1.35;
+      : 1.50;
     const isAtrScalpMode = config.risk_management.take_profit_mode !== "RR_RATIO";
-    const takeProfitDistance = isAtrScalpMode
-      ? Math.max(lastAtr * tpAtrMult, stopLossDistance * 0.8)
-      : stopLossDistance * config.risk_management.take_profit_ratio;
+    const rawTpDist = isAtrScalpMode
+      ? Math.max(lastAtr * tpAtrMult, stopLossDistance * minRRMultiplier)
+      : stopLossDistance * Math.max(config.risk_management.take_profit_ratio, minRRMultiplier);
+    const takeProfitDistance = Math.max(rawTpDist, minFeeCoverDistance);
 
     let stopLossPrice = direction === TradeDirection.LONG ? entryPrice - stopLossDistance : entryPrice + stopLossDistance;
     let takeProfitPrice = direction === TradeDirection.LONG ? entryPrice + takeProfitDistance : entryPrice - takeProfitDistance;
@@ -10788,10 +10853,10 @@ class TradingEngine {
           finalStopLossPrice = stopLossPrice;
         }
 
-        // Dynamic Breakeven Floor: Once profit touches >= 1.0x ATR, lock SL to Entry + Fees (with strict safety limits)
+        // Dynamic Breakeven Floor: Once profit touches >= 0.75x ATR, lock SL to Entry + Fees (with strict safety limits)
         const beTriggerAtr = config.risk_management.breakeven_trigger_atr !== undefined
           ? config.risk_management.breakeven_trigger_atr
-          : 1.0;
+          : 0.75;
         if ((peakPrice - entryPrice) >= (lastAtr * beTriggerAtr)) {
           // Standard round-trip taker fee buffer (~0.08% of notional)
           const feeBufferUsd = Math.min(entryPrice * 0.0008, (entryFee + exitFeeProj) / (qty || 0.001));
@@ -10846,10 +10911,10 @@ class TradingEngine {
           finalStopLossPrice = stopLossPrice;
         }
 
-        // Dynamic Breakeven Floor: Once profit touches >= 1.0x ATR, lock SL to Entry - Fees (with strict safety limits)
+        // Dynamic Breakeven Floor: Once profit touches >= 0.75x ATR, lock SL to Entry - Fees (with strict safety limits)
         const beTriggerAtr = config.risk_management.breakeven_trigger_atr !== undefined
           ? config.risk_management.breakeven_trigger_atr
-          : 1.0;
+          : 0.75;
         if ((entryPrice - valleyPrice) >= (lastAtr * beTriggerAtr)) {
           // Standard round-trip taker fee buffer (~0.08% of notional)
           const feeBufferUsd = Math.min(entryPrice * 0.0008, (entryFee + exitFeeProj) / (qty || 0.001));

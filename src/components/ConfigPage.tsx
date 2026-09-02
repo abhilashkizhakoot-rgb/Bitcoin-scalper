@@ -241,17 +241,17 @@ export default function ConfigPage({
         risk_per_trade_pct: 0.5,
         max_risk_per_trade_pct: 1.0,
         leverage: 20,
-        stop_loss_atr_multiplier: 1.8,
+        stop_loss_atr_multiplier: 1.25,
         take_profit_ratio: 1.5,
-        take_profit_atr_multiplier: 1.35,
+        take_profit_atr_multiplier: 1.50,
         take_profit_mode: "ATR_SCALP",
-        breakeven_trigger_atr: 1.0,
-        min_stop_loss_distance_usd: 80,
-        min_stop_loss_distance_pct: 0.12,
+        breakeven_trigger_atr: 0.75,
+        min_stop_loss_distance_usd: 25,
+        min_stop_loss_distance_pct: 0.035,
         static_stop_loss_value_usd: 150,
         max_atr_for_stop_loss_value: 100,
-        trailing_stop_loss_distance_atr: 1.8,
-        trailing_stop_loss_activation_ratio: 1.2,
+        trailing_stop_loss_distance_atr: 1.25,
+        trailing_stop_loss_activation_ratio: 1.0,
         max_consecutive_losses: 3,
         consecutive_losses_cooldown_minutes: 30,
         daily_loss_limit_pct: 2.0,
@@ -1934,16 +1934,16 @@ export default function ConfigPage({
               </h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-slate-600">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Stop Loss ATR Multiplier</label>
+                  <label className="text-xs font-mono text-slate-400 uppercase">Base Stop Loss ATR Multiplier</label>
                   <input
                     type="number"
-                    step="0.1"
+                    step="0.05"
                     value={riskConfig.stop_loss_atr_multiplier}
                     onChange={(e) => setRiskConfig({ ...riskConfig, stop_loss_atr_multiplier: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Stop loss distance multiplier applied to Average True Range (14-period ATR). Dynamic SL adapts to historical 1m candle volatility, expanding stop distances during wide swings and narrowing them during tight ranges (Standard: 1.3 - 2.2).
+                    Fallback Stop Loss distance multiplier applied to 14-period ATR when regime-adaptive mode is disabled (Standard: 1.2 - 1.8).
                   </p>
                 </div>
 
@@ -1967,17 +1967,156 @@ export default function ConfigPage({
                   </p>
                 </div>
 
+                {/* Regime-Adaptive Dynamic SL/TP Section */}
+                <div className="col-span-1 md:col-span-2 border border-indigo-100 rounded-xl p-4 bg-indigo-50/30 space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none text-xs font-bold text-indigo-950 uppercase tracking-wide">
+                      <input
+                        type="checkbox"
+                        checked={riskConfig.enable_regime_adaptive_sl_tp !== false}
+                        onChange={(e) => setRiskConfig({ ...riskConfig, enable_regime_adaptive_sl_tp: e.target.checked })}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                      />
+                      Regime-Based Dynamic SL & TP Calibration
+                    </label>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
+                      {riskConfig.enable_regime_adaptive_sl_tp !== false ? "ACTIVE" : "DISABLED"}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-indigo-800/80 leading-relaxed">
+                    Dynamically scales Stop Loss & Take Profit ATR multipliers based on real-time market classification. Protects capital against chop in Range-Bound markets (tighter SL/TP) while capturing extended single impulses in Trends and Volatility surges.
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 pt-1">
+                    {/* Trending Regime Card */}
+                    <div className="bg-white p-3.5 rounded-lg border border-slate-200/80 shadow-2xs space-y-2">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                        <span className="text-[11px] font-bold text-indigo-700 font-sans">Trending Markets</span>
+                        <span className="text-[9px] font-mono text-slate-400">UP/DOWN</span>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Stop Loss ATR</span>
+                          <span className="font-bold text-slate-700">{riskConfig.sl_atr_multiplier_trending ?? 1.25}x</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={riskConfig.sl_atr_multiplier_trending ?? 1.25}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, sl_atr_multiplier_trending: parseInputNumber(e.target.value, true) })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Take Profit ATR</span>
+                          <span className="font-bold text-slate-700">{riskConfig.tp_atr_multiplier_trending ?? 1.50}x</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={riskConfig.tp_atr_multiplier_trending ?? 1.50}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, tp_atr_multiplier_trending: parseInputNumber(e.target.value, true) })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Range-Bound Regime Card */}
+                    <div className="bg-white p-3.5 rounded-lg border border-slate-200/80 shadow-2xs space-y-2">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                        <span className="text-[11px] font-bold text-amber-700 font-sans">Range-Bound</span>
+                        <span className="text-[9px] font-mono text-slate-400">MEAN REVERSION</span>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Stop Loss ATR</span>
+                          <span className="font-bold text-slate-700">{riskConfig.sl_atr_multiplier_ranging ?? 1.15}x</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={riskConfig.sl_atr_multiplier_ranging ?? 1.15}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, sl_atr_multiplier_ranging: parseInputNumber(e.target.value, true) })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Take Profit ATR</span>
+                          <span className="font-bold text-slate-700">{riskConfig.tp_atr_multiplier_ranging ?? 1.15}x</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={riskConfig.tp_atr_multiplier_ranging ?? 1.15}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, tp_atr_multiplier_ranging: parseInputNumber(e.target.value, true) })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {/* High Volatility Regime Card */}
+                    <div className="bg-white p-3.5 rounded-lg border border-slate-200/80 shadow-2xs space-y-2">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                        <span className="text-[11px] font-bold text-rose-700 font-sans">High Volatility</span>
+                        <span className="text-[9px] font-mono text-slate-400">EXPANSION</span>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Stop Loss ATR</span>
+                          <span className="font-bold text-slate-700">{riskConfig.sl_atr_multiplier_volatile ?? 1.45}x</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={riskConfig.sl_atr_multiplier_volatile ?? 1.45}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, sl_atr_multiplier_volatile: parseInputNumber(e.target.value, true) })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                          <span>Take Profit ATR</span>
+                          <span className="font-bold text-slate-700">{riskConfig.tp_atr_multiplier_volatile ?? 1.75}x</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={riskConfig.tp_atr_multiplier_volatile ?? 1.75}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, tp_atr_multiplier_volatile: parseInputNumber(e.target.value, true) })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Scalp Take Profit ATR Multiplier</label>
+                  <label className="text-xs font-mono text-slate-400 uppercase">Base Scalp TP ATR Multiplier (Fallback)</label>
                   <input
                     type="number"
                     step="0.05"
-                    value={riskConfig.take_profit_atr_multiplier ?? 1.35}
+                    value={riskConfig.take_profit_atr_multiplier ?? 1.50}
                     onChange={(e) => setRiskConfig({ ...riskConfig, take_profit_atr_multiplier: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Direct multiplier applied to current 14-period ATR for Take Profit placement (Recommended: 1.25 - 1.50x ATR). Captures momentum swings before counter-trend pullbacks.
+                    Fallback multiplier applied to current 14-period ATR for Take Profit when regime adaptation is disabled (Recommended: 1.35 - 1.75x ATR).
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Min Risk-to-Reward (R:R) Guarantee</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={riskConfig.min_rr_ratio_floor ?? 1.25}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, min_rr_ratio_floor: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Guaranteed minimum ratio of Take Profit distance to Stop Loss distance. Enforces that TP distance is always larger than SL distance so 1 SL does not wipe multiple TPs (Default: 1.25x).
                   </p>
                 </div>
 
@@ -1985,13 +2124,13 @@ export default function ConfigPage({
                   <label className="text-xs font-mono text-slate-400 uppercase">Breakeven Lock Trigger (ATR)</label>
                   <input
                     type="number"
-                    step="0.1"
-                    value={riskConfig.breakeven_trigger_atr ?? 1.0}
+                    step="0.05"
+                    value={riskConfig.breakeven_trigger_atr ?? 0.75}
                     onChange={(e) => setRiskConfig({ ...riskConfig, breakeven_trigger_atr: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Peak ATR gain required to lock Stop Loss to Breakeven + Fees. Protects trades from multi-wave reversals once in solid profit (Default: 1.0x ATR).
+                    Peak ATR gain required to lock Stop Loss to Breakeven + Fees. Protects trades from multi-wave reversals once in solid profit (Default: 0.75x ATR).
                   </p>
                 </div>
 
@@ -2014,7 +2153,7 @@ export default function ConfigPage({
                   <input
                     type="number"
                     step="5"
-                    value={riskConfig.min_stop_loss_distance_usd}
+                    value={riskConfig.min_stop_loss_distance_usd ?? 25}
                     onChange={(e) => {
                       const parsed = parseInputNumber(e.target.value, true);
                       if (typeof parsed === "number") {
@@ -2026,7 +2165,7 @@ export default function ConfigPage({
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Absolute minimum price distance allowed in USD for stop loss placement. Prevents excessively tight stops in BTC during consolidation, avoiding false stops by random noise before the actual breakout direction settles (Default: $80).
+                    Sensible minimum price distance floor in USD for stop loss placement. Prevents sub-dollar rounding errors without artificially inflating Stop Loss (Default: $25).
                   </p>
                 </div>
 
@@ -2034,8 +2173,8 @@ export default function ConfigPage({
                   <label className="text-xs font-mono text-slate-400 uppercase">Min Stop Loss (Price % Floor)</label>
                   <input
                     type="number"
-                    step="0.01"
-                    value={riskConfig.min_stop_loss_distance_pct}
+                    step="0.005"
+                    value={riskConfig.min_stop_loss_distance_pct ?? 0.035}
                     onChange={(e) => {
                       const parsed = parseInputNumber(e.target.value, true);
                       if (typeof parsed === "number") {
@@ -2047,7 +2186,7 @@ export default function ConfigPage({
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Absolute minimum stop loss percentage from the entry price. Protects trade executions from micro stop placements that fail to accommodate regular spread volatility and local exchange order routing slippage (Default: 0.12%).
+                    Minimum stop loss percentage from the entry price. Protects trade executions from sub-tick spread volatility without forcing oversized losses (Default: 0.035%).
                   </p>
                 </div>
 

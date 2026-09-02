@@ -3711,6 +3711,66 @@ export default function ConfigPage({
                 </div>
                 <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
                   <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Anti-Falling Knife Lockout (Consecutive Dump Protection)</span>
+                    <p className="text-[10px] text-slate-400">Blocks entry if consecutive solid contrary candles are slicing into the FVG, requiring a closed reversal candle or hammer pin bar before entry.</p>
+                  </div>
+                  <button
+                    id="fvg_anti_falling_knife_lockout_toggle"
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, fvg_anti_falling_knife_lockout: msConfig.fvg_anti_falling_knife_lockout === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.fvg_anti_falling_knife_lockout !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.fvg_anti_falling_knife_lockout !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Enforce 50% Consequent Encroachment (CE) Defense</span>
+                    <p className="text-[10px] text-slate-400">Invalidates entry if the candle closes past the 50% CE midpoint without immediate institutional wick rejection.</p>
+                  </div>
+                  <button
+                    id="fvg_consequent_encroachment_filter_toggle"
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, fvg_consequent_encroachment_filter: msConfig.fvg_consequent_encroachment_filter === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.fvg_consequent_encroachment_filter !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.fvg_consequent_encroachment_filter !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Structural FVG Stop Loss Anchoring</span>
+                    <p className="text-[10px] text-slate-400">Anchors Stop Loss beyond the outer FVG boundary + 0.15x ATR safety buffer, maintaining strict R:R targets.</p>
+                  </div>
+                  <button
+                    id="fvg_structural_stop_loss_enabled_toggle"
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, fvg_structural_stop_loss_enabled: msConfig.fvg_structural_stop_loss_enabled === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.fvg_structural_stop_loss_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.fvg_structural_stop_loss_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
+                  <div className="space-y-0.5">
                     <span className="text-xs font-sans font-semibold text-slate-800">Require Rejection Candlestick on Order Block Retest</span>
                     <p className="text-[10px] text-slate-400">Demands a confirmed rejection candlestick pattern (e.g. Pin Bar, Engulfing, Harami, Hammer) inside the Order Block zone before market execution.</p>
                   </div>

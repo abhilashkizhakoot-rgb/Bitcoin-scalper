@@ -5321,6 +5321,9 @@ class TradingEngine {
     const setupCandle = this.candles1m[setupIdx];
     const currentCandle = this.candles1m[lastIdx];
 
+    const isAntiFallingKnifeActive = ms.fvg_anti_falling_knife_lockout !== false;
+    const isCeFilterActive = ms.fvg_consequent_encroachment_filter !== false;
+
     if (direction === "LONG") {
       // Strictly require validated bullish rejection candlestick confirmation
       const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtr);
@@ -5365,6 +5368,66 @@ class TradingEngine {
             const isNotOverextended = currentPrice <= fvgTop + 0.35 * currentAtr;
 
             if (hasTouchedFvg && !isBroken && isNotOverextended) {
+              // --- Institutional SMC Rule 1: Anti-Falling Knife Lockout ---
+              // Block entries if the last 2 completed candles are consecutive solid red dumping candles without a completed reversal
+              if (isAntiFallingKnifeActive && setupCandle && confirmCandle) {
+                const isSetupRed = setupCandle.close < setupCandle.open;
+                const isConfirmRed = confirmCandle.close < confirmCandle.open;
+                const confirmRange = confirmCandle.high - confirmCandle.low;
+                const confirmLowerWick = Math.min(confirmCandle.open, confirmCandle.close) - confirmCandle.low;
+                const isHammerReversal = confirmRange > 0 && (confirmLowerWick / confirmRange >= 0.40) && (confirmCandle.close >= confirmCandle.low + 0.35 * confirmRange);
+
+                if (isSetupRed && isConfirmRed && !isHammerReversal) {
+                  return {
+                    isFvgValid: false,
+                    fvgLevel: targetEntry,
+                    consequentEncroachment: ce,
+                    fvgBottom,
+                    fvgTop,
+                    isDisplacementConfirmed: isDisplacement,
+                    hasStructureShift,
+                    description: `Awaiting Bullish Reversal: Consecutive falling red candles slicing through FVG ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}). Entry blocked until bullish reversal candle closes.`,
+                  };
+                }
+              }
+
+              // --- Institutional SMC Rule 2: Consequent Encroachment (50% CE) Invalidation ---
+              // If latest closed candle breached and closed below CE as a weak/bearish candle, the 50% discount equilibrium is compromised
+              if (isCeFilterActive && confirmCandle) {
+                const confirmRange = confirmCandle.high - confirmCandle.low;
+                const confirmLowerWick = Math.min(confirmCandle.open, confirmCandle.close) - confirmCandle.low;
+                const isHammerReversal = confirmRange > 0 && (confirmLowerWick / confirmRange >= 0.35) && (confirmCandle.close >= confirmCandle.low + 0.35 * confirmRange);
+                const isGreenClose = confirmCandle.close > confirmCandle.open;
+
+                if (confirmCandle.close < ce - 0.05 * currentAtr && !isHammerReversal && !isGreenClose) {
+                  return {
+                    isFvgValid: false,
+                    fvgLevel: targetEntry,
+                    consequentEncroachment: ce,
+                    fvgBottom,
+                    fvgTop,
+                    isDisplacementConfirmed: isDisplacement,
+                    hasStructureShift,
+                    description: `Awaiting FVG CE Reclamation: Candle closed at $${confirmCandle.close.toFixed(2)} below 50% Consequent Encroachment ($${ce.toFixed(2)}). Equilibrium defense required.`,
+                  };
+                }
+              }
+
+              // --- Institutional SMC Rule 3: Active Tick Low Violation Check ---
+              // If active price has already punched below the low of the rejection candle, rejection has failed
+              if (confirmCandle && currentPrice < confirmCandle.low - 0.05 * currentAtr) {
+                return {
+                  isFvgValid: false,
+                  fvgLevel: targetEntry,
+                  consequentEncroachment: ce,
+                  fvgBottom,
+                  fvgTop,
+                  isDisplacementConfirmed: isDisplacement,
+                  hasStructureShift,
+                  description: `Awaiting FVG Support Stabilization: Real-time price ($${currentPrice.toFixed(2)}) broke below rejection candle low ($${confirmCandle.low.toFixed(2)}).`,
+                };
+              }
+
               // Verify that the rejection pattern candle(s) wicked into / tested the CE / FVG zone
               const isRejectionAtFvg = (confirmCandle && confirmCandle.low <= ceEntryLimit + 0.08 * currentAtr && confirmCandle.high >= fvgBottom - 0.10 * currentAtr) ||
                                        (setupCandle && setupCandle.low <= ceEntryLimit + 0.08 * currentAtr && setupCandle.high >= fvgBottom - 0.10 * currentAtr) ||
@@ -5373,7 +5436,14 @@ class TradingEngine {
               // Strict candlestick confirmation check: must have confirmed bullish pattern and close holding above FVG support
               const isCandleHoldingSupport = confirmCandle ? confirmCandle.close >= fvgBottom - 0.10 * currentAtr : true;
 
-              if (rejectionCheck.confirmed && isRejectionAtFvg && isCandleHoldingSupport) {
+              // Ensure latest completed candle shows bullish defense (green or hammer rejection)
+              const confirmRange = confirmCandle ? (confirmCandle.high - confirmCandle.low) : 0;
+              const confirmLowerWick = confirmCandle ? (Math.min(confirmCandle.open, confirmCandle.close) - confirmCandle.low) : 0;
+              const isConfirmGreen = confirmCandle ? confirmCandle.close > confirmCandle.open : false;
+              const isConfirmHammer = confirmRange > 0 && (confirmLowerWick / confirmRange >= 0.35) && (confirmCandle.close >= confirmCandle.low + 0.35 * confirmRange);
+              const hasBullishDefense = isConfirmGreen || isConfirmHammer;
+
+              if (rejectionCheck.confirmed && isRejectionAtFvg && isCandleHoldingSupport && hasBullishDefense) {
                 // In STRONG_DOWNTREND, Long FVG requires confirmed Market Structure Shift (MSS/CHoCH)
                 if (this.currentRegime === MarketRegime.STRONG_DOWNTREND && !hasStructureShift) {
                   return {
@@ -5419,7 +5489,7 @@ class TradingEngine {
                   fvgTop,
                   isDisplacementConfirmed: isDisplacement,
                   hasStructureShift,
-                  description: `Awaiting Bullish Candlestick Confirmation: Price ($${currentPrice.toFixed(2)}) retested FVG CE zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) -- awaiting confirmed bullish rejection candlestick pattern (e.g. Pin Bar, Engulfing, Morning Star, Harami).`,
+                  description: `Awaiting Bullish Candlestick Confirmation: Price ($${currentPrice.toFixed(2)}) retested FVG CE zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) -- awaiting confirmed green close or bullish rejection pin bar.`,
                 };
               }
             }
@@ -5470,6 +5540,64 @@ class TradingEngine {
             const isNotOverextended = currentPrice >= fvgBottom - 0.35 * currentAtr;
 
             if (hasTouchedFvg && !isBroken && isNotOverextended) {
+              // --- Institutional SMC Rule 1: Anti-Rising Knife Lockout ---
+              // Block entries if the last 2 completed candles are consecutive solid green pumping candles without a completed reversal
+              if (isAntiFallingKnifeActive && setupCandle && confirmCandle) {
+                const isSetupGreen = setupCandle.close > setupCandle.open;
+                const isConfirmGreen = confirmCandle.close > confirmCandle.open;
+                const confirmRange = confirmCandle.high - confirmCandle.low;
+                const confirmUpperWick = confirmCandle.high - Math.max(confirmCandle.open, confirmCandle.close);
+                const isStarReversal = confirmRange > 0 && (confirmUpperWick / confirmRange >= 0.40) && (confirmCandle.close <= confirmCandle.low + 0.65 * confirmRange);
+
+                if (isSetupGreen && isConfirmGreen && !isStarReversal) {
+                  return {
+                    isFvgValid: false,
+                    fvgLevel: targetEntry,
+                    consequentEncroachment: ce,
+                    fvgBottom,
+                    fvgTop,
+                    isDisplacementConfirmed: isDisplacement,
+                    hasStructureShift,
+                    description: `Awaiting Bearish Reversal: Consecutive rising green candles slicing through FVG ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}). Entry blocked until bearish reversal candle closes.`,
+                  };
+                }
+              }
+
+              // --- Institutional SMC Rule 2: Consequent Encroachment (50% CE) Invalidation ---
+              if (isCeFilterActive && confirmCandle) {
+                const confirmRange = confirmCandle.high - confirmCandle.low;
+                const confirmUpperWick = confirmCandle.high - Math.max(confirmCandle.open, confirmCandle.close);
+                const isStarReversal = confirmRange > 0 && (confirmUpperWick / confirmRange >= 0.35) && (confirmCandle.close <= confirmCandle.low + 0.65 * confirmRange);
+                const isRedClose = confirmCandle.close < confirmCandle.open;
+
+                if (confirmCandle.close > ce + 0.05 * currentAtr && !isStarReversal && !isRedClose) {
+                  return {
+                    isFvgValid: false,
+                    fvgLevel: targetEntry,
+                    consequentEncroachment: ce,
+                    fvgBottom,
+                    fvgTop,
+                    isDisplacementConfirmed: isDisplacement,
+                    hasStructureShift,
+                    description: `Awaiting FVG CE Defense: Candle closed at $${confirmCandle.close.toFixed(2)} above 50% Consequent Encroachment ($${ce.toFixed(2)}). Premium defense required.`,
+                  };
+                }
+              }
+
+              // --- Institutional SMC Rule 3: Active Tick High Violation Check ---
+              if (confirmCandle && currentPrice > confirmCandle.high + 0.05 * currentAtr) {
+                return {
+                  isFvgValid: false,
+                  fvgLevel: targetEntry,
+                  consequentEncroachment: ce,
+                  fvgBottom,
+                  fvgTop,
+                  isDisplacementConfirmed: isDisplacement,
+                  hasStructureShift,
+                  description: `Awaiting FVG Resistance Stabilization: Real-time price ($${currentPrice.toFixed(2)}) broke above rejection candle high ($${confirmCandle.high.toFixed(2)}).`,
+                };
+              }
+
               // Verify that the rejection pattern candle(s) wicked into / tested the CE / FVG zone
               const isRejectionAtFvg = (confirmCandle && confirmCandle.high >= ceEntryLimit - 0.08 * currentAtr && confirmCandle.low <= fvgTop + 0.10 * currentAtr) ||
                                        (setupCandle && setupCandle.high >= ceEntryLimit - 0.08 * currentAtr && setupCandle.low <= fvgTop + 0.10 * currentAtr) ||
@@ -5478,7 +5606,14 @@ class TradingEngine {
               // Strict candlestick confirmation check: must have confirmed bearish pattern and close holding below FVG resistance
               const isCandleHoldingResistance = confirmCandle ? confirmCandle.close <= fvgTop + 0.10 * currentAtr : true;
 
-              if (rejectionCheck.confirmed && isRejectionAtFvg && isCandleHoldingResistance) {
+              // Ensure latest completed candle shows bearish defense (red or shooting star rejection)
+              const confirmRange = confirmCandle ? (confirmCandle.high - confirmCandle.low) : 0;
+              const confirmUpperWick = confirmCandle ? (confirmCandle.high - Math.max(confirmCandle.open, confirmCandle.close)) : 0;
+              const isConfirmRed = confirmCandle ? confirmCandle.close < confirmCandle.open : false;
+              const isConfirmStar = confirmRange > 0 && (confirmUpperWick / confirmRange >= 0.35) && (confirmCandle.close <= confirmCandle.low + 0.65 * confirmRange);
+              const hasBearishDefense = isConfirmRed || isConfirmStar;
+
+              if (rejectionCheck.confirmed && isRejectionAtFvg && isCandleHoldingResistance && hasBearishDefense) {
                 // In STRONG_UPTREND, Short FVG requires confirmed Market Structure Shift (MSS/CHoCH)
                 if (this.currentRegime === MarketRegime.STRONG_UPTREND && !hasStructureShift) {
                   return {
@@ -5524,7 +5659,7 @@ class TradingEngine {
                   fvgTop,
                   isDisplacementConfirmed: isDisplacement,
                   hasStructureShift,
-                  description: `Awaiting Bearish Candlestick Confirmation: Price ($${currentPrice.toFixed(2)}) retested FVG CE zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) -- awaiting confirmed bearish rejection candlestick pattern (e.g. Pin Bar, Engulfing, Evening Star, Harami).`,
+                  description: `Awaiting Bearish Candlestick Confirmation: Price ($${currentPrice.toFixed(2)}) retested FVG CE zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) -- awaiting confirmed red close or shooting star pin bar.`,
                 };
               }
             }
@@ -10500,6 +10635,32 @@ class TradingEngine {
           minSlDistance
         );
 
+    // --- STRUCTURAL FVG / ORDER BLOCK STOP LOSS ANCHORING ---
+    let structuralSlDistance = stopLossDistance;
+    if (config.market_structure?.fvg_structural_stop_loss_enabled !== false) {
+      if (execDirection === "LONG") {
+        const fvgCheck = this.evaluateFVGSetup("LONG");
+        if (fvgCheck.isFvgValid && fvgCheck.fvgBottom > 0) {
+          // Anchor stop loss structurally below the FVG floor with a 0.15x ATR safety buffer
+          const structuralFvgSlDist = currentPrice - (fvgCheck.fvgBottom - 0.15 * lastAtr);
+          if (structuralFvgSlDist > structuralSlDistance && structuralFvgSlDist <= 2.2 * lastAtr) {
+            structuralSlDistance = structuralFvgSlDist;
+            this.log(`[SMC FVG Structural SL]: Anchored Stop Loss $${(fvgCheck.fvgBottom - 0.15 * lastAtr).toFixed(2)} structurally below FVG floor $${fvgCheck.fvgBottom.toFixed(2)} (Dist: $${structuralSlDistance.toFixed(2)})`);
+          }
+        }
+      } else if (execDirection === "SHORT") {
+        const fvgCheck = this.evaluateFVGSetup("SHORT");
+        if (fvgCheck.isFvgValid && fvgCheck.fvgTop > 0) {
+          // Anchor stop loss structurally above the FVG ceiling with a 0.15x ATR safety buffer
+          const structuralFvgSlDist = (fvgCheck.fvgTop + 0.15 * lastAtr) - currentPrice;
+          if (structuralFvgSlDist > structuralSlDistance && structuralFvgSlDist <= 2.2 * lastAtr) {
+            structuralSlDistance = structuralFvgSlDist;
+            this.log(`[SMC FVG Structural SL]: Anchored Stop Loss $${(fvgCheck.fvgTop + 0.15 * lastAtr).toFixed(2)} structurally above FVG ceiling $${fvgCheck.fvgTop.toFixed(2)} (Dist: $${structuralSlDistance.toFixed(2)})`);
+          }
+        }
+      }
+    }
+
     // Use the configured default quantity (fixed standard trade size)
     const sizeMultiplier = this.getTradeSizeMultiplier();
     const baseQty = config.risk_management.default_quantity_btc || 0.001;
@@ -10520,15 +10681,15 @@ class TradingEngine {
 
     const isAtrScalpMode = config.risk_management.take_profit_mode !== "RR_RATIO";
     const rawTpDist = isAtrScalpMode
-      ? Math.max(lastAtr * effectiveTpAtrMult, stopLossDistance * minRRMultiplier)
-      : stopLossDistance * Math.max(config.risk_management.take_profit_ratio, minRRMultiplier);
+      ? Math.max(lastAtr * effectiveTpAtrMult, structuralSlDistance * minRRMultiplier)
+      : structuralSlDistance * Math.max(config.risk_management.take_profit_ratio, minRRMultiplier);
 
     const takeProfitDistance = Math.max(rawTpDist, minFeeCoverDistance);
 
     // --- CONTEXT-AWARE VOLUME PROFILE SL / TP TARGETING ---
     // Align TP with next opposing High-Volume Node (POC/HVN) and SL behind local supporting Volume Node
     let vpTargetTpDistance = takeProfitDistance;
-    let vpTargetSlDistance = stopLossDistance;
+    let vpTargetSlDistance = structuralSlDistance;
 
     const vpCheck = this.evaluateMultiTimeframeVolumeProfile(
       execDirection,

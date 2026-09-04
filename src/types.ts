@@ -319,13 +319,6 @@ export interface StrategyConfig {
     liquidity_sweep_min_wick_ratio?: number; // Minimum wick ratio for sweep candle (default: 0.35)
     liquidity_sweep_volume_mult?: number; // Minimum volume multiplier for liquidity sweep (default: 1.0)
     choch_confirmation_enabled?: boolean; // Require Change of Character (CHoCH) post-sweep confirmation
-    fvg_strategy_enabled?: boolean; // Enable Fair Value Gap (FVG) / Inefficiency Retest Strategy
-    fvg_min_gap_atr_ratio?: number; // Minimum FVG gap size relative to ATR (default 0.12)
-    fvg_entry_level?: "BOUNDARY" | "CONSEQUENT_ENCROACHMENT"; // Entry on FVG boundary or 50% midpoint (CE)
-    fvg_require_candlestick_rejection?: boolean; // Require Rejection Candlestick Pattern on FVG Retest (default: true)
-    fvg_consequent_encroachment_filter?: boolean; // Require 50% CE defense and block closes beyond CE (default: true)
-    fvg_anti_falling_knife_lockout?: boolean; // Block FVG entry if consecutive contrary candles are actively slicing into gap (default: true)
-    fvg_structural_stop_loss_enabled?: boolean; // Anchor Stop Loss structurally beyond FVG boundary (default: true)
     eqh_eql_detection_enabled?: boolean; // Enable Equal Highs / Equal Lows Liquidity Pool Detector
     eqh_eql_tolerance_pct?: number; // Tolerance % for EQH/EQL touches (default 0.08%)
     asian_session_sweep_enabled?: boolean; // Enable Asian Session High/Low Sweep Strategy

@@ -1346,8 +1346,6 @@ class TradingEngine {
       // SMC, Range Reversal, VWAP Band Rejection (Setup 10), EQH/EQL Double Touch (Setup 11), CVD Absorption (Setup 12), and OI Flush (Setup 13) checks
       const smcSweepLong = this.detectLiquiditySweep("LONG");
       const smcSweepShort = this.detectLiquiditySweep("SHORT");
-      const smcFvgLong = this.evaluateFVGSetup("LONG");
-      const smcFvgShort = this.evaluateFVGSetup("SHORT");
       const vwapReversalLong = this.evaluateVwapBandRejectionSetup("LONG");
       const vwapReversalShort = this.evaluateVwapBandRejectionSetup("SHORT");
       const eqhEqlLong = this.evaluateEqhEqlDoubleTouchSetup("LONG");
@@ -1369,9 +1367,9 @@ class TradingEngine {
         signalDirection = "LONG";
       } else if (oiFlushShort.isValid || cvdAbsorptionShort.isValid || isRangeShortReversal || vwapReversalShort.isValid || eqhEqlShort.isValid || (exhaustionShort.isExhausted && probabilityShort >= 0.48)) {
         signalDirection = "SHORT";
-      } else if (smcSweepLong.isSweep || smcFvgLong.isFvgValid) {
+      } else if (smcSweepLong.isSweep) {
         signalDirection = "LONG";
-      } else if (smcSweepShort.isSweep || smcFvgShort.isFvgValid) {
+      } else if (smcSweepShort.isSweep) {
         signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
@@ -1428,8 +1426,6 @@ class TradingEngine {
       // Multi-factor intelligent direction assessment (including SMC & Microstructural Setups)
       const longSweepSignal = this.detectLiquiditySweep("LONG");
       const shortSweepSignal = this.detectLiquiditySweep("SHORT");
-      const smcFvgLong = this.evaluateFVGSetup("LONG");
-      const smcFvgShort = this.evaluateFVGSetup("SHORT");
       const cvdAbsorptionLong = this.evaluateCvdAbsorptionDivergenceSetup("LONG");
       const cvdAbsorptionShort = this.evaluateCvdAbsorptionDivergenceSetup("SHORT");
       const oiFlushLong = this.evaluateOiFlushCascadeFadeSetup("LONG");
@@ -1441,33 +1437,32 @@ class TradingEngine {
       const upperWickExhaustion = this.evaluateDirectionalExhaustionWicks("LONG");
       const lowerWickExhaustion = this.evaluateDirectionalExhaustionWicks("SHORT");
 
-      if (oiFlushLong.isValid) {
+      const isStrongUptrend = this.currentRegime === MarketRegime.STRONG_UPTREND;
+      const isStrongDowntrend = this.currentRegime === MarketRegime.STRONG_DOWNTREND;
+
+      if (!isStrongDowntrend && oiFlushLong.isValid) {
         signalDirection = "LONG";
-      } else if (oiFlushShort.isValid) {
+      } else if (!isStrongUptrend && oiFlushShort.isValid) {
         signalDirection = "SHORT";
-      } else if (cvdAbsorptionLong.isValid) {
+      } else if (!isStrongDowntrend && cvdAbsorptionLong.isValid) {
         signalDirection = "LONG";
-      } else if (cvdAbsorptionShort.isValid) {
+      } else if (!isStrongUptrend && cvdAbsorptionShort.isValid) {
         signalDirection = "SHORT";
-      } else if (longSweepSignal.isSweep && probabilityLong >= 0.50) {
+      } else if (!isStrongDowntrend && longSweepSignal.isSweep && probabilityLong >= 0.50) {
         signalDirection = "LONG";
-      } else if (shortSweepSignal.isSweep && probabilityShort >= 0.50) {
+      } else if (!isStrongUptrend && shortSweepSignal.isSweep && probabilityShort >= 0.50) {
         signalDirection = "SHORT";
-      } else if (smcFvgLong.isFvgValid) {
+      } else if (!isStrongDowntrend && exhaustionLong.isExhausted && probabilityLong >= 0.48) {
         signalDirection = !upperWickExhaustion.isExhausted ? "LONG" : "NEUTRAL";
-      } else if (smcFvgShort.isFvgValid) {
+      } else if (!isStrongUptrend && exhaustionShort.isExhausted && probabilityShort >= 0.48) {
         signalDirection = !lowerWickExhaustion.isExhausted ? "SHORT" : "NEUTRAL";
-      } else if (exhaustionLong.isExhausted && probabilityLong >= 0.48) {
+      } else if (!isStrongDowntrend && isUptrendAligned && (hasValidPushbackLong || isScalperBreakoutLongAllowed) && isNotLongBreakout && probabilityLong >= 0.58) {
         signalDirection = !upperWickExhaustion.isExhausted ? "LONG" : "NEUTRAL";
-      } else if (exhaustionShort.isExhausted && probabilityShort >= 0.48) {
+      } else if (!isStrongUptrend && isDowntrendAligned && (hasValidPushbackShort || isScalperBreakdownShortAllowed) && isNotShortBreakdown && probabilityShort >= 0.58) {
         signalDirection = !lowerWickExhaustion.isExhausted ? "SHORT" : "NEUTRAL";
-      } else if (isUptrendAligned && (hasValidPushbackLong || isScalperBreakoutLongAllowed) && isNotLongBreakout && probabilityLong >= 0.58) {
+      } else if (!isStrongDowntrend && isUptrendAligned && (probabilityLong >= 0.55 || (this.orderFlowStats.takerBuyRatio >= 0.54 && currentRsi >= 45))) {
         signalDirection = !upperWickExhaustion.isExhausted ? "LONG" : "NEUTRAL";
-      } else if (isDowntrendAligned && (hasValidPushbackShort || isScalperBreakdownShortAllowed) && isNotShortBreakdown && probabilityShort >= 0.58) {
-        signalDirection = !lowerWickExhaustion.isExhausted ? "SHORT" : "NEUTRAL";
-      } else if (isUptrendAligned && (probabilityLong >= 0.55 || (this.orderFlowStats.takerBuyRatio >= 0.54 && currentRsi >= 45))) {
-        signalDirection = !upperWickExhaustion.isExhausted ? "LONG" : "NEUTRAL";
-      } else if (isDowntrendAligned && (probabilityShort >= 0.55 || (this.orderFlowStats.takerBuyRatio <= 0.46 && currentRsi <= 55))) {
+      } else if (!isStrongUptrend && isDowntrendAligned && (probabilityShort >= 0.55 || (this.orderFlowStats.takerBuyRatio <= 0.46 && currentRsi <= 55))) {
         signalDirection = !lowerWickExhaustion.isExhausted ? "SHORT" : "NEUTRAL";
       } else {
         signalDirection = "NEUTRAL";
@@ -1514,8 +1509,8 @@ class TradingEngine {
                           (signalDirection === "SHORT" && this.evaluateVwapBandRejectionSetup("SHORT").isValid);
     const smcEqhEqlActive = (signalDirection === "LONG" && this.evaluateEqhEqlDoubleTouchSetup("LONG").isValid) ||
                             (signalDirection === "SHORT" && this.evaluateEqhEqlDoubleTouchSetup("SHORT").isValid);
-    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFVGSetup("LONG").isFvgValid || this.evaluateFailedAuctionSetup("LONG").isValid || smcVwapActive || smcEqhEqlActive)) ||
-                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFVGSetup("SHORT").isFvgValid || this.evaluateFailedAuctionSetup("SHORT").isValid || smcVwapActive || smcEqhEqlActive));
+    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFailedAuctionSetup("LONG").isValid || smcVwapActive || smcEqhEqlActive)) ||
+                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFailedAuctionSetup("SHORT").isValid || smcVwapActive || smcEqhEqlActive));
 
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY && !isSmcActive) {
       return {
@@ -1597,8 +1592,7 @@ class TradingEngine {
     const regimeAligned =
       (signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
       (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
-      this.currentRegime === MarketRegime.HIGH_VOLATILITY ||
-      isSmcActive;
+      this.currentRegime === MarketRegime.HIGH_VOLATILITY;
 
     const isRegimeSoftened = false;
 
@@ -1978,32 +1972,46 @@ class TradingEngine {
 
 
 
-    // C17: Binance Order Flow Confirmation (Hard Validation - No AI Softening)
+    // C17: Binance Order Flow Confirmation (Hard Validation - Directional Delta & CVD Alignment)
     let ofMet = true;
     const flowRes = this.getOrderFlowScore(signalDirection);
     let ofVal = `Score: ${flowRes.score}/100 [${flowRes.label}] | Taker Buy: ${(flowRes.takerBuyRatio * 100).toFixed(1)}% | Imbalance: ${(flowRes.imbalanceRatio * 100).toFixed(1)}%`;
-    let ofReq = "Dynamic Score >= 35/100 & Directional Taker Vol >= 40.0% (Hard Gate - No AI Softening)";
+    let ofReq = "Dynamic Score >= 35/100, Directional Taker Vol >= 45.0% & CVD Alignment (Hard Gate)";
+
+    const netCVD = this.orderFlowStats ? this.orderFlowStats.netCVD : 0;
 
     if (signalDirection === "LONG") {
-      const hasMinTakerBuy = flowRes.takerBuyRatio >= 0.40;
+      const hasMinTakerBuy = flowRes.takerBuyRatio >= 0.45;
       const hasMinScore = flowRes.score >= 35;
-      ofMet = hasMinTakerBuy && hasMinScore;
+      const notOpposingCvd = netCVD >= -0.20 || flowRes.takerBuyRatio >= 0.52;
+      ofMet = hasMinTakerBuy && hasMinScore && notOpposingCvd;
       if (!ofMet) {
-        const failReason = !hasMinTakerBuy 
-          ? `Taker Buy ${(flowRes.takerBuyRatio * 100).toFixed(1)}% < 40.0% minimum` 
-          : `Order Flow score ${flowRes.score}/100 < 35`;
+        let failReason = "";
+        if (!hasMinTakerBuy) {
+          failReason = `Taker Buy ${(flowRes.takerBuyRatio * 100).toFixed(1)}% < 45.0% minimum`;
+        } else if (!notOpposingCvd) {
+          failReason = `Negative CVD (${netCVD.toFixed(4)} BTC) indicates ongoing sell absorption`;
+        } else {
+          failReason = `Order Flow score ${flowRes.score}/100 < 35`;
+        }
         ofVal = `${ofVal} - BLOCKED (${failReason}: ${flowRes.description})`;
       } else {
         ofVal = `${ofVal} - PASSED (Verified Institutional Buy Support)`;
       }
     } else if (signalDirection === "SHORT") {
-      const hasMinTakerSell = flowRes.takerBuyRatio <= 0.60; // Taker sell >= 40%
+      const hasMinTakerSell = flowRes.takerBuyRatio <= 0.55; // Taker sell >= 45%
       const hasMinScore = flowRes.score >= 35;
-      ofMet = hasMinTakerSell && hasMinScore;
+      const notOpposingCvd = netCVD <= 0.20 || flowRes.takerBuyRatio <= 0.48;
+      ofMet = hasMinTakerSell && hasMinScore && notOpposingCvd;
       if (!ofMet) {
-        const failReason = !hasMinTakerSell 
-          ? `Taker Sell ${((1 - flowRes.takerBuyRatio) * 100).toFixed(1)}% < 40.0% minimum` 
-          : `Order Flow score ${flowRes.score}/100 < 35`;
+        let failReason = "";
+        if (!hasMinTakerSell) {
+          failReason = `Taker Sell ${((1 - flowRes.takerBuyRatio) * 100).toFixed(1)}% < 45.0% minimum (Taker Buy ${(flowRes.takerBuyRatio * 100).toFixed(1)}% > 55.0%)`;
+        } else if (!notOpposingCvd) {
+          failReason = `Positive CVD (+${netCVD.toFixed(4)} BTC) indicates buyer absorption`;
+        } else {
+          failReason = `Order Flow score ${flowRes.score}/100 < 35`;
+        }
         ofVal = `${ofVal} - BLOCKED (${failReason}: ${flowRes.description})`;
       } else {
         ofVal = `${ofVal} - PASSED (Verified Institutional Sell Pressure)`;
@@ -2016,7 +2024,7 @@ class TradingEngine {
       current_value: ofVal,
       required: ofReq,
       description: "Applies a continuous fuzzy confluence score blending taker volume buy/sell ratio (70% weight) and order book bid/ask depth imbalance (30% weight) with hard floor validation to prevent fighting institutional flow.",
-      priority: "HIGH",
+      priority: "CRITICAL",
       softened: false,
     });
 
@@ -2136,7 +2144,7 @@ class TradingEngine {
       current_value: vpResult.val,
       required: vpResult.req,
       description: vpResult.description,
-      priority: "HIGH",
+      priority: "CRITICAL",
     });
 
     // C20: Regime Transition Cooldown
@@ -4253,7 +4261,6 @@ class TradingEngine {
       "Pullback & Retest Setup (Setup 1)": { status: "SKIP", reason: "No active breakout & retest setup" },
       "EMA Retracement / Pushback Setup (Setup 2)": { status: "SKIP", reason: "No active dynamic EMA pushback setup" },
       "Liquidity Sweep Setup (Setup 3)": { status: "SKIP", reason: "No active liquidity sweep setup" },
-      "Fair Value Gap Retest Setup (Setup 4)": { status: "SKIP", reason: "No active fair value gap setup" },
       "Range Failed Auction Reclaim Setup (Setup 9)": { status: "SKIP", reason: "No active range failed auction setup" },
       "VWAP Band Rejection Setup (Setup 10)": { status: "SKIP", reason: "No active VWAP band rejection setup" },
       "EQH/EQL Double Touch Setup (Setup 11)": { status: "SKIP", reason: "No active EQH/EQL double touch setup" },
@@ -4362,16 +4369,6 @@ class TradingEngine {
       condDict["Liquidity Sweep Setup (Setup 3)"] = { status: "SKIP", reason: sweepResult.description || "No active liquidity sweep setup" };
     }
 
-    // 2. Setup 4: Fair Value Gap Retest
-    const fvgResult = this.evaluateFVGSetup(direction);
-    if (fvgResult.isFvgValid) {
-      condDict["Fair Value Gap Retest Setup (Setup 4)"] = { status: isMtfAligned ? "PASS" : "FAIL", reason: isMtfAligned ? fvgResult.description : "Blocked by 5m MTF Trend conflict." };
-    } else if (fvgResult.description && (fvgResult.description.includes("Awaiting") || fvgResult.description.includes("awaiting"))) {
-      condDict["Fair Value Gap Retest Setup (Setup 4)"] = { status: "FAIL", reason: fvgResult.description };
-    } else {
-      condDict["Fair Value Gap Retest Setup (Setup 4)"] = { status: "SKIP", reason: fvgResult.description || "No active fair value gap setup" };
-    }
-
     // Setup 9: Range Failed Auction / SFP Reclaim
     const failedAuctionResult = this.evaluateFailedAuctionSetup(direction);
     if (failedAuctionResult.isValid) {
@@ -4440,23 +4437,6 @@ class TradingEngine {
       return getReturnObj(
         true,
         `[Setup 3 - Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`
-      );
-    }
-
-    if (fvgResult.isFvgValid && isMtfAligned) {
-      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Fair Value Gap Inefficiency Retest" };
-      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `FVG entry target confirmed at $${fvgResult.fvgLevel.toFixed(2)}` };
-      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "FVG displacement candle" };
-      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "FVG retracement entry" };
-      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: "FVG boundaries holding" };
-      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "FVG retracement entry" };
-      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "FVG retest volume within bounds" };
-      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Fair Value Gap Retest (Setup 4)" };
-      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Fair Value Gap Retest (Setup 4)" };
-
-      return getReturnObj(
-        true,
-        `[Setup 4 - Fair Value Gap Retest Confirmed] ${fvgResult.description}`
       );
     }
 
@@ -5375,386 +5355,6 @@ class TradingEngine {
           : `Awaiting Bearish CHoCH: Price ($${last.close.toFixed(2)}) must close below $${minLowBeforeSweep.toFixed(2)}.`,
       };
     }
-  }
-
-  public evaluateFVGSetup(direction: "LONG" | "SHORT"): {
-    isFvgValid: boolean;
-    fvgLevel: number;
-    consequentEncroachment: number;
-    description: string;
-    fvgBottom: number;
-    fvgTop: number;
-    isDisplacementConfirmed: boolean;
-    hasStructureShift: boolean;
-  } {
-    const config = dbManager.getConfig();
-    const ms: any = config.market_structure || {};
-    if (ms.fvg_strategy_enabled === false || this.candles1m.length < 10) {
-      return { isFvgValid: false, fvgLevel: 0, consequentEncroachment: 0, description: "FVG strategy disabled or insufficient data", fvgBottom: 0, fvgTop: 0, isDisplacementConfirmed: false, hasStructureShift: false };
-    }
-
-    const atr14 = this.calculateATR(this.candles1m, 14);
-    const lastIdx = this.candles1m.length - 1;
-    const currentAtr = atr14[lastIdx] || 50;
-    const minGap = (ms.fvg_min_gap_atr_ratio || 0.12) * currentAtr;
-    const entryLevelType = ms.fvg_entry_level || "CONSEQUENT_ENCROACHMENT";
-
-    const lookback = Math.min(15, this.candles1m.length - 2);
-    const currentPrice = this.currentPrice;
-    const closedIdx = (lastIdx === this.candles1m.length - 1 && this.candles1m.length >= 2) ? lastIdx - 1 : lastIdx;
-    const setupIdx = closedIdx >= 1 ? closedIdx - 1 : closedIdx;
-    const confirmCandle = this.candles1m[closedIdx];
-    const setupCandle = this.candles1m[setupIdx];
-    const currentCandle = this.candles1m[lastIdx];
-
-    const isAntiFallingKnifeActive = ms.fvg_anti_falling_knife_lockout !== false;
-    const isCeFilterActive = ms.fvg_consequent_encroachment_filter !== false;
-
-    if (direction === "LONG") {
-      // Strictly require validated bullish rejection candlestick confirmation
-      const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtr);
-
-      for (let i = lastIdx; i >= lastIdx - lookback; i--) {
-        const c1 = this.candles1m[i - 2];
-        const c2 = this.candles1m[i - 1]; // Middle displacement impulse candle
-        const c3 = this.candles1m[i];
-        if (c1 && c2 && c3) {
-          const gapSize = c3.low - c1.high;
-          if (gapSize >= minGap) {
-            // 1. Validate Displacement on Middle Candle (c2)
-            const c2Body = c2.close - c2.open;
-            const c2Range = c2.high - c2.low;
-            const isC2Bullish = c2.close > c2.open;
-            const isDisplacement = isC2Bullish && (c2Body >= 0.45 * currentAtr || (c2Range > 0 && c2Body / c2Range >= 0.50));
-
-            // 2. Validate Structure Shift / BOS (c2 or c3 broke above preceding micro swing high)
-            const prevSlice = this.candles1m.slice(Math.max(0, i - 6), i - 2);
-            const prevMicroHigh = prevSlice.length > 0 ? Math.max(...prevSlice.map(c => c.high)) : 0;
-            const hasStructureShift = prevMicroHigh > 0 && Math.max(c2.high, c3.high) >= prevMicroHigh;
-
-            const fvgBottom = c1.high;
-            const fvgTop = c3.low;
-            const fvgHeight = fvgTop - fvgBottom;
-            const ce = fvgBottom + fvgHeight * 0.5;
-
-            // Consequent Encroachment (CE 50% Midpoint) Calibration
-            // Enforces that price mitigates into the discount zone (at or below CE + 0.15 * fvgHeight)
-            const ceEntryLimit = entryLevelType === "CONSEQUENT_ENCROACHMENT" ? ce + 0.15 * fvgHeight : fvgTop;
-            const targetEntry = entryLevelType === "CONSEQUENT_ENCROACHMENT" ? ce : fvgTop;
-            const postFvgCandles = this.candles1m.slice(i + 1);
-            
-            // Check if price touched into the required FVG depth (reaching the CE discount zone)
-            const hasTouchedFvg = (postFvgCandles.some(c => c.low <= ceEntryLimit && c.low >= fvgBottom - 0.15 * currentAtr)) ||
-                                  (currentPrice <= ceEntryLimit && currentPrice >= fvgBottom - 0.15 * currentAtr);
-            
-            // Check if FVG was completely broken/invalidated
-            const isBroken = postFvgCandles.some(c => c.close < fvgBottom - 0.15 * currentAtr) || (currentPrice < fvgBottom - 0.15 * currentAtr);
-
-            // Prevent entries if price has already chased far away above the FVG
-            const isNotOverextended = currentPrice <= fvgTop + 0.35 * currentAtr;
-
-            if (hasTouchedFvg && !isBroken && isNotOverextended) {
-              // --- Institutional SMC Rule 1: Anti-Falling Knife Lockout ---
-              // Block entries if the last 2 completed candles are consecutive solid red dumping candles without a completed reversal
-              if (isAntiFallingKnifeActive && setupCandle && confirmCandle) {
-                const isSetupRed = setupCandle.close < setupCandle.open;
-                const isConfirmRed = confirmCandle.close < confirmCandle.open;
-                const confirmRange = confirmCandle.high - confirmCandle.low;
-                const confirmLowerWick = Math.min(confirmCandle.open, confirmCandle.close) - confirmCandle.low;
-                const isHammerReversal = confirmRange > 0 && (confirmLowerWick / confirmRange >= 0.40) && (confirmCandle.close >= confirmCandle.low + 0.35 * confirmRange);
-
-                if (isSetupRed && isConfirmRed && !isHammerReversal) {
-                  return {
-                    isFvgValid: false,
-                    fvgLevel: targetEntry,
-                    consequentEncroachment: ce,
-                    fvgBottom,
-                    fvgTop,
-                    isDisplacementConfirmed: isDisplacement,
-                    hasStructureShift,
-                    description: `Awaiting Bullish Reversal: Consecutive falling red candles slicing through FVG ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}). Entry blocked until bullish reversal candle closes.`,
-                  };
-                }
-              }
-
-              // --- Institutional SMC Rule 2: Consequent Encroachment (50% CE) Invalidation ---
-              // If latest closed candle breached and closed below CE as a weak/bearish candle, the 50% discount equilibrium is compromised
-              if (isCeFilterActive && confirmCandle) {
-                const confirmRange = confirmCandle.high - confirmCandle.low;
-                const confirmLowerWick = Math.min(confirmCandle.open, confirmCandle.close) - confirmCandle.low;
-                const isHammerReversal = confirmRange > 0 && (confirmLowerWick / confirmRange >= 0.35) && (confirmCandle.close >= confirmCandle.low + 0.35 * confirmRange);
-                const isGreenClose = confirmCandle.close > confirmCandle.open;
-
-                if (confirmCandle.close < ce - 0.05 * currentAtr && !isHammerReversal && !isGreenClose) {
-                  return {
-                    isFvgValid: false,
-                    fvgLevel: targetEntry,
-                    consequentEncroachment: ce,
-                    fvgBottom,
-                    fvgTop,
-                    isDisplacementConfirmed: isDisplacement,
-                    hasStructureShift,
-                    description: `Awaiting FVG CE Reclamation: Candle closed at $${confirmCandle.close.toFixed(2)} below 50% Consequent Encroachment ($${ce.toFixed(2)}). Equilibrium defense required.`,
-                  };
-                }
-              }
-
-              // --- Institutional SMC Rule 3: Active Tick Low Violation Check ---
-              // If active price has already punched below the low of the rejection candle, rejection has failed
-              if (confirmCandle && currentPrice < confirmCandle.low - 0.05 * currentAtr) {
-                return {
-                  isFvgValid: false,
-                  fvgLevel: targetEntry,
-                  consequentEncroachment: ce,
-                  fvgBottom,
-                  fvgTop,
-                  isDisplacementConfirmed: isDisplacement,
-                  hasStructureShift,
-                  description: `Awaiting FVG Support Stabilization: Real-time price ($${currentPrice.toFixed(2)}) broke below rejection candle low ($${confirmCandle.low.toFixed(2)}).`,
-                };
-              }
-
-              // Verify that the rejection pattern candle(s) wicked into / tested the CE / FVG zone
-              const isRejectionAtFvg = (confirmCandle && confirmCandle.low <= ceEntryLimit + 0.08 * currentAtr && confirmCandle.high >= fvgBottom - 0.10 * currentAtr) ||
-                                       (setupCandle && setupCandle.low <= ceEntryLimit + 0.08 * currentAtr && setupCandle.high >= fvgBottom - 0.10 * currentAtr) ||
-                                       (currentCandle && currentCandle.low <= ceEntryLimit + 0.08 * currentAtr && currentCandle.high >= fvgBottom - 0.10 * currentAtr);
-
-              // Strict candlestick confirmation check: must have confirmed bullish pattern and close holding above FVG support
-              const isCandleHoldingSupport = confirmCandle ? confirmCandle.close >= fvgBottom - 0.10 * currentAtr : true;
-
-              // Ensure latest completed candle shows bullish defense (green or hammer rejection)
-              const confirmRange = confirmCandle ? (confirmCandle.high - confirmCandle.low) : 0;
-              const confirmLowerWick = confirmCandle ? (Math.min(confirmCandle.open, confirmCandle.close) - confirmCandle.low) : 0;
-              const isConfirmGreen = confirmCandle ? confirmCandle.close > confirmCandle.open : false;
-              const isConfirmHammer = confirmRange > 0 && (confirmLowerWick / confirmRange >= 0.35) && (confirmCandle.close >= confirmCandle.low + 0.35 * confirmRange);
-              const hasBullishDefense = isConfirmGreen || isConfirmHammer;
-
-              if (rejectionCheck.confirmed && isRejectionAtFvg && isCandleHoldingSupport && hasBullishDefense) {
-                // In STRONG_DOWNTREND, Long FVG requires confirmed Market Structure Shift (MSS/CHoCH)
-                if (this.currentRegime === MarketRegime.STRONG_DOWNTREND && !hasStructureShift) {
-                  return {
-                    isFvgValid: false,
-                    fvgLevel: targetEntry,
-                    consequentEncroachment: ce,
-                    fvgBottom,
-                    fvgTop,
-                    isDisplacementConfirmed: isDisplacement,
-                    hasStructureShift,
-                    description: `Counter-Trend Bullish FVG Blocked in STRONG_DOWNTREND: Awaiting verified Market Structure Shift (MSS/CHoCH) break above swing high.`,
-                  };
-                }
-                const shiftText = hasStructureShift ? " [MSS/BOS Aligned]" : "";
-                const dispText = isDisplacement ? " [Displacement Confirmed]" : "";
-                return {
-                  isFvgValid: true,
-                  fvgLevel: targetEntry,
-                  consequentEncroachment: ce,
-                  fvgBottom,
-                  fvgTop,
-                  isDisplacementConfirmed: isDisplacement,
-                  hasStructureShift,
-                  description: `Bullish Fair Value Gap (FVG) Retest Confirmed via [${rejectionCheck.type}]${dispText}${shiftText}: Price ($${currentPrice.toFixed(2)}) confirmed rejection and holding unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
-                };
-              } else if (rejectionCheck.confirmed && !isRejectionAtFvg) {
-                return {
-                  isFvgValid: false,
-                  fvgLevel: targetEntry,
-                  consequentEncroachment: ce,
-                  fvgBottom,
-                  fvgTop,
-                  isDisplacementConfirmed: isDisplacement,
-                  hasStructureShift,
-                  description: `Awaiting FVG Zone Rejection: Rejection pattern formed away from FVG CE zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
-                };
-              } else {
-                return {
-                  isFvgValid: false,
-                  fvgLevel: targetEntry,
-                  consequentEncroachment: ce,
-                  fvgBottom,
-                  fvgTop,
-                  isDisplacementConfirmed: isDisplacement,
-                  hasStructureShift,
-                  description: `Awaiting Bullish Candlestick Confirmation: Price ($${currentPrice.toFixed(2)}) retested FVG CE zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) -- awaiting confirmed green close or bullish rejection pin bar.`,
-                };
-              }
-            }
-          }
-        }
-      }
-    } else {
-      // Strictly require validated bearish rejection candlestick confirmation
-      const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtr);
-
-      for (let i = lastIdx; i >= lastIdx - lookback; i--) {
-        const c1 = this.candles1m[i - 2];
-        const c2 = this.candles1m[i - 1]; // Middle displacement impulse candle
-        const c3 = this.candles1m[i];
-        if (c1 && c2 && c3) {
-          const gapSize = c1.low - c3.high;
-          if (gapSize >= minGap) {
-            // 1. Validate Displacement on Middle Candle (c2)
-            const c2Body = c2.open - c2.close;
-            const c2Range = c2.high - c2.low;
-            const isC2Bearish = c2.close < c2.open;
-            const isDisplacement = isC2Bearish && (c2Body >= 0.45 * currentAtr || (c2Range > 0 && c2Body / c2Range >= 0.50));
-
-            // 2. Validate Structure Shift / BOS (c2 or c3 broke below preceding micro swing low)
-            const prevSlice = this.candles1m.slice(Math.max(0, i - 6), i - 2);
-            const prevMicroLow = prevSlice.length > 0 ? Math.min(...prevSlice.map(c => c.low)) : 0;
-            const hasStructureShift = prevMicroLow > 0 && Math.min(c2.low, c3.low) <= prevMicroLow;
-
-            const fvgTop = c1.low;
-            const fvgBottom = c3.high;
-            const fvgHeight = fvgTop - fvgBottom;
-            const ce = fvgBottom + fvgHeight * 0.5;
-
-            // Consequent Encroachment (CE 50% Midpoint) Calibration
-            // Enforces that price mitigates into the premium zone (at or above CE - 0.15 * fvgHeight)
-            const ceEntryLimit = entryLevelType === "CONSEQUENT_ENCROACHMENT" ? ce - 0.15 * fvgHeight : fvgBottom;
-            const targetEntry = entryLevelType === "CONSEQUENT_ENCROACHMENT" ? ce : fvgBottom;
-            const postFvgCandles = this.candles1m.slice(i + 1);
-
-            // Check if price touched into the required FVG depth (reaching the CE premium zone)
-            const hasTouchedFvg = (postFvgCandles.some(c => c.high >= ceEntryLimit && c.high <= fvgTop + 0.15 * currentAtr)) ||
-                                  (currentPrice >= ceEntryLimit && currentPrice <= fvgTop + 0.15 * currentAtr);
-
-            // Check if FVG was completely broken/invalidated
-            const isBroken = postFvgCandles.some(c => c.close > fvgTop + 0.15 * currentAtr) || (currentPrice > fvgTop + 0.15 * currentAtr);
-
-            // Prevent entries if price has already chased far away below the FVG
-            const isNotOverextended = currentPrice >= fvgBottom - 0.35 * currentAtr;
-
-            if (hasTouchedFvg && !isBroken && isNotOverextended) {
-              // --- Institutional SMC Rule 1: Anti-Rising Knife Lockout ---
-              // Block entries if the last 2 completed candles are consecutive solid green pumping candles without a completed reversal
-              if (isAntiFallingKnifeActive && setupCandle && confirmCandle) {
-                const isSetupGreen = setupCandle.close > setupCandle.open;
-                const isConfirmGreen = confirmCandle.close > confirmCandle.open;
-                const confirmRange = confirmCandle.high - confirmCandle.low;
-                const confirmUpperWick = confirmCandle.high - Math.max(confirmCandle.open, confirmCandle.close);
-                const isStarReversal = confirmRange > 0 && (confirmUpperWick / confirmRange >= 0.40) && (confirmCandle.close <= confirmCandle.low + 0.65 * confirmRange);
-
-                if (isSetupGreen && isConfirmGreen && !isStarReversal) {
-                  return {
-                    isFvgValid: false,
-                    fvgLevel: targetEntry,
-                    consequentEncroachment: ce,
-                    fvgBottom,
-                    fvgTop,
-                    isDisplacementConfirmed: isDisplacement,
-                    hasStructureShift,
-                    description: `Awaiting Bearish Reversal: Consecutive rising green candles slicing through FVG ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}). Entry blocked until bearish reversal candle closes.`,
-                  };
-                }
-              }
-
-              // --- Institutional SMC Rule 2: Consequent Encroachment (50% CE) Invalidation ---
-              if (isCeFilterActive && confirmCandle) {
-                const confirmRange = confirmCandle.high - confirmCandle.low;
-                const confirmUpperWick = confirmCandle.high - Math.max(confirmCandle.open, confirmCandle.close);
-                const isStarReversal = confirmRange > 0 && (confirmUpperWick / confirmRange >= 0.35) && (confirmCandle.close <= confirmCandle.low + 0.65 * confirmRange);
-                const isRedClose = confirmCandle.close < confirmCandle.open;
-
-                if (confirmCandle.close > ce + 0.05 * currentAtr && !isStarReversal && !isRedClose) {
-                  return {
-                    isFvgValid: false,
-                    fvgLevel: targetEntry,
-                    consequentEncroachment: ce,
-                    fvgBottom,
-                    fvgTop,
-                    isDisplacementConfirmed: isDisplacement,
-                    hasStructureShift,
-                    description: `Awaiting FVG CE Defense: Candle closed at $${confirmCandle.close.toFixed(2)} above 50% Consequent Encroachment ($${ce.toFixed(2)}). Premium defense required.`,
-                  };
-                }
-              }
-
-              // --- Institutional SMC Rule 3: Active Tick High Violation Check ---
-              if (confirmCandle && currentPrice > confirmCandle.high + 0.05 * currentAtr) {
-                return {
-                  isFvgValid: false,
-                  fvgLevel: targetEntry,
-                  consequentEncroachment: ce,
-                  fvgBottom,
-                  fvgTop,
-                  isDisplacementConfirmed: isDisplacement,
-                  hasStructureShift,
-                  description: `Awaiting FVG Resistance Stabilization: Real-time price ($${currentPrice.toFixed(2)}) broke above rejection candle high ($${confirmCandle.high.toFixed(2)}).`,
-                };
-              }
-
-              // Verify that the rejection pattern candle(s) wicked into / tested the CE / FVG zone
-              const isRejectionAtFvg = (confirmCandle && confirmCandle.high >= ceEntryLimit - 0.08 * currentAtr && confirmCandle.low <= fvgTop + 0.10 * currentAtr) ||
-                                       (setupCandle && setupCandle.high >= ceEntryLimit - 0.08 * currentAtr && setupCandle.low <= fvgTop + 0.10 * currentAtr) ||
-                                       (currentCandle && currentCandle.high >= ceEntryLimit - 0.08 * currentAtr && currentCandle.low <= fvgTop + 0.10 * currentAtr);
-
-              // Strict candlestick confirmation check: must have confirmed bearish pattern and close holding below FVG resistance
-              const isCandleHoldingResistance = confirmCandle ? confirmCandle.close <= fvgTop + 0.10 * currentAtr : true;
-
-              // Ensure latest completed candle shows bearish defense (red or shooting star rejection)
-              const confirmRange = confirmCandle ? (confirmCandle.high - confirmCandle.low) : 0;
-              const confirmUpperWick = confirmCandle ? (confirmCandle.high - Math.max(confirmCandle.open, confirmCandle.close)) : 0;
-              const isConfirmRed = confirmCandle ? confirmCandle.close < confirmCandle.open : false;
-              const isConfirmStar = confirmRange > 0 && (confirmUpperWick / confirmRange >= 0.35) && (confirmCandle.close <= confirmCandle.low + 0.65 * confirmRange);
-              const hasBearishDefense = isConfirmRed || isConfirmStar;
-
-              if (rejectionCheck.confirmed && isRejectionAtFvg && isCandleHoldingResistance && hasBearishDefense) {
-                // In STRONG_UPTREND, Short FVG requires confirmed Market Structure Shift (MSS/CHoCH)
-                if (this.currentRegime === MarketRegime.STRONG_UPTREND && !hasStructureShift) {
-                  return {
-                    isFvgValid: false,
-                    fvgLevel: targetEntry,
-                    consequentEncroachment: ce,
-                    fvgBottom,
-                    fvgTop,
-                    isDisplacementConfirmed: isDisplacement,
-                    hasStructureShift,
-                    description: `Counter-Trend Bearish FVG Blocked in STRONG_UPTREND: Awaiting verified Market Structure Shift (MSS/CHoCH) break below swing low.`,
-                  };
-                }
-                const shiftText = hasStructureShift ? " [MSS/BOS Aligned]" : "";
-                const dispText = isDisplacement ? " [Displacement Confirmed]" : "";
-                return {
-                  isFvgValid: true,
-                  fvgLevel: targetEntry,
-                  consequentEncroachment: ce,
-                  fvgBottom,
-                  fvgTop,
-                  isDisplacementConfirmed: isDisplacement,
-                  hasStructureShift,
-                  description: `Bearish Fair Value Gap (FVG) Retest Confirmed via [${rejectionCheck.type}]${dispText}${shiftText}: Price ($${currentPrice.toFixed(2)}) confirmed rejection and holding unmitigated FVG zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
-                };
-              } else if (rejectionCheck.confirmed && !isRejectionAtFvg) {
-                return {
-                  isFvgValid: false,
-                  fvgLevel: targetEntry,
-                  consequentEncroachment: ce,
-                  fvgBottom,
-                  fvgTop,
-                  isDisplacementConfirmed: isDisplacement,
-                  hasStructureShift,
-                  description: `Awaiting FVG Zone Rejection: Rejection pattern formed away from FVG CE zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}).`,
-                };
-              } else {
-                return {
-                  isFvgValid: false,
-                  fvgLevel: targetEntry,
-                  consequentEncroachment: ce,
-                  fvgBottom,
-                  fvgTop,
-                  isDisplacementConfirmed: isDisplacement,
-                  hasStructureShift,
-                  description: `Awaiting Bearish Candlestick Confirmation: Price ($${currentPrice.toFixed(2)}) retested FVG CE zone ($${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}, CE: $${ce.toFixed(2)}) -- awaiting confirmed red close or shooting star pin bar.`,
-                };
-              }
-            }
-          }
-        }
-      }
-    }
-
-    return { isFvgValid: false, fvgLevel: 0, consequentEncroachment: 0, description: "No active unmitigated FVG retest", fvgBottom: 0, fvgTop: 0, isDisplacementConfirmed: false, hasStructureShift: false };
   }
 
   public detectLiquiditySweep(direction: "LONG" | "SHORT" | "NEUTRAL"): {
@@ -8299,7 +7899,6 @@ class TradingEngine {
     const isPullbackRetest = msg.includes("pullback") || msg.includes("retest") || msg.includes("mitigation");
     const isEmaRetrace = msg.includes("ema") || msg.includes("pushback") || msg.includes("bounce");
     const isLiquiditySweep = msg.includes("liquidity sweep") || msg.includes("setup 3");
-    const isFvg = msg.includes("fair value gap") || msg.includes("fvg") || msg.includes("setup 4");
     const isFailedAuction = msg.includes("failed auction") || msg.includes("sfp") || msg.includes("setup 9");
     const isCvdAbsorption = msg.includes("cvd absorption") || msg.includes("delta divergence") || msg.includes("setup 12");
     const isOiFlush = msg.includes("open interest") || msg.includes("oi flush") || msg.includes("cascade fade") || msg.includes("setup 13");
@@ -8331,11 +7930,11 @@ class TradingEngine {
       setupCategory = "Trend Retracement / Pullback Retest";
       targetRelVol = Math.min(baseMinRelVol * 0.80, 1.05); // e.g. 1.04x
       categoryDescription = "Pullback & Retest: Healthy trend retracements feature volume dry-up into support/resistance and steady retest volume (>= 1.05x).";
-    } else if (isLiquiditySweep || isFvg) {
+    } else if (isLiquiditySweep) {
       // Smart Money (SMC) Setups: Order Flow / Institutional Wick Mitigations
-      setupCategory = "Institutional SMC (Sweep / FVG)";
+      setupCategory = "Institutional SMC (Liquidity Sweep)";
       targetRelVol = Math.min(baseMinRelVol * 0.85, 1.10); // e.g. 1.10x
-      categoryDescription = "Smart Money Setup: Institutional mitigations and sweep reversals operate on targeted delta absorption, requiring baseline liquidity confirmation (>= 1.10x).";
+      categoryDescription = "Smart Money Setup: Institutional sweep reversals operate on targeted delta absorption, requiring baseline liquidity confirmation (>= 1.10x).";
     } else if (isRangeReversal) {
       // Range Mean Reversion
       setupCategory = "Range Boundary Reversal";
@@ -9634,7 +9233,7 @@ class TradingEngine {
     const msg = (structCheck?.message || "").toLowerCase();
     const isBreakoutOrSqueeze = msg.includes("breakout") || msg.includes("squeeze") || msg.includes("super strong") || msg.includes("immediate breakout");
     const isPullbackOrRetest = msg.includes("pullback") || msg.includes("retest") || msg.includes("mitigation") || msg.includes("bounce") || msg.includes("pushback");
-    const isSMCConcept = msg.includes("liquidity sweep") || msg.includes("fair value gap") || msg.includes("fvg");
+    const isSMCConcept = msg.includes("liquidity sweep");
     const isRangeReversal = (regime === MarketRegime.RANGE_BOUND) || msg.includes("range reversal") || msg.includes("ranging bullish") || msg.includes("ranging bearish");
 
     // Check if price is sitting directly inside an LVN (Low Volume Node) Acceleration Runway
@@ -9685,9 +9284,9 @@ class TradingEngine {
         if (hasSupportFloor) {
           isMet = true;
           detailMsg = `PASSED [Pullback Retest]: Supported by Heavy Horizontal Floor at $${nearSupport!.toFixed(1)}`;
-        } else if (nearResistance && (nearResistance - currentPrice) < 0.20 * atrVal) {
+        } else if (nearResistance && (nearResistance - currentPrice) < Math.max(50, 0.65 * atrVal)) {
           isMet = false;
-          detailMsg = `BLOCKED [Pullback]: Entry cramped directly under Overhead Resistance Wall at $${nearResistance.toFixed(1)}`;
+          detailMsg = `BLOCKED [Pullback]: Entry cramped directly under Overhead Resistance Wall at $${nearResistance.toFixed(1)} (runway ${(nearResistance - currentPrice).toFixed(1)} < $50 threshold)`;
         } else {
           isMet = true;
           detailMsg = `PASSED [Pullback]: Sufficient runway ($${barrierDistance.toFixed(1)}) above structural base`;
@@ -9707,9 +9306,9 @@ class TradingEngine {
         if (currentPrice <= mtProfile.val + 0.3 * atrVal) {
           isMet = true;
           detailMsg = `PASSED [Range Reversal]: Bouncing from Value Area Low ($${mtProfile.val.toFixed(1)}) targeting Session POC ($${mtProfile.poc.toFixed(1)})`;
-        } else if (nearResistance && (nearResistance - currentPrice) < 0.20 * atrVal) {
+        } else if (nearResistance && (nearResistance - currentPrice) < Math.max(50, 0.65 * atrVal)) {
           isMet = false;
-          detailMsg = `BLOCKED [Range Reversal]: Overhead resistance ceiling at $${nearResistance.toFixed(1)} limits upside`;
+          detailMsg = `BLOCKED [Range Reversal]: Overhead resistance ceiling at $${nearResistance.toFixed(1)} limits upside (distance ${(nearResistance - currentPrice).toFixed(1)} < $50 threshold)`;
         } else {
           isMet = true;
           detailMsg = `PASSED [Range]: Mean-reverting toward central value nodes`;
@@ -9756,9 +9355,9 @@ class TradingEngine {
         if (hasSupportFloor) {
           isMet = true;
           detailMsg = `PASSED [Pullback Retest]: Protected by Heavy Horizontal Ceiling at $${nearResistance!.toFixed(1)}`;
-        } else if (nearSupport && (currentPrice - nearSupport) < 0.20 * atrVal) {
+        } else if (nearSupport && (currentPrice - nearSupport) < Math.max(50, 0.65 * atrVal)) {
           isMet = false;
-          detailMsg = `BLOCKED [Pullback]: Entry cramped directly above Underhead Support Floor at $${nearSupport.toFixed(1)}`;
+          detailMsg = `BLOCKED [Pullback]: Entry cramped directly above Underhead Support Floor at $${nearSupport.toFixed(1)} (runway ${(currentPrice - nearSupport).toFixed(1)} < $50 threshold)`;
         } else {
           isMet = true;
           detailMsg = `PASSED [Pullback]: Sufficient downside runway ($${barrierDistance.toFixed(1)})`;
@@ -9778,9 +9377,9 @@ class TradingEngine {
         if (currentPrice >= mtProfile.vah - 0.3 * atrVal) {
           isMet = true;
           detailMsg = `PASSED [Range Reversal]: Rejecting off Value Area High ($${mtProfile.vah.toFixed(1)}) targeting Session POC ($${mtProfile.poc.toFixed(1)})`;
-        } else if (nearSupport && (currentPrice - nearSupport) < 0.20 * atrVal) {
+        } else if (nearSupport && (currentPrice - nearSupport) < Math.max(50, 0.65 * atrVal)) {
           isMet = false;
-          detailMsg = `BLOCKED [Range Reversal]: Underhead support floor at $${nearSupport.toFixed(1)} limits downside`;
+          detailMsg = `BLOCKED [Range Reversal]: Underhead support floor at $${nearSupport.toFixed(1)} limits downside (distance ${(currentPrice - nearSupport).toFixed(1)} < $50 threshold)`;
         } else {
           isMet = true;
           detailMsg = `PASSED [Range]: Mean-reverting toward central value nodes`;
@@ -9796,6 +9395,22 @@ class TradingEngine {
         } else {
           detailMsg = `PASSED (Neutral range spacing; Near Floor: ${nearSupport ? "$" + nearSupport.toFixed(1) : "None"}, Near Wall: ${nearResistance ? "$" + nearResistance.toFixed(1) : "None"})`;
         }
+      }
+    }
+
+    // Strict $50 Session POC & Major HVN Node Check
+    const pocHvnConflictThreshold = 50.0;
+    if (direction === "LONG") {
+      const directOverheadNode = allLiquidityNodes.find(node => node > currentPrice && (node - currentPrice) < pocHvnConflictThreshold);
+      if (directOverheadNode && relVolume < 1.35) {
+        isMet = false;
+        detailMsg = `BLOCKED [POC/HVN Conflict]: Overhead liquidity barrier at $${directOverheadNode.toFixed(1)} within $${(directOverheadNode - currentPrice).toFixed(1)} (< $50 clearance) requires Rel Vol >= 1.35 (current: ${relVolume.toFixed(2)}x)`;
+      }
+    } else if (direction === "SHORT") {
+      const directUnderheadNode = [...allLiquidityNodes].reverse().find(node => node < currentPrice && (currentPrice - node) < pocHvnConflictThreshold);
+      if (directUnderheadNode && relVolume < 1.35) {
+        isMet = false;
+        detailMsg = `BLOCKED [POC/HVN Conflict]: Underhead liquidity barrier at $${directUnderheadNode.toFixed(1)} within $${(currentPrice - directUnderheadNode).toFixed(1)} (< $50 clearance) requires Rel Vol >= 1.35 (current: ${relVolume.toFixed(2)}x)`;
       }
     }
 
@@ -10363,42 +9978,42 @@ class TradingEngine {
     }
 
     // Regime-Adaptive Dynamic Stop Loss ATR Multiplier
-    // Trending: 1.25x ATR (clean directional trends have low MAE < 0.8x ATR)
-    // Range-Bound: 1.15x ATR (tight invalidation beyond local boundary)
-    // High Volatility: 1.45x ATR (allows necessary breathing room for volatile expansions)
-    let effectiveSlAtrMult = config.risk_management.stop_loss_atr_multiplier || 1.25;
+    // Trending: 1.55x ATR (provides essential breathing room for BTC 1m noise while trailing safely)
+    // Range-Bound: 1.35x ATR (allows standard range bounce without micro-wick triggers)
+    // High Volatility: 1.75x ATR (allows necessary breathing room for volatile expansions)
+    let effectiveSlAtrMult = config.risk_management.stop_loss_atr_multiplier || 1.55;
     let effectiveTpAtrMult = config.risk_management.take_profit_atr_multiplier !== undefined
       ? config.risk_management.take_profit_atr_multiplier
-      : 1.35;
+      : 1.65;
 
     if (config.risk_management.enable_regime_adaptive_sl_tp !== false) {
       if (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.STRONG_DOWNTREND) {
         effectiveSlAtrMult = config.risk_management.sl_atr_multiplier_trending !== undefined
           ? config.risk_management.sl_atr_multiplier_trending
-          : 1.25;
+          : 1.55;
         effectiveTpAtrMult = config.risk_management.tp_atr_multiplier_trending !== undefined
           ? config.risk_management.tp_atr_multiplier_trending
-          : 1.50;
+          : 1.70;
       } else if (this.currentRegime === MarketRegime.RANGE_BOUND) {
         effectiveSlAtrMult = config.risk_management.sl_atr_multiplier_ranging !== undefined
           ? config.risk_management.sl_atr_multiplier_ranging
-          : 1.15;
+          : 1.35;
         effectiveTpAtrMult = config.risk_management.tp_atr_multiplier_ranging !== undefined
           ? config.risk_management.tp_atr_multiplier_ranging
-          : 1.15;
+          : 1.40;
       } else if (this.currentRegime === MarketRegime.HIGH_VOLATILITY) {
         effectiveSlAtrMult = config.risk_management.sl_atr_multiplier_volatile !== undefined
           ? config.risk_management.sl_atr_multiplier_volatile
-          : 1.45;
+          : 1.75;
         effectiveTpAtrMult = config.risk_management.tp_atr_multiplier_volatile !== undefined
           ? config.risk_management.tp_atr_multiplier_volatile
-          : 1.75;
+          : 2.00;
       }
     }
 
     // Enforce a sensible minimum stop loss distance floor to prevent sub-tick anomalies without overriding ATR scaling
-    const usdFloor = config.risk_management.min_stop_loss_distance_usd !== undefined ? config.risk_management.min_stop_loss_distance_usd : 25;
-    const pctFloorVal = config.risk_management.min_stop_loss_distance_pct !== undefined ? config.risk_management.min_stop_loss_distance_pct : 0.035;
+    const usdFloor = config.risk_management.min_stop_loss_distance_usd !== undefined ? config.risk_management.min_stop_loss_distance_usd : 35;
+    const pctFloorVal = config.risk_management.min_stop_loss_distance_pct !== undefined ? config.risk_management.min_stop_loss_distance_pct : 0.045;
     const minSlDistance = Math.max(usdFloor, currentPrice * (pctFloorVal / 100));
     
     const isStaticSl = config.risk_management.static_stop_loss_enabled === true;
@@ -10411,31 +10026,7 @@ class TradingEngine {
           minSlDistance
         );
 
-    // --- STRUCTURAL FVG STOP LOSS ANCHORING ---
-    let structuralSlDistance = stopLossDistance;
-    if (config.market_structure?.fvg_structural_stop_loss_enabled !== false) {
-      if (execDirection === "LONG") {
-        const fvgCheck = this.evaluateFVGSetup("LONG");
-        if (fvgCheck.isFvgValid && fvgCheck.fvgBottom > 0) {
-          // Anchor stop loss structurally below the FVG floor with a 0.15x ATR safety buffer
-          const structuralFvgSlDist = currentPrice - (fvgCheck.fvgBottom - 0.15 * lastAtr);
-          if (structuralFvgSlDist > structuralSlDistance && structuralFvgSlDist <= 2.2 * lastAtr) {
-            structuralSlDistance = structuralFvgSlDist;
-            this.log(`[SMC FVG Structural SL]: Anchored Stop Loss $${(fvgCheck.fvgBottom - 0.15 * lastAtr).toFixed(2)} structurally below FVG floor $${fvgCheck.fvgBottom.toFixed(2)} (Dist: $${structuralSlDistance.toFixed(2)})`);
-          }
-        }
-      } else if (execDirection === "SHORT") {
-        const fvgCheck = this.evaluateFVGSetup("SHORT");
-        if (fvgCheck.isFvgValid && fvgCheck.fvgTop > 0) {
-          // Anchor stop loss structurally above the FVG ceiling with a 0.15x ATR safety buffer
-          const structuralFvgSlDist = (fvgCheck.fvgTop + 0.15 * lastAtr) - currentPrice;
-          if (structuralFvgSlDist > structuralSlDistance && structuralFvgSlDist <= 2.2 * lastAtr) {
-            structuralSlDistance = structuralFvgSlDist;
-            this.log(`[SMC FVG Structural SL]: Anchored Stop Loss $${(fvgCheck.fvgTop + 0.15 * lastAtr).toFixed(2)} structurally above FVG ceiling $${fvgCheck.fvgTop.toFixed(2)} (Dist: $${structuralSlDistance.toFixed(2)})`);
-          }
-        }
-      }
-    }
+    const structuralSlDistance = stopLossDistance;
 
     // Use the configured default quantity (fixed standard trade size)
     const sizeMultiplier = this.getTradeSizeMultiplier();

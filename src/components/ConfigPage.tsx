@@ -481,7 +481,7 @@ export default function ConfigPage({
     
     // Calculate new mandatory gates list
     let currentMandatory = generalConfig.mandatory_gates ? [...generalConfig.mandatory_gates] : [
-      "preflight", "timing", "structure", "atr", "regime_cooldown"
+      "preflight", "timing", "structure", "atr", "regime_cooldown", "choppy", "orderflow", "volume_profile"
     ];
     if (mode === "MANDATORY") {
       if (!currentMandatory.includes(gateId)) currentMandatory.push(gateId);
@@ -491,7 +491,7 @@ export default function ConfigPage({
 
     // Calculate new weighted gates list
     let currentWeighted = generalConfig.weighted_gates ? [...generalConfig.weighted_gates] : [
-      "catboost", "regime", "trend", "volume", "vwap", "wedge", "orderflow", "squeeze", "orderbook", "volume_profile"
+      "catboost", "regime", "trend", "volume", "vwap", "wedge", "squeeze", "orderbook", "adx", "ema100"
     ];
     if (mode === "WEIGHTED") {
       if (!currentWeighted.includes(gateId)) currentWeighted.push(gateId);
@@ -1997,12 +1997,12 @@ export default function ConfigPage({
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
                           <span>Stop Loss ATR</span>
-                          <span className="font-bold text-slate-700">{riskConfig.sl_atr_multiplier_trending ?? 1.25}x</span>
+                          <span className="font-bold text-slate-700">{riskConfig.sl_atr_multiplier_trending ?? 1.55}x</span>
                         </label>
                         <input
                           type="number"
                           step="0.05"
-                          value={riskConfig.sl_atr_multiplier_trending ?? 1.25}
+                          value={riskConfig.sl_atr_multiplier_trending ?? 1.55}
                           onChange={(e) => setRiskConfig({ ...riskConfig, sl_atr_multiplier_trending: parseInputNumber(e.target.value, true) })}
                           className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
                         />
@@ -2010,12 +2010,12 @@ export default function ConfigPage({
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
                           <span>Take Profit ATR</span>
-                          <span className="font-bold text-slate-700">{riskConfig.tp_atr_multiplier_trending ?? 1.50}x</span>
+                          <span className="font-bold text-slate-700">{riskConfig.tp_atr_multiplier_trending ?? 1.70}x</span>
                         </label>
                         <input
                           type="number"
                           step="0.05"
-                          value={riskConfig.tp_atr_multiplier_trending ?? 1.50}
+                          value={riskConfig.tp_atr_multiplier_trending ?? 1.70}
                           onChange={(e) => setRiskConfig({ ...riskConfig, tp_atr_multiplier_trending: parseInputNumber(e.target.value, true) })}
                           className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
                         />
@@ -2031,12 +2031,12 @@ export default function ConfigPage({
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
                           <span>Stop Loss ATR</span>
-                          <span className="font-bold text-slate-700">{riskConfig.sl_atr_multiplier_ranging ?? 1.15}x</span>
+                          <span className="font-bold text-slate-700">{riskConfig.sl_atr_multiplier_ranging ?? 1.35}x</span>
                         </label>
                         <input
                           type="number"
                           step="0.05"
-                          value={riskConfig.sl_atr_multiplier_ranging ?? 1.15}
+                          value={riskConfig.sl_atr_multiplier_ranging ?? 1.35}
                           onChange={(e) => setRiskConfig({ ...riskConfig, sl_atr_multiplier_ranging: parseInputNumber(e.target.value, true) })}
                           className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
                         />
@@ -2044,12 +2044,12 @@ export default function ConfigPage({
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
                           <span>Take Profit ATR</span>
-                          <span className="font-bold text-slate-700">{riskConfig.tp_atr_multiplier_ranging ?? 1.15}x</span>
+                          <span className="font-bold text-slate-700">{riskConfig.tp_atr_multiplier_ranging ?? 1.40}x</span>
                         </label>
                         <input
                           type="number"
                           step="0.05"
-                          value={riskConfig.tp_atr_multiplier_ranging ?? 1.15}
+                          value={riskConfig.tp_atr_multiplier_ranging ?? 1.40}
                           onChange={(e) => setRiskConfig({ ...riskConfig, tp_atr_multiplier_ranging: parseInputNumber(e.target.value, true) })}
                           className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
                         />
@@ -2065,12 +2065,12 @@ export default function ConfigPage({
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
                           <span>Stop Loss ATR</span>
-                          <span className="font-bold text-slate-700">{riskConfig.sl_atr_multiplier_volatile ?? 1.45}x</span>
+                          <span className="font-bold text-slate-700">{riskConfig.sl_atr_multiplier_volatile ?? 1.75}x</span>
                         </label>
                         <input
                           type="number"
                           step="0.05"
-                          value={riskConfig.sl_atr_multiplier_volatile ?? 1.45}
+                          value={riskConfig.sl_atr_multiplier_volatile ?? 1.75}
                           onChange={(e) => setRiskConfig({ ...riskConfig, sl_atr_multiplier_volatile: parseInputNumber(e.target.value, true) })}
                           className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
                         />
@@ -2078,12 +2078,12 @@ export default function ConfigPage({
                       <div className="space-y-1">
                         <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
                           <span>Take Profit ATR</span>
-                          <span className="font-bold text-slate-700">{riskConfig.tp_atr_multiplier_volatile ?? 1.75}x</span>
+                          <span className="font-bold text-slate-700">{riskConfig.tp_atr_multiplier_volatile ?? 2.00}x</span>
                         </label>
                         <input
                           type="number"
                           step="0.05"
-                          value={riskConfig.tp_atr_multiplier_volatile ?? 1.75}
+                          value={riskConfig.tp_atr_multiplier_volatile ?? 2.00}
                           onChange={(e) => setRiskConfig({ ...riskConfig, tp_atr_multiplier_volatile: parseInputNumber(e.target.value, true) })}
                           className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
                         />
@@ -3547,7 +3547,7 @@ export default function ConfigPage({
                   Smart Money Concepts & Liquidity Grab Trading Strategy
                 </h4>
                 <p className="text-xs text-slate-500 font-sans mt-1">
-                  Integrates institutional liquidity sweep detection, Change of Character (CHoCH) structural shifts, 3-candle Fair Value Gap (FVG) inefficiencies, Equal Highs/Lows (EQH/EQL) liquidity pools, and Asian session range sweeps.
+                  Integrates institutional liquidity sweep detection, Change of Character (CHoCH) structural shifts, Equal Highs/Lows (EQH/EQL) liquidity pools, and Asian session range sweeps.
                 </p>
               </div>
 
@@ -3621,137 +3621,7 @@ export default function ConfigPage({
                 </div>
               </div>
 
-              {/* Grid 2: Fair Value Gap (FVG) Strategy */}
-              <div className="border-t border-slate-100 pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-sans font-semibold text-slate-800">Enable Fair Value Gap (FVG) Strategy (Setup 4)</span>
-                    <p className="text-[10px] text-slate-400">Detects 3-candle price inefficiencies and trades retests into the FVG gap zone.</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setMsConfig({ ...msConfig, fvg_strategy_enabled: !msConfig.fvg_strategy_enabled })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.fvg_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.fvg_strategy_enabled !== false ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">FVG Entry Target Level</label>
-                  <select
-                    value={msConfig.fvg_entry_level || "CONSEQUENT_ENCROACHMENT"}
-                    onChange={(e) => setMsConfig({ ...msConfig, fvg_entry_level: e.target.value as any })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-sans"
-                  >
-                    <option value="CONSEQUENT_ENCROACHMENT">50% Midpoint (Consequent Encroachment / CE)</option>
-                    <option value="BOUNDARY">Outer Boundary / Edge</option>
-                  </select>
-                  <p className="text-[10px] text-slate-400">Determines if entries trigger at 50% FVG fill or outer boundary.</p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Min FVG Gap ATR Ratio</label>
-                  <input
-                    type="number"
-                    step="0.02"
-                    min="0.05"
-                    max="0.5"
-                    value={msConfig.fvg_min_gap_atr_ratio || 0.12}
-                    onChange={(e) => setMsConfig({ ...msConfig, fvg_min_gap_atr_ratio: parseInputNumber(e.target.value, true) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                  />
-                  <p className="text-[10px] text-slate-400">Minimum gap size expressed as a fraction of ATR (Standard: 0.12).</p>
-                </div>
-                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-sans font-semibold text-slate-800">Require Rejection Candlestick on FVG Retest</span>
-                    <p className="text-[10px] text-slate-400">Demands a confirmed rejection candlestick pattern (e.g. Pin Bar, Engulfing, Harami, Hammer) inside the FVG zone before market execution.</p>
-                  </div>
-                  <button
-                    id="fvg_require_candlestick_rejection_toggle"
-                    type="button"
-                    onClick={() => setMsConfig({ ...msConfig, fvg_require_candlestick_rejection: msConfig.fvg_require_candlestick_rejection === false ? true : false })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.fvg_require_candlestick_rejection !== false ? "bg-indigo-600" : "bg-slate-200"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.fvg_require_candlestick_rejection !== false ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-sans font-semibold text-slate-800">Anti-Falling Knife Lockout (Consecutive Dump Protection)</span>
-                    <p className="text-[10px] text-slate-400">Blocks entry if consecutive solid contrary candles are slicing into the FVG, requiring a closed reversal candle or hammer pin bar before entry.</p>
-                  </div>
-                  <button
-                    id="fvg_anti_falling_knife_lockout_toggle"
-                    type="button"
-                    onClick={() => setMsConfig({ ...msConfig, fvg_anti_falling_knife_lockout: msConfig.fvg_anti_falling_knife_lockout === false ? true : false })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.fvg_anti_falling_knife_lockout !== false ? "bg-indigo-600" : "bg-slate-200"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.fvg_anti_falling_knife_lockout !== false ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-sans font-semibold text-slate-800">Enforce 50% Consequent Encroachment (CE) Defense</span>
-                    <p className="text-[10px] text-slate-400">Invalidates entry if the candle closes past the 50% CE midpoint without immediate institutional wick rejection.</p>
-                  </div>
-                  <button
-                    id="fvg_consequent_encroachment_filter_toggle"
-                    type="button"
-                    onClick={() => setMsConfig({ ...msConfig, fvg_consequent_encroachment_filter: msConfig.fvg_consequent_encroachment_filter === false ? true : false })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.fvg_consequent_encroachment_filter !== false ? "bg-indigo-600" : "bg-slate-200"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.fvg_consequent_encroachment_filter !== false ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4 md:col-span-2">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-sans font-semibold text-slate-800">Structural FVG Stop Loss Anchoring</span>
-                    <p className="text-[10px] text-slate-400">Anchors Stop Loss beyond the outer FVG boundary + 0.15x ATR safety buffer, maintaining strict R:R targets.</p>
-                  </div>
-                  <button
-                    id="fvg_structural_stop_loss_enabled_toggle"
-                    type="button"
-                    onClick={() => setMsConfig({ ...msConfig, fvg_structural_stop_loss_enabled: msConfig.fvg_structural_stop_loss_enabled === false ? true : false })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.fvg_structural_stop_loss_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.fvg_structural_stop_loss_enabled !== false ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {/* Grid 3: EQH/EQL, Asian Session Range, and SMC TP */}
+              {/* Grid 2: EQH/EQL, Asian Session Range, and SMC TP */}
               <div className="border-t border-slate-100 pt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-1.5 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-1">

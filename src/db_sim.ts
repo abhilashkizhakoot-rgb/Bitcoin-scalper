@@ -112,10 +112,10 @@ const DEFAULT_CONFIG: StrategyConfig = {
       "orderbook", "volume_profile", "atr", "regime_cooldown", "choppy"
     ],
     mandatory_gates: [
-      "limit", "equity", "credentials", "cooldown", "timing", "structure", "atr", "regime_cooldown", "choppy"
+      "limit", "equity", "credentials", "cooldown", "timing", "structure", "atr", "regime_cooldown", "choppy", "orderflow", "volume_profile"
     ],
     weighted_gates: [
-      "catboost", "regime", "trend", "volume", "vwap", "wedge", "orderflow", "squeeze", "orderbook", "volume_profile", "adx", "ema100"
+      "catboost", "regime", "trend", "volume", "vwap", "wedge", "squeeze", "orderbook", "adx", "ema100"
     ],
     relative_volume_threshold: 1.3,
     adx_threshold: 22.0,
@@ -202,11 +202,11 @@ const DEFAULT_CONFIG: StrategyConfig = {
   risk_management: {
     risk_per_trade_pct: 0.5,
     max_risk_per_trade_pct: 1.0,
-    stop_loss_atr_multiplier: 1.25,
+    stop_loss_atr_multiplier: 1.55,
     take_profit_ratio: 1.5,
-    take_profit_atr_multiplier: 1.50,
+    take_profit_atr_multiplier: 1.65,
     take_profit_mode: "ATR_SCALP",
-    breakeven_trigger_atr: 0.75,
+    breakeven_trigger_atr: 0.85,
     max_consecutive_losses: 3,
     consecutive_losses_cooldown_minutes: 30,
     daily_loss_limit_pct: 2.0,
@@ -219,10 +219,10 @@ const DEFAULT_CONFIG: StrategyConfig = {
     delta_scalper_offer_enabled: true,
     default_order_execution: "TAKER",
     trailing_stop_loss_enabled: true,
-    trailing_stop_loss_distance_atr: 1.25,
+    trailing_stop_loss_distance_atr: 1.45,
     trailing_stop_loss_activation_ratio: 1.0,
-    min_stop_loss_distance_usd: 25,
-    min_stop_loss_distance_pct: 0.035,
+    min_stop_loss_distance_usd: 35,
+    min_stop_loss_distance_pct: 0.045,
     static_stop_loss_enabled: false,
     static_stop_loss_value_usd: 150,
     max_atr_for_stop_loss_enabled: false,
@@ -236,12 +236,12 @@ const DEFAULT_CONFIG: StrategyConfig = {
     max_allowed_z_dist: 1.80,
     enable_regime_adaptive_sl_tp: true,
     min_rr_ratio_floor: 1.25,
-    sl_atr_multiplier_trending: 1.25,
-    sl_atr_multiplier_ranging: 1.15,
-    sl_atr_multiplier_volatile: 1.45,
-    tp_atr_multiplier_trending: 1.50,
-    tp_atr_multiplier_ranging: 1.25,
-    tp_atr_multiplier_volatile: 1.75,
+    sl_atr_multiplier_trending: 1.55,
+    sl_atr_multiplier_ranging: 1.35,
+    sl_atr_multiplier_volatile: 1.75,
+    tp_atr_multiplier_trending: 1.70,
+    tp_atr_multiplier_ranging: 1.40,
+    tp_atr_multiplier_volatile: 2.00,
   },
   market_structure: {
     min_breakout_body_ratio: 0.22,
@@ -279,13 +279,6 @@ const DEFAULT_CONFIG: StrategyConfig = {
     liquidity_sweep_min_wick_ratio: 0.35,
     liquidity_sweep_volume_mult: 1.0,
     choch_confirmation_enabled: true,
-    fvg_strategy_enabled: false,
-    fvg_min_gap_atr_ratio: 0.12,
-    fvg_entry_level: "CONSEQUENT_ENCROACHMENT",
-    fvg_require_candlestick_rejection: true,
-    fvg_consequent_encroachment_filter: true,
-    fvg_anti_falling_knife_lockout: true,
-    fvg_structural_stop_loss_enabled: true,
     eqh_eql_detection_enabled: true,
     eqh_eql_tolerance_pct: 0.08,
     asian_session_sweep_enabled: true,
@@ -998,15 +991,15 @@ class DatabaseManager {
         this.cache.config.general.required_gates = allGates.filter(g => !skipped.includes(g));
         changed = true;
       }
-      if (!this.cache.config.general.mandatory_gates) {
+      if (!this.cache.config.general.mandatory_gates || !this.cache.config.general.mandatory_gates.includes("orderflow")) {
         this.cache.config.general.mandatory_gates = [
-          "limit", "equity", "credentials", "cooldown", "timing", "structure", "atr", "regime_cooldown"
+          "limit", "equity", "credentials", "cooldown", "timing", "structure", "atr", "regime_cooldown", "choppy", "orderflow", "volume_profile"
         ];
         changed = true;
       }
-      if (!this.cache.config.general.weighted_gates) {
+      if (!this.cache.config.general.weighted_gates || this.cache.config.general.weighted_gates.includes("orderflow")) {
         this.cache.config.general.weighted_gates = [
-          "catboost", "regime", "trend", "volume", "vwap", "wedge", "orderflow", "squeeze", "orderbook", "volume_profile", "adx", "ema100"
+          "catboost", "regime", "trend", "volume", "vwap", "wedge", "squeeze", "orderbook", "adx", "ema100"
         ];
         changed = true;
       }

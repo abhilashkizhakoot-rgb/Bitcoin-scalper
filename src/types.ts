@@ -318,6 +318,15 @@ export interface StrategyConfig {
     liquidity_sweep_lookback_candles?: number; // Lookback candles to identify liquidity pools (default: 20)
     liquidity_sweep_min_wick_ratio?: number; // Minimum wick ratio for sweep candle (default: 0.35)
     liquidity_sweep_volume_mult?: number; // Minimum volume multiplier for liquidity sweep (default: 1.0)
+    fvg_strategy_enabled?: boolean; // Enable Fair Value Gap (FVG) Retest Strategy (Setup 4) (default: true)
+    fvg_min_gap_atr_ratio?: number; // Minimum gap size in ATR multiples to qualify as an institutional FVG (default: 0.25)
+    fvg_lookback_candles?: number; // Maximum candles back to identify unmitigated FVG (default: 20)
+    fvg_consequent_encroachment_entry?: boolean; // Target 50% Consequent Encroachment (CE) of FVG for optimal entry (default: true)
+    fvg_require_reversal_confirmation?: boolean; // Require reversal wick or rejection confirmation on FVG tap (default: true)
+    fvg_displacement_vol_mult?: number; // Minimum volume multiplier on displacement candle for institutional backing (default: 1.25)
+    fvg_min_body_ratio?: number; // Minimum body-to-range ratio on displacement candle to avoid indecision gaps (default: 0.60)
+    fvg_ce_invalidation_rule?: boolean; // Invalidate FVG if candle body closes past 50% Consequent Encroachment (default: true)
+    fvg_trend_filter_enabled?: boolean; // Enforce micro-trend & EMA50/VWAP alignment to avoid knife-catching (default: true)
     choch_confirmation_enabled?: boolean; // Require Change of Character (CHoCH) post-sweep confirmation
     eqh_eql_detection_enabled?: boolean; // Enable Equal Highs / Equal Lows Liquidity Pool Detector
     eqh_eql_tolerance_pct?: number; // Tolerance % for EQH/EQL touches (default 0.08%)

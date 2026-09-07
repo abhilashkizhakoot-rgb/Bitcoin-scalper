@@ -3621,6 +3621,148 @@ export default function ConfigPage({
                 </div>
               </div>
 
+              {/* Grid: Fair Value Gap (FVG) Retest Setup (Setup 4) */}
+              <div className="border-t border-slate-100 pt-4 space-y-4">
+                <div className="flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Fair Value Gap (FVG) Retest Strategy (Setup 4)</span>
+                    <p className="text-[10px] text-slate-400">Enables high-conviction entries on price pullbacks into unmitigated 3-candle institutional displacement imbalances (BISI/SIBI).</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, fvg_strategy_enabled: !msConfig.fvg_strategy_enabled })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.fvg_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.fvg_strategy_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">50% CE Invalidation Rule</span>
+                      <p className="text-[10px] text-slate-400">Disqualifies FVG if any candle body closes past 50% CE (inversion guard).</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMsConfig({ ...msConfig, fvg_ce_invalidation_rule: !msConfig.fvg_ce_invalidation_rule })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                        msConfig.fvg_ce_invalidation_rule !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.fvg_ce_invalidation_rule !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Micro-Trend Guard</span>
+                      <p className="text-[10px] text-slate-400">Enforces 50 EMA / VWAP alignment and blocks counter-trend knife catching.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMsConfig({ ...msConfig, fvg_trend_filter_enabled: !msConfig.fvg_trend_filter_enabled })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                        msConfig.fvg_trend_filter_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.fvg_trend_filter_enabled !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Two-Step Reversal Confirmation</span>
+                      <p className="text-[10px] text-slate-400">Requires at least 35% rejection wick or directional close after FVG zone tap.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMsConfig({ ...msConfig, fvg_require_reversal_confirmation: !msConfig.fvg_require_reversal_confirmation })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                        msConfig.fvg_require_reversal_confirmation !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.fvg_require_reversal_confirmation !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Displacement Volume Mult</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.5"
+                      max="3.0"
+                      value={msConfig.fvg_displacement_vol_mult || 1.25}
+                      onChange={(e) => setMsConfig({ ...msConfig, fvg_displacement_vol_mult: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Candle 2 volume multiple vs 20-period MA (Standard: 1.25x).</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Displacement Body Ratio</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.30"
+                      max="0.95"
+                      value={msConfig.fvg_min_body_ratio || 0.60}
+                      onChange={(e) => setMsConfig({ ...msConfig, fvg_min_body_ratio: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Minimum body-to-range ratio on displacement candle (Standard: 0.60 / 60%).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Gap ATR Ratio</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.10"
+                      max="1.50"
+                      value={msConfig.fvg_min_gap_atr_ratio || 0.25}
+                      onChange={(e) => setMsConfig({ ...msConfig, fvg_min_gap_atr_ratio: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Minimum gap size relative to current ATR (Standard: 0.25 ATR).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">FVG Lookback Candles</label>
+                    <input
+                      type="number"
+                      min="5"
+                      max="60"
+                      value={msConfig.fvg_lookback_candles || 20}
+                      onChange={(e) => setMsConfig({ ...msConfig, fvg_lookback_candles: parseInputNumber(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Max candles to scan back for unmitigated imbalances (Standard: 20).</p>
+                  </div>
+                </div>
+              </div>
+
               {/* Grid 2: EQH/EQL, Asian Session Range, and SMC TP */}
               <div className="border-t border-slate-100 pt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-1.5 bg-slate-50 border border-slate-200/60 rounded-xl p-4">

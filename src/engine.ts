@@ -1879,17 +1879,24 @@ class TradingEngine {
     const baseZLimit = Math.min(isTrending ? 2.20 : 2.00, userMaxZCap);
     const maxZLimit = Math.min((isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure) ? 3.20 : baseZLimit, userMaxZCap);
 
+    // Flaw 2 Fix: Single-Component Exhaustion Ceiling (Anti-Dilution Guard)
+    // Prevents composite Z_dist averaging from masking extreme individual overextension (> 3.00 sigma from 100 EMA or VWAP).
+    const singleComponentCeiling = isTrending ? 3.00 : 2.60;
+    const isSingleComponentExhausted = signalDirection === "LONG"
+      ? (zEma > singleComponentCeiling || zVwap > singleComponentCeiling)
+      : (zEma < -singleComponentCeiling || zVwap < -singleComponentCeiling);
+
     let isValueExtensionMet = true;
     let isValueExtensionSoftened = false;
 
     if (signalDirection === "LONG") {
-      if (zDist > maxZLimit) {
+      if (zDist > maxZLimit || isSingleComponentExhausted) {
         isValueExtensionMet = false;
       } else if (zDist > baseZLimit && zDist <= maxZLimit) {
         isValueExtensionSoftened = true;
       }
     } else if (signalDirection === "SHORT") {
-      if (zDist < -maxZLimit) {
+      if (zDist < -maxZLimit || isSingleComponentExhausted) {
         isValueExtensionMet = false;
       } else if (zDist < -baseZLimit && zDist >= -maxZLimit) {
         isValueExtensionSoftened = true;
@@ -1897,9 +1904,15 @@ class TradingEngine {
     }
 
     const zDistFormatted = zDist >= 0 ? `+${zDist.toFixed(2)}` : zDist.toFixed(2);
-    const valueExtensionValStr = isValueExtensionMet
-      ? `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, Chase: ${zChase.toFixed(2)}sigma) | Status: PASSED${isValueExtensionSoftened ? " (SOFTENED BY MOMENTUM)" : ""}`
-      : `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, Chase: ${zChase.toFixed(2)}sigma) | EXHAUSTION BLOCKED (|Z_dist| > ${maxZLimit.toFixed(2)})`;
+    let valueExtensionValStr = "";
+    if (isValueExtensionMet) {
+      valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, Chase: ${zChase.toFixed(2)}sigma) | Status: PASSED${isValueExtensionSoftened ? " (SOFTENED BY MOMENTUM)" : ""}`;
+    } else if (isSingleComponentExhausted) {
+      const overextendedMetric = Math.abs(zEma) > singleComponentCeiling ? `EMA100: ${zEma.toFixed(2)}sigma` : `VWAP: ${zVwap.toFixed(2)}sigma`;
+      valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, Chase: ${zChase.toFixed(2)}sigma) | EXHAUSTION BLOCKED (Single component overextended: ${overextendedMetric} > ${singleComponentCeiling.toFixed(2)}sigma limit)`;
+    } else {
+      valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, Chase: ${zChase.toFixed(2)}sigma) | EXHAUSTION BLOCKED (|Z_dist| > ${maxZLimit.toFixed(2)})`;
+    }
 
     conditions.push({
       name: "Unified Value Extension Anchor",
@@ -4746,7 +4759,28 @@ class TradingEngine {
       const strongTrendAdx = ms.trend_alignment_adx_threshold || 28;
       const isRecentBreakout = postBreakoutCandles.length >= 1 && postBreakoutCandles.length <= 5;
       const isNearBreakoutLevel = (currentPrice - breakoutLevel) <= 2.0 * currentAtr;
-      const isHighAdxConsolidation = adxValue >= strongTrendAdx && isRecentBreakout && isNearBreakoutLevel;
+
+      // Flaw 1 Fix: Directional Sanity Filter on High-ADX Consolidation
+      // ADX is non-directional. A multi-candle dump (e.g. 7 consecutive red candles dropping -$160) spikes ADX to 48+.
+      // Do not allow a single 1-minute green bounce to trigger a "High-ADX Parabolic Continuation LONG" when the recent
+      // window is net negative or dominated by heavy distribution selling!
+      const lookbackLen = Math.min(8, this.candles1m.length);
+      const recentWindow = this.candles1m.slice(-lookbackLen);
+      const netDisplacement = recentWindow.length > 0 ? (currentPrice - recentWindow[0].open) : 0;
+      const redCandlesCount = recentWindow.filter(c => c.close < c.open).length;
+      const isDominantDumping = redCandlesCount >= Math.ceil(lookbackLen * 0.65) || netDisplacement < -0.4 * currentAtr;
+
+      // Flaw 3 Filter: Round-Number Retest Requirement
+      // If price broke above a major $500 / $1,000 psychological milestone (e.g. $80,000),
+      // institutional liquidity sweeps frequently probe below the round number before real continuation.
+      // Continuation entries within 2.5x ATR of a round number must have verified a retest touch near that level.
+      const nearestRoundBelow = Math.floor(currentPrice / 500) * 500;
+      const isNearRoundBreakout = currentPrice > nearestRoundBelow && (currentPrice - nearestRoundBelow) <= 2.5 * currentAtr;
+      const hasRetestedRoundLevel = isNearRoundBreakout
+        ? recentWindow.some(c => c.low <= (nearestRoundBelow + 0.35 * currentAtr))
+        : true;
+
+      const isHighAdxConsolidation = adxValue >= strongTrendAdx && isRecentBreakout && isNearBreakoutLevel && !isDominantDumping && netDisplacement >= 0 && hasRetestedRoundLevel;
       
       // Targeted Fix: Candle Direction & Reversal Confirmation Guard
       // Strictly enforces that long entries require a closed green candle with positive upward displacement.
@@ -5074,7 +5108,25 @@ class TradingEngine {
       const strongTrendAdx = ms.trend_alignment_adx_threshold || 28;
       const isRecentBreakout = postBreakoutCandles.length >= 1 && postBreakoutCandles.length <= 5;
       const isNearBreakoutLevel = (breakoutLevel - currentPrice) <= 2.0 * currentAtr;
-      const isHighAdxConsolidation = adxValue >= strongTrendAdx && isRecentBreakout && isNearBreakoutLevel;
+
+      // Flaw 1 Fix: Directional Sanity Filter on High-ADX Consolidation (SHORT)
+      // ADX is non-directional. A multi-candle pump spikes ADX to 48+.
+      // Do not allow a single 1-minute red dip to trigger a "High-ADX Parabolic Continuation SHORT" when the recent
+      // window is net positive or dominated by heavy accumulation buying!
+      const lookbackLen = Math.min(8, this.candles1m.length);
+      const recentWindow = this.candles1m.slice(-lookbackLen);
+      const netDisplacement = recentWindow.length > 0 ? (currentPrice - recentWindow[0].open) : 0;
+      const greenCandlesCount = recentWindow.filter(c => c.close > c.open).length;
+      const isDominantPumping = greenCandlesCount >= Math.ceil(lookbackLen * 0.65) || netDisplacement > 0.4 * currentAtr;
+
+      // Flaw 3 Filter: Round-Number Retest Requirement (SHORT)
+      const nearestRoundAbove = Math.ceil(currentPrice / 500) * 500;
+      const isNearRoundBreakdown = currentPrice < nearestRoundAbove && (nearestRoundAbove - currentPrice) <= 2.5 * currentAtr;
+      const hasRetestedRoundLevel = isNearRoundBreakdown
+        ? recentWindow.some(c => c.high >= (nearestRoundAbove - 0.35 * currentAtr))
+        : true;
+
+      const isHighAdxConsolidation = adxValue >= strongTrendAdx && isRecentBreakout && isNearBreakoutLevel && !isDominantPumping && netDisplacement <= 0 && hasRetestedRoundLevel;
       
       // Targeted Fix: Candle Direction & Reversal Confirmation Guard
       // Strictly enforces that short entries require a closed red candle with negative downward displacement.
@@ -10078,10 +10130,43 @@ class TradingEngine {
     const finalTpDistance = vpTargetTpDistance;
     const finalSlDistance = vpTargetSlDistance;
 
-    const stopLossPrice = execDirection === "LONG" ? currentPrice - finalSlDistance : currentPrice + finalSlDistance;
+    const initialSlPrice = execDirection === "LONG" ? currentPrice - finalSlDistance : currentPrice + finalSlDistance;
+
+    // --- FLAW 3 FIX: STRUCTURAL STOP PLACEMENT AROUND MAJOR ROUND NUMBERS ---
+    // Major psychological round numbers (multiples of $500 and $1,000 like $80,000, $80,500)
+    // attract institutional stop sweeps before real breakouts occur.
+    // If a LONG SL lands in the danger zone between the round level and $45 above it (e.g. $80,000 to $80,045),
+    // a standard wick down to $79,960-$79,980 stops out the trader right before the surge.
+    // We adjust the SL with a protective buffer below/above the round number.
+    const roundStep = 500;
+    let adjustedSlPrice = initialSlPrice;
+    if (execDirection === "LONG") {
+      const nearestRoundBelow = Math.floor(currentPrice / roundStep) * roundStep;
+      // If entry is above the round level and stop loss lands right above it (within $45 or 0.8x ATR)
+      if (currentPrice > nearestRoundBelow && adjustedSlPrice >= nearestRoundBelow && (adjustedSlPrice - nearestRoundBelow) <= Math.max(45, 0.8 * lastAtr)) {
+        const bufferedSl = nearestRoundBelow - Math.max(35, 0.55 * lastAtr);
+        // Only buffer if it keeps the SL within 2.35x ATR to preserve risk boundaries
+        if ((currentPrice - bufferedSl) <= 2.35 * (lastAtr * effectiveSlAtrMult)) {
+          adjustedSlPrice = bufferedSl;
+        }
+      }
+    } else if (execDirection === "SHORT") {
+      const nearestRoundAbove = Math.ceil(currentPrice / roundStep) * roundStep;
+      // If entry is below the round level and stop loss lands right below it (within $45 or 0.8x ATR)
+      if (currentPrice < nearestRoundAbove && adjustedSlPrice <= nearestRoundAbove && (nearestRoundAbove - adjustedSlPrice) <= Math.max(45, 0.8 * lastAtr)) {
+        const bufferedSl = nearestRoundAbove + Math.max(35, 0.55 * lastAtr);
+        if ((bufferedSl - currentPrice) <= 2.35 * (lastAtr * effectiveSlAtrMult)) {
+          adjustedSlPrice = bufferedSl;
+        }
+      }
+    }
+
+    const stopLossPrice = adjustedSlPrice;
     const actualSLDistance = Math.abs(currentPrice - stopLossPrice);
 
-    const takeProfitPrice = execDirection === "LONG" ? currentPrice + finalTpDistance : currentPrice - finalTpDistance;
+    // Maintain favorable Risk-to-Reward ratio if SL was adjusted
+    const requiredTpDist = Math.max(finalTpDistance, actualSLDistance * minRRMultiplier);
+    const takeProfitPrice = execDirection === "LONG" ? currentPrice + requiredTpDist : currentPrice - requiredTpDist;
     const actualTPDistance = Math.abs(currentPrice - takeProfitPrice);
 
     this.log(

@@ -1356,12 +1356,19 @@ class TradingEngine {
       const cvdAbsorptionShort = this.evaluateCvdAbsorptionDivergenceSetup("SHORT");
       const oiFlushLong = this.evaluateOiFlushCascadeFadeSetup("LONG");
       const oiFlushShort = this.evaluateOiFlushCascadeFadeSetup("SHORT");
+      const freshMomentumLong = this.evaluateFreshMomentumImpulseSetup("LONG");
+      const freshMomentumShort = this.evaluateFreshMomentumImpulseSetup("SHORT");
 
       const exhaustionLong = this.evaluateExhaustionReversalCondition("LONG", currentPrice, closes, lastIdx);
       const exhaustionShort = this.evaluateExhaustionReversalCondition("SHORT", currentPrice, closes, lastIdx);
 
+      // Priority 0: Fresh Momentum Impulse (Early aggressive breakout displacement)
+      if (freshMomentumShort.isValid) {
+        signalDirection = "SHORT";
+      } else if (freshMomentumLong.isValid) {
+        signalDirection = "LONG";
       // Priority 1: Range Breakout / Breakdown (when price escapes range boundaries)
-      if (isRangeShortBreakdown) {
+      } else if (isRangeShortBreakdown) {
         signalDirection = "SHORT";
       } else if (isRangeLongBreakout) {
         signalDirection = "LONG";
@@ -1377,7 +1384,9 @@ class TradingEngine {
         signalDirection = "NEUTRAL";
       }
     } else if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
-      // In low volatility compression, detect if FVG (Setup 4), VWAP Reversal (Setup 10), EQH/EQL (Setup 11), CVD Absorption (Setup 12), or OI Flush (Setup 13) fires
+      // In low volatility compression, detect if FVG (Setup 4), VWAP Reversal (Setup 10), EQH/EQL (Setup 11), CVD Absorption (Setup 12), OI Flush (Setup 13), or Fresh Momentum Impulse (Setup 14) fires
+      const freshMomentumLong = this.evaluateFreshMomentumImpulseSetup("LONG");
+      const freshMomentumShort = this.evaluateFreshMomentumImpulseSetup("SHORT");
       const fvgLong = this.evaluateFairValueGapSetup("LONG");
       const fvgShort = this.evaluateFairValueGapSetup("SHORT");
       const vwapLong = this.evaluateVwapBandRejectionSetup("LONG");
@@ -1389,7 +1398,11 @@ class TradingEngine {
       const oiLong = this.evaluateOiFlushCascadeFadeSetup("LONG");
       const oiShort = this.evaluateOiFlushCascadeFadeSetup("SHORT");
 
-      if (fvgLong.isValid || oiLong.isValid || cvdLong.isValid || vwapLong.isValid || eqLong.isValid) {
+      if (freshMomentumShort.isValid) {
+        signalDirection = "SHORT";
+      } else if (freshMomentumLong.isValid) {
+        signalDirection = "LONG";
+      } else if (fvgLong.isValid || oiLong.isValid || cvdLong.isValid || vwapLong.isValid || eqLong.isValid) {
         signalDirection = "LONG";
       } else if (fvgShort.isValid || oiShort.isValid || cvdShort.isValid || vwapShort.isValid || eqShort.isValid) {
         signalDirection = "SHORT";
@@ -1428,6 +1441,8 @@ class TradingEngine {
       const isNotShortBreakdown = isScalperBreakdownShortAllowed ? true : (struct.current_LL ? currentPrice >= struct.current_LL.price : true);
 
       // Multi-factor intelligent direction assessment (including SMC & Microstructural Setups)
+      const freshMomentumLong = this.evaluateFreshMomentumImpulseSetup("LONG");
+      const freshMomentumShort = this.evaluateFreshMomentumImpulseSetup("SHORT");
       const longSweepSignal = this.detectLiquiditySweep("LONG");
       const shortSweepSignal = this.detectLiquiditySweep("SHORT");
       const fvgLongTrending = this.evaluateFairValueGapSetup("LONG");
@@ -1446,7 +1461,12 @@ class TradingEngine {
       const isStrongUptrend = this.currentRegime === MarketRegime.STRONG_UPTREND;
       const isStrongDowntrend = this.currentRegime === MarketRegime.STRONG_DOWNTREND;
 
-      if (!isStrongDowntrend && fvgLongTrending.isValid) {
+      // Priority 0: Fresh Momentum Impulse (Aggressive early expansion, bypasses lagging regime lock)
+      if (freshMomentumShort.isValid) {
+        signalDirection = "SHORT";
+      } else if (freshMomentumLong.isValid) {
+        signalDirection = "LONG";
+      } else if (!isStrongDowntrend && fvgLongTrending.isValid) {
         signalDirection = "LONG";
       } else if (!isStrongUptrend && fvgShortTrending.isValid) {
         signalDirection = "SHORT";
@@ -1521,8 +1541,10 @@ class TradingEngine {
                           (signalDirection === "SHORT" && this.evaluateVwapBandRejectionSetup("SHORT").isValid);
     const smcEqhEqlActive = (signalDirection === "LONG" && this.evaluateEqhEqlDoubleTouchSetup("LONG").isValid) ||
                             (signalDirection === "SHORT" && this.evaluateEqhEqlDoubleTouchSetup("SHORT").isValid);
-    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFailedAuctionSetup("LONG").isValid || smcFvgActive || smcVwapActive || smcEqhEqlActive)) ||
-                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFailedAuctionSetup("SHORT").isValid || smcFvgActive || smcVwapActive || smcEqhEqlActive));
+    const smcFreshMomentumActive = (signalDirection === "LONG" && this.evaluateFreshMomentumImpulseSetup("LONG").isValid) ||
+                                   (signalDirection === "SHORT" && this.evaluateFreshMomentumImpulseSetup("SHORT").isValid);
+    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFailedAuctionSetup("LONG").isValid || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive)) ||
+                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFailedAuctionSetup("SHORT").isValid || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive));
 
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY && !isSmcActive) {
       return {
@@ -1577,7 +1599,7 @@ class TradingEngine {
     const isEnteringPullback = true;
 
     const catboostThreshold = (this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) 
-      ? 0.50 
+      ? (smcFreshMomentumActive ? 0.46 : 0.50) 
       : 0.55;
     const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold) : false;
     const pShortMet = signalDirection === "SHORT" ? (probabilityShort >= catboostThreshold) : false;
@@ -1586,8 +1608,8 @@ class TradingEngine {
       met: (pLongMet || pShortMet),
       current_value: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}% | P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%`,
       required: signalDirection === "LONG"
-        ? `P(LONG) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "55"}% (Evaluating LONG Trade)`
-        : `P(SHORT) >= ${(this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? "50" : "55"}% (Evaluating SHORT Trade)`,
+        ? `P(LONG) >= ${((this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? (smcFreshMomentumActive ? "46" : "50") : "55")}% (Evaluating LONG Trade)`
+        : `P(SHORT) >= ${((this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? (smcFreshMomentumActive ? "46" : "50") : "55")}% (Evaluating SHORT Trade)`,
       description: "Uses pre-trained ensemble trees mapping momentum, EMA spreads, and ATR volatility expansion.",
       priority: "CRITICAL",
     });
@@ -1600,19 +1622,22 @@ class TradingEngine {
 
     // C2: Market Regime lock
     // Blocked all entries during LOW_VOLATILITY unless structural setup active.
-    const regimeValid = !isLowVolatility;
+    const regimeValid = !isLowVolatility || smcFreshMomentumActive;
     const regimeAligned =
-      (signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
-      (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND)) ||
-      this.currentRegime === MarketRegime.HIGH_VOLATILITY;
+      (signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND || smcFreshMomentumActive)) ||
+      (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND || smcFreshMomentumActive)) ||
+      this.currentRegime === MarketRegime.HIGH_VOLATILITY ||
+      smcFreshMomentumActive;
 
-    const isRegimeSoftened = false;
+    const isRegimeSoftened = smcFreshMomentumActive;
 
     conditions.push({
       name: "Market Regime Filter",
       met: regimeValid && regimeAligned,
-      current_value: this.currentRegime,
-      required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, or HIGH_VOLATILITY",
+      current_value: smcFreshMomentumActive
+        ? `${this.currentRegime} (OVERRIDDEN: Fresh Momentum Impulse Active)`
+        : this.currentRegime,
+      required: "STRONG_UPTREND/RANGE_BOUND for LONG, STRONG_DOWNTREND/RANGE_BOUND for SHORT, HIGH_VOLATILITY, or Fresh Momentum Impulse Override",
       description: "Restricts execution during low volatility ranging zones to prevent chop losses.",
       priority: "CRITICAL",
       softened: isRegimeSoftened,
@@ -1646,10 +1671,12 @@ class TradingEngine {
         adxMet = adxValue >= hardFloorAdx;
       }
       trendAligned = adxMet;
-      currentTrendStr = activeSweepSignal.isSweep 
-        ? "PASSING (Bypassed via Liquidity Sweep Reversal Setup 3)"
-        : "PASSING (Bypassed via SMC Structural Setup)";
-      requiredStr = "SMC Structural Setup Active";
+      currentTrendStr = smcFreshMomentumActive
+        ? "PASSING (Bypassed via Fresh Momentum Impulse Setup 14)"
+        : (activeSweepSignal.isSweep 
+            ? "PASSING (Bypassed via Liquidity Sweep Reversal Setup 3)"
+            : "PASSING (Bypassed via SMC Structural Setup)");
+      requiredStr = smcFreshMomentumActive ? "Fresh Momentum Impulse Active" : "SMC Structural Setup Active";
     } else if (isExhaustionBypassEnabled && isExhaustionActive) {
       adxMet = adxValue >= hardFloorAdx && adxValue <= maxExhaustionAdx;
       trendAligned = adxMet;
@@ -4292,6 +4319,7 @@ class TradingEngine {
       "EQH/EQL Double Touch Setup (Setup 11)": { status: "SKIP", reason: "No active EQH/EQL double touch setup" },
       "CVD Absorption & Delta Divergence (Setup 12)": { status: "SKIP", reason: "No active CVD absorption setup" },
       "OI Flush & Cascade Fade (Setup 13)": { status: "SKIP", reason: "No active OI flush cascade setup" },
+      "Fresh Momentum Impulse (Setup 14)": { status: "SKIP", reason: "No active fresh momentum impulse setup" },
     };
 
     const getReturnObj = (confirmed: boolean, message: string) => {
@@ -4343,6 +4371,9 @@ class TradingEngine {
         ? (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long) 
         : (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short));
 
+    // Fresh Momentum Impulse Check (Setup 14)
+    const freshMomentumResult = this.evaluateFreshMomentumImpulseSetup(direction);
+
     // 2. Evaluate Multi-Timeframe (5m) Trend Alignment Up-Front
     const candles5m = this.aggregateCandles(this.candles1m, 5);
     const closes5m = candles5m.map(c => c.close);
@@ -4360,7 +4391,7 @@ class TradingEngine {
 
         const isCounterTrend = (direction === "LONG" && this.currentRegime === MarketRegime.STRONG_DOWNTREND) ||
                                (direction === "SHORT" && this.currentRegime === MarketRegime.STRONG_UPTREND);
-        const canBypassMtf = hasHighHFPressure && !isCounterTrend;
+        const canBypassMtf = (hasHighHFPressure && !isCounterTrend) || freshMomentumResult.isValid;
 
         if (direction === "LONG" && !isMtfLong && !canBypassMtf) {
           isMtfAligned = false;
@@ -4371,10 +4402,14 @@ class TradingEngine {
           const mtfMsg = `Conflicting Trend: Multi-timeframe (5m) trend is bullish (5m EMA 5: $${ema5_5m_val.toFixed(2)} >= EMA 15: $${ema15_5m_val.toFixed(2)}).`;
           condDict["Multi-Timeframe Trend Alignment"] = { status: "FAIL", reason: mtfMsg };
         } else {
-          mtfMessage = canBypassMtf ? " | MTF Bypassed (High HF Pressure)" : " | MTF Aligned";
+          mtfMessage = freshMomentumResult.isValid
+            ? " | MTF Bypassed (Fresh Momentum Impulse)"
+            : (canBypassMtf ? " | MTF Bypassed (High HF Pressure)" : " | MTF Aligned");
           condDict["Multi-Timeframe Trend Alignment"] = {
             status: "PASS",
-            reason: canBypassMtf ? "Bypassed due to high HF pressure" : `5m EMA5 ($${ema5_5m_val.toFixed(2)}) ${isMtfLong ? ">" : "<"} EMA15 ($${ema15_5m_val.toFixed(2)})`
+            reason: freshMomentumResult.isValid
+              ? "Bypassed due to fresh momentum impulse displacement"
+              : (canBypassMtf ? "Bypassed due to high HF pressure" : `5m EMA5 ($${ema5_5m_val.toFixed(2)}) ${isMtfLong ? ">" : "<"} EMA15 ($${ema15_5m_val.toFixed(2)})`)
           };
         }
       } else {
@@ -4455,7 +4490,35 @@ class TradingEngine {
       condDict["OI Flush & Cascade Fade (Setup 13)"] = { status: "SKIP", reason: oiFlushResult.description || "No active OI flush cascade setup" };
     }
 
+    // 12. Setup 14: Fresh Momentum Impulse Engine
+    if (freshMomentumResult.isValid) {
+      condDict["Fresh Momentum Impulse (Setup 14)"] = { status: "PASS", reason: freshMomentumResult.description };
+    } else if (freshMomentumResult.description && !freshMomentumResult.description.includes("No active") && !freshMomentumResult.description.includes("disabled")) {
+      condDict["Fresh Momentum Impulse (Setup 14)"] = { status: "FAIL", reason: freshMomentumResult.description };
+    } else {
+      condDict["Fresh Momentum Impulse (Setup 14)"] = { status: "SKIP", reason: freshMomentumResult.description || "No active fresh momentum impulse setup" };
+    }
+
     // --- PRIORITY DISPATCH FOR SMC / SPECIALIZED SETUPS ---
+    // Priority 0: Fresh Momentum Impulse (Early aggressive breakout expansion - Bypasses lagging MTF & deep pullbacks)
+    if (freshMomentumResult.isValid) {
+      const fmDesc = `[Setup 14 - Fresh Momentum Impulse Confirmed]: ${freshMomentumResult.description}`;
+      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Fresh Momentum Impulse Displacement Setup" };
+      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Fresh momentum impulse confirmed at $${freshMomentumResult.impulsePrice.toFixed(2)}` };
+      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: `Displacement body confirmed (${(freshMomentumResult.bodyRatio * 100).toFixed(0)}%)` };
+      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Fresh momentum early expansion entry" };
+      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `Impulse origin intact (SL: $${freshMomentumResult.stopLoss.toFixed(2)}, TP: $${freshMomentumResult.takeProfit.toFixed(2)})` };
+      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Fresh impulse initiation (early momentum phase)" };
+      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: `Volume surge confirmed (${freshMomentumResult.volumeMult.toFixed(2)}x)` };
+      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Fresh Momentum Impulse Setup (Setup 14)" };
+      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Fresh Momentum Impulse Setup (Setup 14)" };
+      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
+        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Fresh momentum impulse bypasses lagging MTF" };
+      }
+
+      return getReturnObj(true, fmDesc);
+    }
+
     if (sweepResult.isSweep) {
       condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Liquidity Sweep Reversal Setup" };
       condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Liquidity sweep confirmed at level $${sweepResult.sweptLevel.toFixed(2)}` };
@@ -8580,6 +8643,225 @@ class TradingEngine {
     }
   }
 
+  /**
+   * FEATURE: Setup 14 - Fresh Momentum Impulse Engine
+   * Captures early 1m velocity and high-displacement breakouts before exhaustion or deep pullbacks.
+   * Directly bypasses lagging macro regime (3m/50-period) and multi-timeframe 5m EMA alignment
+   * when fresh institutional displacement, volume surge, and aggressive taker flow are confirmed.
+   */
+  public evaluateFreshMomentumImpulseSetup(direction: "LONG" | "SHORT" | "NEUTRAL"): {
+    isValid: boolean;
+    direction: "LONG" | "SHORT" | "NEUTRAL";
+    impulsePrice: number;
+    impulseOrigin: number;
+    volumeMult: number;
+    bodyRatio: number;
+    stopLoss: number;
+    takeProfit: number;
+    riskReward: number;
+    description: string;
+  } {
+    const config = dbManager.getConfig();
+    const ms: any = config.market_structure || {};
+
+    if (ms.fresh_momentum_strategy_enabled === false || direction === "NEUTRAL") {
+      return {
+        isValid: false,
+        direction,
+        impulsePrice: 0,
+        impulseOrigin: 0,
+        volumeMult: 0,
+        bodyRatio: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: ms.fresh_momentum_strategy_enabled === false ? "Fresh Momentum Impulse strategy disabled" : "Neutral direction"
+      };
+    }
+
+    if (!this.candles1m || this.candles1m.length < 15) {
+      return {
+        isValid: false,
+        direction,
+        impulsePrice: 0,
+        impulseOrigin: 0,
+        volumeMult: 0,
+        bodyRatio: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Insufficient 1m candles for impulse scanning"
+      };
+    }
+
+    const minBodyRatio = ms.fresh_momentum_min_body_ratio !== undefined ? ms.fresh_momentum_min_body_ratio : 0.48;
+    const minVolMult = ms.fresh_momentum_min_vol_mult !== undefined ? ms.fresh_momentum_min_vol_mult : 1.15;
+    const maxChaseAtr = ms.fresh_momentum_max_chase_atr !== undefined ? ms.fresh_momentum_max_chase_atr : 4.5;
+
+    const lastIdx = this.candles1m.length - 1;
+    const currentPrice = this.currentPrice;
+    const atr14 = this.calculateATR(this.candles1m, 14);
+    const currentAtr = Math.max(10, atr14[lastIdx] || 50);
+
+    // Compute 20-period average volume
+    const volSlice = this.candles1m.slice(Math.max(0, lastIdx - 20), lastIdx);
+    const sumVol = volSlice.reduce((sum, c) => sum + (c.volume || 0), 0);
+    const avgVol = volSlice.length > 0 ? Math.max(1.0, sumVol / volSlice.length) : 15.0;
+
+    // Scan recent candidate candles: current candle [lastIdx] and last closed candle [lastIdx - 1]
+    const scanIndices = [lastIdx, lastIdx - 1];
+
+    const takerRatio = this.orderFlowStats ? this.orderFlowStats.takerBuyRatio : 0.50;
+    const netCVD = this.orderFlowStats ? this.orderFlowStats.netCVD : 0;
+    const imbalanceRatio = this.orderBookStats ? this.orderBookStats.imbalanceRatio : 0;
+    const rsi14 = this.calculateRSI(this.candles1m.map(c => c.close), 14);
+    const currentRsi = rsi14[lastIdx] || 50;
+
+    if (direction === "SHORT") {
+      for (const idx of scanIndices) {
+        if (idx < 5) continue;
+        const c = this.candles1m[idx];
+        const range = Math.max(1.0, c.high - c.low);
+        const body = c.open - c.close; // positive if bearish
+        const bodyRatio = body / range;
+
+        // 1. High Displacement: Bearish body >= 0.40 * ATR (or >= $25) with body ratio >= minBodyRatio
+        const isSingleDisplacement = body >= Math.max(25, 0.40 * currentAtr) && bodyRatio >= minBodyRatio;
+        // Or 2-candle cumulative displacement
+        const prevC = this.candles1m[idx - 1];
+        const twoCandleBody = prevC ? (prevC.open - c.close) : 0;
+        const isTwoCandleDisplacement = prevC && twoCandleBody >= Math.max(45, 0.75 * currentAtr) && c.close < prevC.close && prevC.close < prevC.open;
+
+        if (!isSingleDisplacement && !isTwoCandleDisplacement) continue;
+
+        // 2. Strong Closing Conviction: Candle closed near lows (lower wick <= 38% of range)
+        const lowerWick = c.close - c.low;
+        const lowerWickRatio = lowerWick / range;
+        if (lowerWickRatio > 0.38) continue;
+
+        // 3. Volume Expansion: Volume >= minVolMult OR relative volume >= minVolMult
+        const cVol = c.volume || avgVol;
+        const volMult = cVol / avgVol;
+        const currentRelVol = this.calculateAccurateRelativeVolume();
+        const hasVolSurge = volMult >= minVolMult || currentRelVol >= minVolMult;
+        if (!hasVolSurge) continue;
+
+        // 4. Micro-Structure Breakdown: Closed below low of the preceding 3 to 6 candles
+        const priorSlice = this.candles1m.slice(Math.max(0, idx - 5), idx);
+        const priorLow = priorSlice.length > 0 ? Math.min(...priorSlice.map(p => p.low)) : c.open;
+        const brokePriorLow = c.close < priorLow || c.low < priorLow;
+        if (!brokePriorLow) continue;
+
+        // 5. Order Flow or Momentum Alignment: Taker sell dominance or negative CVD or falling RSI
+        const hasBearishFlow = takerRatio <= 0.52 || imbalanceRatio <= -0.10 || netCVD < 0 || currentRsi <= 48;
+        if (!hasBearishFlow) continue;
+
+        // 6. Freshness Guard: Ensure price is not overextended beyond fresh momentum boundary
+        const impulseOrigin = Math.max(c.high, prevC ? prevC.high : c.high);
+        const distFromOrigin = impulseOrigin - currentPrice;
+        if (distFromOrigin > maxChaseAtr * currentAtr) continue;
+
+        // 7. Dynamic Stop Loss & Take Profit Target
+        const stopLoss = impulseOrigin + Math.max(25, 0.40 * currentAtr);
+        const risk = stopLoss - currentPrice;
+        if (risk <= 0) continue;
+
+        const takeProfit = currentPrice - Math.max(risk * 2.2, 2.0 * currentAtr);
+        const rrRatio = (currentPrice - takeProfit) / risk;
+
+        return {
+          isValid: true,
+          direction: "SHORT",
+          impulsePrice: c.close,
+          impulseOrigin,
+          volumeMult: Number(volMult.toFixed(2)),
+          bodyRatio: Number(bodyRatio.toFixed(2)),
+          stopLoss,
+          takeProfit,
+          riskReward: Number(rrRatio.toFixed(2)),
+          description: `Fresh Bearish Momentum Impulse: 1m displacement ($${body.toFixed(1)} body, ${(bodyRatio * 100).toFixed(0)}% body ratio) broke micro-support $${priorLow.toFixed(2)} with ${volMult.toFixed(2)}x volume surge & taker sell flow (${((1 - takerRatio) * 100).toFixed(1)}%). Early expansion phase active (SL: $${stopLoss.toFixed(2)}, TP: $${takeProfit.toFixed(2)}, R:R ${rrRatio.toFixed(2)}:1).`
+        };
+      }
+    } else if (direction === "LONG") {
+      for (const idx of scanIndices) {
+        if (idx < 5) continue;
+        const c = this.candles1m[idx];
+        const range = Math.max(1.0, c.high - c.low);
+        const body = c.close - c.open; // positive if bullish
+        const bodyRatio = body / range;
+
+        // 1. High Displacement: Bullish body >= 0.40 * ATR (or >= $25) with body ratio >= minBodyRatio
+        const isSingleDisplacement = body >= Math.max(25, 0.40 * currentAtr) && bodyRatio >= minBodyRatio;
+        const prevC = this.candles1m[idx - 1];
+        const twoCandleBody = prevC ? (c.close - prevC.open) : 0;
+        const isTwoCandleDisplacement = prevC && twoCandleBody >= Math.max(45, 0.75 * currentAtr) && c.close > prevC.close && prevC.close > prevC.open;
+
+        if (!isSingleDisplacement && !isTwoCandleDisplacement) continue;
+
+        // 2. Strong Closing Conviction: Candle closed near highs (upper wick <= 38% of range)
+        const upperWick = c.high - c.close;
+        const upperWickRatio = upperWick / range;
+        if (upperWickRatio > 0.38) continue;
+
+        // 3. Volume Expansion
+        const cVol = c.volume || avgVol;
+        const volMult = cVol / avgVol;
+        const currentRelVol = this.calculateAccurateRelativeVolume();
+        const hasVolSurge = volMult >= minVolMult || currentRelVol >= minVolMult;
+        if (!hasVolSurge) continue;
+
+        // 4. Micro-Structure Breakout: Closed above high of preceding 3 to 6 candles
+        const priorSlice = this.candles1m.slice(Math.max(0, idx - 5), idx);
+        const priorHigh = priorSlice.length > 0 ? Math.max(...priorSlice.map(p => p.high)) : c.open;
+        const brokePriorHigh = c.close > priorHigh || c.high > priorHigh;
+        if (!brokePriorHigh) continue;
+
+        // 5. Order Flow or Momentum Alignment
+        const hasBullishFlow = takerRatio >= 0.48 || imbalanceRatio >= 0.10 || netCVD > 0 || currentRsi >= 52;
+        if (!hasBullishFlow) continue;
+
+        // 6. Freshness Guard
+        const impulseOrigin = Math.min(c.low, prevC ? prevC.low : c.low);
+        const distFromOrigin = currentPrice - impulseOrigin;
+        if (distFromOrigin > maxChaseAtr * currentAtr) continue;
+
+        // 7. Dynamic Stop Loss & Take Profit Target
+        const stopLoss = impulseOrigin - Math.max(25, 0.40 * currentAtr);
+        const risk = currentPrice - stopLoss;
+        if (risk <= 0) continue;
+
+        const takeProfit = currentPrice + Math.max(risk * 2.2, 2.0 * currentAtr);
+        const rrRatio = (takeProfit - currentPrice) / risk;
+
+        return {
+          isValid: true,
+          direction: "LONG",
+          impulsePrice: c.close,
+          impulseOrigin,
+          volumeMult: Number(volMult.toFixed(2)),
+          bodyRatio: Number(bodyRatio.toFixed(2)),
+          stopLoss,
+          takeProfit,
+          riskReward: Number(rrRatio.toFixed(2)),
+          description: `Fresh Bullish Momentum Impulse: 1m displacement ($${body.toFixed(1)} body, ${(bodyRatio * 100).toFixed(0)}% body ratio) broke micro-resistance $${priorHigh.toFixed(2)} with ${volMult.toFixed(2)}x volume surge & taker buy flow (${(takerRatio * 100).toFixed(1)}%). Early expansion phase active (SL: $${stopLoss.toFixed(2)}, TP: $${takeProfit.toFixed(2)}, R:R ${rrRatio.toFixed(2)}:1).`
+        };
+      }
+    }
+
+    return {
+      isValid: false,
+      direction,
+      impulsePrice: 0,
+      impulseOrigin: 0,
+      volumeMult: 0,
+      bodyRatio: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      riskReward: 0,
+      description: "No active fresh momentum impulse detected"
+    };
+  }
+
   public evaluateContextAwareVolume(
     direction: "LONG" | "SHORT" | "NEUTRAL",
     relVolume: number,
@@ -8600,6 +8882,7 @@ class TradingEngine {
     
     // Determine active setup category from structCheck message or setupType
     const msg = (structCheck?.message || "").toLowerCase();
+    const isFreshMomentum = msg.includes("fresh momentum") || msg.includes("setup 14");
     const isBreakout = msg.includes("breakout") || msg.includes("super strong") || msg.includes("immediate breakout");
     const isPullbackRetest = msg.includes("pullback") || msg.includes("retest") || msg.includes("mitigation");
     const isEmaRetrace = msg.includes("ema") || msg.includes("pushback") || msg.includes("bounce");
@@ -8613,7 +8896,11 @@ class TradingEngine {
     let targetRelVol = baseMinRelVol; // default e.g. 1.30x
     let categoryDescription = "Standard momentum entry: requires clear transaction volume expansion above 20-period moving average.";
 
-    if (isOiFlush) {
+    if (isFreshMomentum) {
+      setupCategory = "Fresh Momentum Impulse";
+      targetRelVol = Math.min(baseMinRelVol, 1.15);
+      categoryDescription = "Fresh Momentum Impulse: Early 1m displacement burst supported by volume expansion (>= 1.15x) and immediate taker aggression.";
+    } else if (isOiFlush) {
       setupCategory = "Liquidation Cascade Fade (OI Flush)";
       targetRelVol = Math.max(1.30, baseMinRelVol);
       categoryDescription = "OI Flush Cascade Fade: Requires confirmed volume surge (>= 1.30x) during liquidation flush followed by exhaustion.";
@@ -10661,14 +10948,18 @@ class TradingEngine {
     const isConditionB = isOutsideBB || isEmaOverextended;
 
     // Extreme Confluence: Parabolic & mathematically exhausted -> BLOCK ENTRY
-    if (isConditionA && isConditionB) {
+    const isFreshImpulse = this.evaluateFreshMomentumImpulseSetup(execDirection).isValid;
+
+    if (isConditionA && isConditionB && !isFreshImpulse) {
       this.log(
         `  [ENTRY BLOCKED - Confluence of Extremes] Late-stage exhaustion breakout detected! Order Flow Climax (Imbalance: ${(rawImbalance * 100).toFixed(1)}%, Taker: ${(takerRatio * 100).toFixed(1)}%) & Physical Overextension (Outside BB: ${isOutsideBB}, Dist to EMA9: $${distEma9.toFixed(2)} vs 1.5xATR $${(1.5 * lastAtr).toFixed(2)}). Trade entry aborted.`
       );
       return;
     }
 
-    if (isConditionA && !isConditionB) {
+    if (isFreshImpulse) {
+      this.log(`[FRESH MOMENTUM] Early-stage momentum impulse displacement verified (Setup 14). Bypassing late-stage exhaustion block.`);
+    } else if (isConditionA && !isConditionB) {
       this.log(`[VOLT] [High-Momentum Breakout Allowed]: Extreme Order Flow detected, but Price is not overextended. Executing Market Order.`);
     } else if (isConditionB && !isConditionA) {
       this.log(`  [Steady Trend Grind Allowed]: Price is overextended, but Order Flow is not climactic. Executing Market Order.`);

@@ -315,6 +315,10 @@ const DEFAULT_CONFIG: StrategyConfig = {
     oi_flush_min_vol_mult: 1.8,
     oi_flush_min_reversal_wick_pct: 45,
     oi_flush_require_second_candle_confirmation: true,
+    fresh_momentum_strategy_enabled: true,
+    fresh_momentum_min_body_ratio: 0.48,
+    fresh_momentum_min_vol_mult: 1.15,
+    fresh_momentum_max_chase_atr: 4.5,
   },
   gate_scoring: {
     enabled: true,
@@ -1276,6 +1280,10 @@ class DatabaseManager {
       if (ms.oi_flush_min_vol_mult === undefined) { ms.oi_flush_min_vol_mult = def.oi_flush_min_vol_mult || 1.8; changed = true; }
       if (ms.oi_flush_min_reversal_wick_pct === undefined) { ms.oi_flush_min_reversal_wick_pct = def.oi_flush_min_reversal_wick_pct || 45; changed = true; }
       if (ms.oi_flush_require_second_candle_confirmation === undefined) { ms.oi_flush_require_second_candle_confirmation = def.oi_flush_require_second_candle_confirmation !== false; changed = true; }
+      if (ms.fresh_momentum_strategy_enabled === undefined) { ms.fresh_momentum_strategy_enabled = def.fresh_momentum_strategy_enabled !== false; changed = true; }
+      if (ms.fresh_momentum_min_body_ratio === undefined) { ms.fresh_momentum_min_body_ratio = def.fresh_momentum_min_body_ratio || 0.48; changed = true; }
+      if (ms.fresh_momentum_min_vol_mult === undefined) { ms.fresh_momentum_min_vol_mult = def.fresh_momentum_min_vol_mult || 1.15; changed = true; }
+      if (ms.fresh_momentum_max_chase_atr === undefined) { ms.fresh_momentum_max_chase_atr = def.fresh_momentum_max_chase_atr || 4.5; changed = true; }
     }
 
     if (!this.cache?.config?.gate_scoring) {

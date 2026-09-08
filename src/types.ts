@@ -355,6 +355,10 @@ export interface StrategyConfig {
     oi_flush_min_vol_mult?: number; // Minimum volume multiplier on the flush impulse candle relative to 20-period SMA (default: 1.8x)
     oi_flush_min_reversal_wick_pct?: number; // Minimum reversal wick percentage on the liquidation flush candle (default: 45%)
     oi_flush_require_second_candle_confirmation?: boolean; // Require 2nd candle or delta stabilization confirmation before entering cascade fade (default: true)
+    fresh_momentum_strategy_enabled?: boolean; // Enable Fresh Momentum Impulse Strategy (Setup 14) (default: true)
+    fresh_momentum_min_body_ratio?: number; // Minimum body-to-range ratio for displacement candle (default: 0.48)
+    fresh_momentum_min_vol_mult?: number; // Minimum volume multiplier relative to 20-period SMA (default: 1.15x)
+    fresh_momentum_max_chase_atr?: number; // Maximum ATR distance from impulse origin to qualify as fresh (default: 4.5x)
   };
   gate_scoring?: {
     enabled: boolean;

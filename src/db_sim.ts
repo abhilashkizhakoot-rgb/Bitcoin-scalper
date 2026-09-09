@@ -217,6 +217,9 @@ const DEFAULT_CONFIG: StrategyConfig = {
     simulate_paper_fees: true,
     delta_india_gst_enabled: true,
     delta_scalper_offer_enabled: true,
+    smart_stall_exit_enabled: true,
+    stall_evaluation_minutes: 25,
+    max_trade_duration_minutes: 60,
     default_order_execution: "TAKER",
     trailing_stop_loss_enabled: true,
     trailing_stop_loss_distance_atr: 1.45,
@@ -1136,6 +1139,18 @@ class DatabaseManager {
       }
       if (this.cache.config.risk_management.delta_scalper_offer_enabled === undefined) {
         this.cache.config.risk_management.delta_scalper_offer_enabled = true;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.smart_stall_exit_enabled === undefined) {
+        this.cache.config.risk_management.smart_stall_exit_enabled = true;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.stall_evaluation_minutes === undefined) {
+        this.cache.config.risk_management.stall_evaluation_minutes = 25;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.max_trade_duration_minutes === undefined) {
+        this.cache.config.risk_management.max_trade_duration_minutes = 60;
         changed = true;
       }
       if (this.cache.config.risk_management.stop_loss_atr_multiplier === undefined || isNaN(this.cache.config.risk_management.stop_loss_atr_multiplier) || this.cache.config.risk_management.stop_loss_atr_multiplier <= 0) {

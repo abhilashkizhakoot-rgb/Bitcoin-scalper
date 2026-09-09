@@ -21,6 +21,7 @@ export enum ExitReason {
   TAKE_PROFIT = "TAKE_PROFIT",
   STOP_LOSS = "STOP_LOSS",
   TIME_LIMIT_29MIN = "TIME_LIMIT_29MIN",
+  STALL_DECAY = "STALL_DECAY",
   SENTIMENT_REVERSAL = "SENTIMENT_REVERSAL",
   REGIME_CHANGE = "REGIME_CHANGE",
   CIRCUIT_BREAKER = "CIRCUIT_BREAKER",
@@ -249,6 +250,7 @@ export interface StrategyConfig {
     breakeven_trigger_atr?: number; // ATR gain threshold to lock stop-loss to Breakeven + Fees (e.g. 1.0x ATR)
     max_consecutive_losses: number; // e.g. 3
     consecutive_losses_cooldown_minutes: number; // e.g. 30
+    anti_whipsaw_cooldown_seconds?: number; // Anti-whipsaw directional cooldown window in seconds (default: 180s)
     daily_loss_limit_pct: number; // e.g. 2.0
     weekly_loss_limit_pct: number; // e.g. 5.0
     intra_trade_drawdown_limit_pct: number; // e.g. 1.5
@@ -257,6 +259,9 @@ export interface StrategyConfig {
     simulate_paper_fees?: boolean; // Whether to simulate exchange fees in paper mode
     delta_india_gst_enabled?: boolean; // Whether to apply 18% GST to trading fees
     delta_scalper_offer_enabled?: boolean; // Pay zero closing fee if trade is closed within 30 minutes
+    smart_stall_exit_enabled?: boolean; // Enable Smart Stall Exit: let profitable trades run past 29m while cutting stagnant/underwater trades before 30m fee deadline
+    stall_evaluation_minutes?: number; // Minute mark to begin smart stall evaluation (default: 25)
+    max_trade_duration_minutes?: number; // Max holding time ceiling for profitable runners (default: 60)
     default_order_execution?: "MAKER" | "TAKER"; // Default order execution type
     trailing_stop_loss_enabled?: boolean; // Dynamic trailing stop loss trigger
     trailing_stop_loss_distance_atr?: number; // ATR distance multiplier for trailing

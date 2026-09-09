@@ -420,6 +420,7 @@ class TradingEngine {
 
   private getGateIdByName(name: string): string {
     const n = name.toLowerCase();
+    if (n.includes("anti-whipsaw") || n.includes("whipsaw")) return "whipsaw";
     if (n.includes("pre-flight") || n.includes("preflight") || n.includes("operational safety")) return "preflight";
     if (n.includes("value extension") || n.includes("z-score") || n.includes("z_dist") || n.includes("overextension") || n.includes("vwap deviation") || (n.includes("vwap") && !n.includes("ema")) || n.includes("ema 100") || n.includes("ema100")) return "value_extension";
     if (n.includes("catboost")) return "catboost";
@@ -429,7 +430,7 @@ class TradingEngine {
     if (n.includes("sentiment")) return "sentiment";
     if (n.includes("volume") && !n.includes("volume profiling")) return "volume";
     if (n.includes("news")) return "news";
-    if (n.includes("limit") || n.includes("equity") || n.includes("credentials") || (n.includes("cooldown") && !n.includes("regime"))) return "preflight";
+    if (n.includes("limit") || n.includes("equity") || n.includes("credentials") || (n.includes("cooldown") && !n.includes("regime") && !n.includes("whipsaw"))) return "preflight";
     if (n.includes("adx")) return "adx";
     if (n.includes("timing")) return "timing";
     if (n.includes("wedge")) return "wedge";
@@ -472,6 +473,12 @@ class TradingEngine {
 
   private isGateMandatory(config: StrategyConfig, name: string): boolean {
     const gateId = this.getGateIdByName(name);
+    // Mandatory Safety Gates: Strictly enforced regardless of weighted scoring or regime overrides
+    // 1. Unified Value Extension Anchor: Prevents catastrophic entry into capitulation bottom wicks or blow-off tops
+    if (gateId === "value_extension") return true;
+    // 2. Anti-Whipsaw Directional Lockout: Prevents instant reverse-trading into market maker liquidity sweeps
+    if (gateId === "whipsaw") return true;
+
     const adaptiveStatus = this.getRegimeAdaptiveGateStatus(config, gateId);
     if (adaptiveStatus === "MANDATORY") return true;
     if (adaptiveStatus === "WEIGHTED" || adaptiveStatus === "BYPASSED") return false;
@@ -479,12 +486,14 @@ class TradingEngine {
     const mandatory = config.general.mandatory_gates || [];
     if (mandatory.includes(gateId)) return true;
     if (gateId === "preflight" && mandatory.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g))) return true;
-    if (gateId === "value_extension" && mandatory.some(g => ["vwap", "ema100", "overextension", "value_extension"].includes(g))) return true;
     return false;
   }
 
   private isGateWeighted(config: StrategyConfig, name: string): boolean {
     const gateId = this.getGateIdByName(name);
+    // Value extension and Anti-Whipsaw are strictly mandatory safety gates, never diluted by weighted scoring
+    if (gateId === "value_extension" || gateId === "whipsaw") return false;
+
     const adaptiveStatus = this.getRegimeAdaptiveGateStatus(config, gateId);
     if (adaptiveStatus === "WEIGHTED") return true;
     if (adaptiveStatus === "MANDATORY" || adaptiveStatus === "BYPASSED") return false;
@@ -492,12 +501,13 @@ class TradingEngine {
     const weighted = config.general.weighted_gates || [];
     if (weighted.includes(gateId)) return true;
     if (gateId === "preflight" && weighted.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g))) return true;
-    if (gateId === "value_extension" && weighted.some(g => ["vwap", "ema100", "overextension", "value_extension"].includes(g))) return true;
     return false;
   }
 
   private isGateActive(config: StrategyConfig, name: string): boolean {
     const gateId = this.getGateIdByName(name);
+    if (gateId === "value_extension" || gateId === "whipsaw") return true;
+
     const adaptiveStatus = this.getRegimeAdaptiveGateStatus(config, gateId);
     if (adaptiveStatus === "MANDATORY" || adaptiveStatus === "WEIGHTED") return true;
     if (adaptiveStatus === "BYPASSED") return false;
@@ -509,10 +519,6 @@ class TradingEngine {
       if (gateId === "preflight" && (
         mandatory.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g)) ||
         weighted.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g))
-      )) return true;
-      if (gateId === "value_extension" && (
-        mandatory.some(g => ["vwap", "ema100", "overextension", "value_extension"].includes(g)) ||
-        weighted.some(g => ["vwap", "ema100", "overextension", "value_extension"].includes(g))
       )) return true;
       return false;
     }
@@ -1062,6 +1068,56 @@ class TradingEngine {
       remainingSeconds: 0,
       expiryTime: null
     };
+  }
+
+  public getAntiWhipsawLockoutStatus(candidateDirection: "LONG" | "SHORT"): {
+    active: boolean;
+    remainingSeconds: number;
+    lastExitDirection: "LONG" | "SHORT" | null;
+    reason: string;
+  } {
+    const config = dbManager.getConfig();
+    const lockoutSec = config.risk_management.anti_whipsaw_cooldown_seconds !== undefined
+      ? config.risk_management.anti_whipsaw_cooldown_seconds
+      : 180; // 3 minutes default
+
+    const closedTrades = dbManager.getTrades()
+      .filter((t) => t.exit_timestamp !== null)
+      .sort((a, b) => new Date(b.exit_timestamp!).getTime() - new Date(a.exit_timestamp!).getTime());
+
+    if (closedTrades.length === 0) {
+      return { active: false, remainingSeconds: 0, lastExitDirection: null, reason: "No closed trades" };
+    }
+
+    const latest = closedTrades[0];
+    const isLoss = latest.is_win === false || 
+      (latest.pnl_usdt !== null && latest.pnl_usdt < 0) || 
+      latest.exit_reason === ExitReason.STOP_LOSS ||
+      (typeof latest.exit_reason === "string" && (latest.exit_reason.includes("STOP_LOSS") || latest.exit_reason.includes("TRAILING")));
+
+    if (!isLoss || !latest.exit_timestamp) {
+      return { active: false, remainingSeconds: 0, lastExitDirection: null, reason: "Last trade was not a loss" };
+    }
+
+    const exitTime = new Date(latest.exit_timestamp).getTime();
+    const now = Date.now();
+    const elapsedSec = (now - exitTime) / 1000;
+
+    if (elapsedSec < lockoutSec) {
+      const opposingDirection = latest.direction === TradeDirection.LONG ? "SHORT" : "LONG";
+      // If candidate direction is OPPOSING the stopped-out trade direction, trigger lockout!
+      if (candidateDirection === opposingDirection) {
+        const remaining = Math.ceil(lockoutSec - elapsedSec);
+        return {
+          active: true,
+          remainingSeconds: remaining,
+          lastExitDirection: latest.direction as "LONG" | "SHORT",
+          reason: `Anti-Whipsaw Lockout: Recent ${latest.direction} trade stopped out ${Math.round(elapsedSec)}s ago (${latest.exit_reason || "STOP_LOSS"}). Opposing ${candidateDirection} entries locked out for ${remaining}s to prevent whipsaw stop-runs.`
+        };
+      }
+    }
+
+    return { active: false, remainingSeconds: 0, lastExitDirection: null, reason: "Clear" };
   }
 
   public calculateAverageSentiment(headlines: NewsHeadline[]): number {
@@ -1918,24 +1974,35 @@ class TradingEngine {
     const baseZLimit = Math.min(isTrending ? 2.20 : 2.00, userMaxZCap);
     const maxZLimit = Math.min((isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure) ? 3.20 : baseZLimit, userMaxZCap);
 
-    // Flaw 2 Fix: Single-Component Exhaustion Ceiling (Anti-Dilution Guard)
-    // Prevents composite Z_dist averaging from masking extreme individual overextension (> 3.00 sigma from 100 EMA or VWAP).
-    const singleComponentCeiling = isTrending ? 3.00 : 2.60;
+    // Absolute Z-score and Single-Component Exhaustion Hard-Locks (MANDATORY SAFETY GATE)
+    // 1. |Z_dist| hard ceiling of 2.50 sigma
+    const hardZDistCeiling = 2.50;
+    const isZDistOverextended = Math.abs(zDist) > hardZDistCeiling;
+
+    // 2. Single-Component Exhaustion Ceiling: Anti-dilution guard against extreme individual deviations (> 3.00 sigma)
+    const singleComponentCeiling = 3.00;
     const isSingleComponentExhausted = signalDirection === "LONG"
       ? (zEma > singleComponentCeiling || zVwap > singleComponentCeiling)
       : (zEma < -singleComponentCeiling || zVwap < -singleComponentCeiling);
 
+    // 3. Absolute RSI Exhaustion Boundaries: Prevent buying blow-off tops (>= 75.0) or selling capitulation bottoms (<= 25.0)
+    const isRsiTerminalExhausted = signalDirection === "LONG"
+      ? currentRsi >= 75.0
+      : (signalDirection === "SHORT" ? currentRsi <= 25.0 : false);
+
     let isValueExtensionMet = true;
     let isValueExtensionSoftened = false;
 
-    if (signalDirection === "LONG") {
-      if (zDist > maxZLimit || isSingleComponentExhausted) {
+    if (isZDistOverextended || isSingleComponentExhausted || isRsiTerminalExhausted) {
+      isValueExtensionMet = false;
+    } else if (signalDirection === "LONG") {
+      if (zDist > maxZLimit) {
         isValueExtensionMet = false;
       } else if (zDist > baseZLimit && zDist <= maxZLimit) {
         isValueExtensionSoftened = true;
       }
     } else if (signalDirection === "SHORT") {
-      if (zDist < -maxZLimit || isSingleComponentExhausted) {
+      if (zDist < -maxZLimit) {
         isValueExtensionMet = false;
       } else if (zDist < -baseZLimit && zDist >= -maxZLimit) {
         isValueExtensionSoftened = true;
@@ -1945,12 +2012,14 @@ class TradingEngine {
     const zDistFormatted = zDist >= 0 ? `+${zDist.toFixed(2)}` : zDist.toFixed(2);
     let valueExtensionValStr = "";
     if (isValueExtensionMet) {
-      valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, Chase: ${zChase.toFixed(2)}sigma) | Status: PASSED${isValueExtensionSoftened ? " (SOFTENED BY MOMENTUM)" : ""}`;
+      valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, Chase: ${zChase.toFixed(2)}sigma, RSI: ${currentRsi.toFixed(1)}) | Status: PASSED${isValueExtensionSoftened ? " (SOFTENED BY MOMENTUM)" : ""}`;
+    } else if (isRsiTerminalExhausted) {
+      valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, RSI: ${currentRsi.toFixed(1)}) | EXHAUSTION BLOCKED (RSI ${currentRsi.toFixed(1)} ${signalDirection === "SHORT" ? "<= 25.0 Capitulation Floor" : ">= 75.0 Blow-off Ceiling"})`;
     } else if (isSingleComponentExhausted) {
       const overextendedMetric = Math.abs(zEma) > singleComponentCeiling ? `EMA100: ${zEma.toFixed(2)}sigma` : `VWAP: ${zVwap.toFixed(2)}sigma`;
       valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, Chase: ${zChase.toFixed(2)}sigma) | EXHAUSTION BLOCKED (Single component overextended: ${overextendedMetric} > ${singleComponentCeiling.toFixed(2)}sigma limit)`;
     } else {
-      valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, Chase: ${zChase.toFixed(2)}sigma) | EXHAUSTION BLOCKED (|Z_dist| > ${maxZLimit.toFixed(2)})`;
+      valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, Chase: ${zChase.toFixed(2)}sigma) | EXHAUSTION BLOCKED (|Z_dist| ${Math.abs(zDist).toFixed(2)} > ${Math.min(maxZLimit, hardZDistCeiling).toFixed(2)})`;
     }
 
     conditions.push({
@@ -2286,6 +2355,21 @@ class TradingEngine {
         ? "No upper rejection wick cluster at resistance ceiling"
         : (signalDirection === "SHORT" ? "No lower rejection wick cluster at demand floor" : "Clean price action without contrary exhaustion wicks"),
       description: "Strictly blocks trade entry signals when price action exhibits repeated rejection wicks at local extremes, indicating trend exhaustion and overhead supply or demand absorption.",
+      priority: "CRITICAL",
+    });
+
+    // Anti-Whipsaw Directional Lockout Gate (Mandatory Safety Gate)
+    const whipsawCheck = this.getAntiWhipsawLockoutStatus(signalDirection as "LONG" | "SHORT");
+    const isWhipsawGateMet = !whipsawCheck.active;
+
+    conditions.push({
+      name: "Anti-Whipsaw Directional Lockout",
+      met: isWhipsawGateMet,
+      current_value: whipsawCheck.active
+        ? `BLOCKED: ${whipsawCheck.reason}`
+        : "PASSING (No immediate opposing stop-loss exit within 180s)",
+      required: "Wait >= 180s before flipping to opposite direction after stop-loss exit",
+      description: "Strictly blocks entering trades in the opposing direction within 180 seconds after a stop-out, preventing market maker liquidity sweeps and consecutive whipsaw losses.",
       priority: "CRITICAL",
     });
 
@@ -8717,51 +8801,84 @@ class TradingEngine {
     const rsi14 = this.calculateRSI(this.candles1m.map(c => c.close), 14);
     const currentRsi = rsi14[lastIdx] || 50;
 
+    // EMA 20 Mean Distance Gate (Freshness check)
+    const ema20 = this.calculateEMA(this.candles1m.map(c => c.close), 20);
+    const currentEma20 = ema20[lastIdx] || currentPrice;
+    const distToEma20 = Math.abs(currentPrice - currentEma20);
+    const isDetachedFromEma20 = distToEma20 > 1.8 * currentAtr;
+
     if (direction === "SHORT") {
+      // Freshness Guard: Block if RSI is already in terminal oversold territory (< 28.0) or price is overextended from EMA 20
+      if (currentRsi < 28.0 || isDetachedFromEma20) {
+        return {
+          isValid: false,
+          direction,
+          impulsePrice: 0,
+          impulseOrigin: 0,
+          volumeMult: 0,
+          bodyRatio: 0,
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: isDetachedFromEma20
+            ? `Price detached from EMA 20 ($${distToEma20.toFixed(1)} > 1.8xATR $${(1.8 * currentAtr).toFixed(1)}) - Late-stage momentum, not fresh`
+            : `RSI ${currentRsi.toFixed(1)} < 28.0 (Terminal Oversold) - Momentum exhausted`
+        };
+      }
+
       for (const idx of scanIndices) {
         if (idx < 5) continue;
         const c = this.candles1m[idx];
         const range = Math.max(1.0, c.high - c.low);
         const body = c.open - c.close; // positive if bearish
-        const bodyRatio = body / range;
+        const rawBodyRatio = range > 0 ? body / range : 0;
+        const bodyRatio = Math.min(1.0, Math.max(0.0, rawBodyRatio));
 
-        // 1. High Displacement: Bearish body >= 0.40 * ATR (or >= $25) with body ratio >= minBodyRatio
-        const isSingleDisplacement = body >= Math.max(25, 0.40 * currentAtr) && bodyRatio >= minBodyRatio;
-        // Or 2-candle cumulative displacement
+        // 1. ATR-Relative Single-Candle Displacement: Bearish body >= max(25, 0.45 * ATR) with normalized body ratio >= minBodyRatio
+        const isSingleDisplacement = body >= Math.max(25, 0.45 * currentAtr) && bodyRatio >= minBodyRatio;
+        
+        // 2. Minimum Displacement on 2-Candle Continuation:
+        // Current candle must provide at least 0.30 * ATR displacement (not micro-noise) and body ratio >= 0.35,
+        // and 2-candle cumulative displacement must displace >= max(45, 0.85 * ATR).
         const prevC = this.candles1m[idx - 1];
         const twoCandleBody = prevC ? (prevC.open - c.close) : 0;
-        const isTwoCandleDisplacement = prevC && twoCandleBody >= Math.max(45, 0.75 * currentAtr) && c.close < prevC.close && prevC.close < prevC.open;
+        const currentCandleDisplacement = body >= Math.max(18, 0.30 * currentAtr) && bodyRatio >= 0.35;
+        const isTwoCandleDisplacement = prevC &&
+          currentCandleDisplacement &&
+          twoCandleBody >= Math.max(45, 0.85 * currentAtr) &&
+          c.close < prevC.close &&
+          prevC.close < prevC.open;
 
         if (!isSingleDisplacement && !isTwoCandleDisplacement) continue;
 
-        // 2. Strong Closing Conviction: Candle closed near lows (lower wick <= 38% of range)
-        const lowerWick = c.close - c.low;
+        // 3. Strong Closing Conviction: Candle closed near lows (lower wick <= 35% of range)
+        const lowerWick = Math.max(0, c.close - c.low);
         const lowerWickRatio = lowerWick / range;
-        if (lowerWickRatio > 0.38) continue;
+        if (lowerWickRatio > 0.35) continue;
 
-        // 3. Volume Expansion: Volume >= minVolMult OR relative volume >= minVolMult
+        // 4. Volume Expansion: Volume >= minVolMult OR relative volume >= minVolMult
         const cVol = c.volume || avgVol;
         const volMult = cVol / avgVol;
         const currentRelVol = this.calculateAccurateRelativeVolume();
         const hasVolSurge = volMult >= minVolMult || currentRelVol >= minVolMult;
         if (!hasVolSurge) continue;
 
-        // 4. Micro-Structure Breakdown: Closed below low of the preceding 3 to 6 candles
+        // 5. Micro-Structure Breakdown: Closed below low of the preceding 3 to 6 candles
         const priorSlice = this.candles1m.slice(Math.max(0, idx - 5), idx);
         const priorLow = priorSlice.length > 0 ? Math.min(...priorSlice.map(p => p.low)) : c.open;
         const brokePriorLow = c.close < priorLow || c.low < priorLow;
         if (!brokePriorLow) continue;
 
-        // 5. Order Flow or Momentum Alignment: Taker sell dominance or negative CVD or falling RSI
+        // 6. Order Flow or Momentum Alignment: Taker sell dominance or negative CVD or falling RSI
         const hasBearishFlow = takerRatio <= 0.52 || imbalanceRatio <= -0.10 || netCVD < 0 || currentRsi <= 48;
         if (!hasBearishFlow) continue;
 
-        // 6. Freshness Guard: Ensure price is not overextended beyond fresh momentum boundary
+        // 7. Freshness Guard: Ensure price is not overextended beyond fresh momentum boundary
         const impulseOrigin = Math.max(c.high, prevC ? prevC.high : c.high);
         const distFromOrigin = impulseOrigin - currentPrice;
         if (distFromOrigin > maxChaseAtr * currentAtr) continue;
 
-        // 7. Dynamic Stop Loss & Take Profit Target
+        // 8. Dynamic Stop Loss & Take Profit Target
         const stopLoss = impulseOrigin + Math.max(25, 0.40 * currentAtr);
         const risk = stopLoss - currentPrice;
         if (risk <= 0) continue;
@@ -8783,49 +8900,77 @@ class TradingEngine {
         };
       }
     } else if (direction === "LONG") {
+      // Freshness Guard: Block if RSI is already in terminal overbought territory (> 72.0) or price is overextended from EMA 20
+      if (currentRsi > 72.0 || isDetachedFromEma20) {
+        return {
+          isValid: false,
+          direction,
+          impulsePrice: 0,
+          impulseOrigin: 0,
+          volumeMult: 0,
+          bodyRatio: 0,
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: isDetachedFromEma20
+            ? `Price detached from EMA 20 ($${distToEma20.toFixed(1)} > 1.8xATR $${(1.8 * currentAtr).toFixed(1)}) - Late-stage momentum, not fresh`
+            : `RSI ${currentRsi.toFixed(1)} > 72.0 (Terminal Overbought) - Momentum exhausted`
+        };
+      }
+
       for (const idx of scanIndices) {
         if (idx < 5) continue;
         const c = this.candles1m[idx];
         const range = Math.max(1.0, c.high - c.low);
         const body = c.close - c.open; // positive if bullish
-        const bodyRatio = body / range;
+        const rawBodyRatio = range > 0 ? body / range : 0;
+        const bodyRatio = Math.min(1.0, Math.max(0.0, rawBodyRatio));
 
-        // 1. High Displacement: Bullish body >= 0.40 * ATR (or >= $25) with body ratio >= minBodyRatio
-        const isSingleDisplacement = body >= Math.max(25, 0.40 * currentAtr) && bodyRatio >= minBodyRatio;
+        // 1. ATR-Relative Single-Candle Displacement: Bullish body >= max(25, 0.45 * ATR) with normalized body ratio >= minBodyRatio
+        const isSingleDisplacement = body >= Math.max(25, 0.45 * currentAtr) && bodyRatio >= minBodyRatio;
+
+        // 2. Minimum Displacement on 2-Candle Continuation:
+        // Current candle must provide at least 0.30 * ATR displacement and body ratio >= 0.35,
+        // and 2-candle cumulative displacement must displace >= max(45, 0.85 * ATR).
         const prevC = this.candles1m[idx - 1];
         const twoCandleBody = prevC ? (c.close - prevC.open) : 0;
-        const isTwoCandleDisplacement = prevC && twoCandleBody >= Math.max(45, 0.75 * currentAtr) && c.close > prevC.close && prevC.close > prevC.open;
+        const currentCandleDisplacement = body >= Math.max(18, 0.30 * currentAtr) && bodyRatio >= 0.35;
+        const isTwoCandleDisplacement = prevC &&
+          currentCandleDisplacement &&
+          twoCandleBody >= Math.max(45, 0.85 * currentAtr) &&
+          c.close > prevC.close &&
+          prevC.close > prevC.open;
 
         if (!isSingleDisplacement && !isTwoCandleDisplacement) continue;
 
-        // 2. Strong Closing Conviction: Candle closed near highs (upper wick <= 38% of range)
-        const upperWick = c.high - c.close;
+        // 3. Strong Closing Conviction: Candle closed near highs (upper wick <= 35% of range)
+        const upperWick = Math.max(0, c.high - c.close);
         const upperWickRatio = upperWick / range;
-        if (upperWickRatio > 0.38) continue;
+        if (upperWickRatio > 0.35) continue;
 
-        // 3. Volume Expansion
+        // 4. Volume Expansion
         const cVol = c.volume || avgVol;
         const volMult = cVol / avgVol;
         const currentRelVol = this.calculateAccurateRelativeVolume();
         const hasVolSurge = volMult >= minVolMult || currentRelVol >= minVolMult;
         if (!hasVolSurge) continue;
 
-        // 4. Micro-Structure Breakout: Closed above high of preceding 3 to 6 candles
+        // 5. Micro-Structure Breakout: Closed above high of preceding 3 to 6 candles
         const priorSlice = this.candles1m.slice(Math.max(0, idx - 5), idx);
         const priorHigh = priorSlice.length > 0 ? Math.max(...priorSlice.map(p => p.high)) : c.open;
         const brokePriorHigh = c.close > priorHigh || c.high > priorHigh;
         if (!brokePriorHigh) continue;
 
-        // 5. Order Flow or Momentum Alignment
+        // 6. Order Flow or Momentum Alignment
         const hasBullishFlow = takerRatio >= 0.48 || imbalanceRatio >= 0.10 || netCVD > 0 || currentRsi >= 52;
         if (!hasBullishFlow) continue;
 
-        // 6. Freshness Guard
+        // 7. Freshness Guard
         const impulseOrigin = Math.min(c.low, prevC ? prevC.low : c.low);
         const distFromOrigin = currentPrice - impulseOrigin;
         if (distFromOrigin > maxChaseAtr * currentAtr) continue;
 
-        // 7. Dynamic Stop Loss & Take Profit Target
+        // 8. Dynamic Stop Loss & Take Profit Target
         const stopLoss = impulseOrigin - Math.max(25, 0.40 * currentAtr);
         const risk = currentPrice - stopLoss;
         if (risk <= 0) continue;
@@ -10918,6 +11063,13 @@ class TradingEngine {
       this.log(`[LAUNCH] SIGNAL TRIGGERED! Entering Delta Exchange ${direction} position...`);
     }
 
+    // Anti-Whipsaw Directional Lockout Guard: Strictly blocks opposing entries after a stop-out
+    const whipsawCheck = this.getAntiWhipsawLockoutStatus(execDirection);
+    if (whipsawCheck.active) {
+      this.log(`  [ENTRY BLOCKED - Anti-Whipsaw Lockout] ${whipsawCheck.reason}`);
+      return;
+    }
+
     // Dynamically calculate dynamic Stop Loss, Take Profit, and Confluence of Extremes (Exhaustion + Overextension)
     const closes = this.candles1m.map((c) => c.close);
     const currentPrice = this.currentPrice;
@@ -10928,6 +11080,21 @@ class TradingEngine {
     const lastIdx = closes.length - 1;
     const ema9Val = ema9[lastIdx] || currentPrice;
     const struct = this.getTrendMarketStructure();
+
+    const rsi14 = this.calculateRSI(closes, 14);
+    const currentRsi = rsi14[lastIdx] !== undefined ? rsi14[lastIdx] : 50;
+
+    // Hard-lock RSI boundaries (Absolute Exhaustion Ceiling / Floor)
+    // Prevents entering SHORT into terminal capitulation wicks (RSI <= 25.0)
+    // Prevents entering LONG into terminal blow-off tops (RSI >= 75.0)
+    if (execDirection === "SHORT" && currentRsi <= 25.0) {
+      this.log(`  [ENTRY BLOCKED - Absolute RSI Floor] Current RSI is ${currentRsi.toFixed(1)} <= 25.0 (Terminal Capitulation Floor). Selling into exhaustion bottom wicks is strictly blocked.`);
+      return;
+    }
+    if (execDirection === "LONG" && currentRsi >= 75.0) {
+      this.log(`  [ENTRY BLOCKED - Absolute RSI Ceiling] Current RSI is ${currentRsi.toFixed(1)} >= 75.0 (Terminal Blow-Off Ceiling). Buying into exhaustion top wicks is strictly blocked.`);
+      return;
+    }
 
     const stProfile = this.getVolumeProfileCached(this.candles1m.slice(-90), "st_1m");
     const mtProfile = this.getVolumeProfileCached(this.aggregateCandles(this.candles1m, 5).slice(-120), "mt_5m");
@@ -11496,10 +11663,62 @@ class TradingEngine {
       reason = ExitReason.STOP_LOSS;
     }
 
-    // Time Limit 29 minutes hard deadline!
-    if (durationSec >= 29 * 60) {
-      shouldExit = true;
-      reason = ExitReason.TIME_LIMIT_29MIN;
+    // --- SMART STALL & TIME-DECAY EXIT ENGINE ---
+    // Delta Exchange offers 0% taker exit fee waiver on positions closed within 30 minutes.
+    // 1. If trade is IN PROFIT at 25+ minutes:
+    //    DO NOT artificially cut the trade! Let the winning runner pursue Take Profit.
+    //    Simultaneously lock the trailing floor to at least Breakeven + Fees so gains cannot vanish.
+    // 2. If trade is UNDERWATER / STAGNANT at 25+ minutes:
+    //    Exit before minute 30 (at 28m) to lock in the 0% exit fee waiver, avoid roll-over into full SL,
+    //    and free margin for the next high-conviction setup.
+    const smartStallEnabled = config.risk_management?.smart_stall_exit_enabled !== false;
+    const stallEvalSec = (config.risk_management?.stall_evaluation_minutes || 25) * 60;
+    const maxRunnerSec = (config.risk_management?.max_trade_duration_minutes || 60) * 60;
+
+    if (smartStallEnabled) {
+      const isProfitable = currentPnL > 0 || priceReturnPct > 0.04;
+
+      if (durationSec >= stallEvalSec) {
+        if (isProfitable) {
+          // PROFITABLE RUNNER:
+          // A. Tighten stop loss to at least Breakeven + Fees (or higher if trailing SL is already higher)
+          const feeBufferUsd = Math.min(entryPrice * 0.0008, (entryFee + exitFeeProj) / (qty || 0.001));
+          if (direction === TradeDirection.LONG) {
+            const minLockBe = entryPrice + feeBufferUsd + 1.0;
+            if (minLockBe > finalStopLossPrice && minLockBe < currentPrice) {
+              finalStopLossPrice = minLockBe;
+              this.activeTrade.feature_snapshot.current_stop_loss_price = finalStopLossPrice;
+            }
+          } else {
+            const minLockBe = entryPrice - feeBufferUsd - 1.0;
+            if (minLockBe < finalStopLossPrice && minLockBe > currentPrice) {
+              finalStopLossPrice = minLockBe;
+              this.activeTrade.feature_snapshot.current_stop_loss_price = finalStopLossPrice;
+            }
+          }
+
+          // B. Absolute duration ceiling for profitable runners (default: 60 mins) to prevent indefinite capital lock
+          if (durationSec >= maxRunnerSec) {
+            shouldExit = true;
+            reason = ExitReason.TIME_LIMIT_29MIN;
+            this.log(`  [SMART RUNNER CEILING] Trade ${this.activeTrade.id} reached maximum runner holding time of ${(durationSec / 60).toFixed(0)}m in profit (+$${currentPnL.toFixed(2)} USD). Securing profit at market.`);
+          }
+        } else {
+          // UNDERWATER / STAGNANT TRADE:
+          // Exit before 30-minute fee deadline (at 28 minutes) to capture 0% Delta exit fee waiver and prevent deep SL rollover
+          if (durationSec >= 28 * 60) {
+            shouldExit = true;
+            reason = ExitReason.STALL_DECAY;
+            this.log(`  [SMART STALL EXIT] Trade ${this.activeTrade.id} underwater/stagnating ($${currentPnL.toFixed(2)} USDT, ${priceReturnPct.toFixed(2)}%) after ${(durationSec / 60).toFixed(1)}m. Executing Smart Stall Exit before 30m fee deadline to secure 0% Delta fee waiver and free margin.`);
+          }
+        }
+      }
+    } else {
+      // Legacy fallback: Hard cutoff at 29 minutes regardless of PnL
+      if (durationSec >= 29 * 60) {
+        shouldExit = true;
+        reason = ExitReason.TIME_LIMIT_29MIN;
+      }
     }
 
     // If exit condition triggered, execute exit immediately!
@@ -11546,6 +11765,11 @@ class TradingEngine {
 
     this.activeTrade = null;
     this.log(`Trade closed. Net P&L: $${finalPnL.toFixed(2)} USD. Account balance updated to: $${newBal.toFixed(2)}`);
+
+    if (!isWin || reason === ExitReason.STOP_LOSS) {
+      const opposing = trade.direction === TradeDirection.LONG ? "SHORT" : "LONG";
+      this.log(`[ANTI-WHIPSAW] Trade ${trade.id.slice(0, 8)} exited with loss (${reason}). Activated 180s directional lockout on opposing ${opposing} entries to prevent whipsaw stop-runs.`);
+    }
 
     const creds = dbManager.getCredentials();
 

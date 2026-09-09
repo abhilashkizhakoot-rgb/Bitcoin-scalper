@@ -357,6 +357,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
       case ExitReason.STOP_LOSS:
         return "bg-rose-50 border-rose-200 text-rose-700";
       case ExitReason.TIME_LIMIT_29MIN:
+      case ExitReason.STALL_DECAY:
         return "bg-indigo-50 border-indigo-200 text-indigo-700";
       case ExitReason.SENTIMENT_REVERSAL:
         return "bg-amber-50 border-amber-200 text-amber-700";
@@ -487,6 +488,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
               <option value="ALL">All Exits</option>
               <option value={ExitReason.TAKE_PROFIT}>Take Profit (TP)</option>
               <option value={ExitReason.STOP_LOSS}>Stop Loss (SL)</option>
+              <option value={ExitReason.STALL_DECAY}>Smart Stall Exit (&lt;30m)</option>
               <option value={ExitReason.TIME_LIMIT_29MIN}>29 Min Timeout</option>
               <option value={ExitReason.SENTIMENT_REVERSAL}>Sentiment Reversal</option>
               <option value={ExitReason.MANUAL_EXIT}>Manual User Exit</option>

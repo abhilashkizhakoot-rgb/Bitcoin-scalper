@@ -2510,6 +2510,47 @@ export default function ConfigPage({
                     Simulates Delta Exchange India's special promotion: exit trading fees are completely waived (Free CloseLeg) on any BTC/ETH futures positions opened and closed within a tight 30-minute window.
                   </p>
                 </div>
+
+                <div className="space-y-2 p-3 bg-indigo-50/50 rounded-lg border border-indigo-100">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                    <input
+                      type="checkbox"
+                      checked={riskConfig.smart_stall_exit_enabled !== false}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, smart_stall_exit_enabled: e.target.checked })}
+                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
+                    />
+                    <span className="text-xs font-semibold text-indigo-900 font-bold">Smart Stall &amp; Runner Exit Engine</span>
+                  </label>
+                  <p className="text-[10px] text-slate-600 leading-relaxed pl-6.5">
+                    Replaces the crude 29-minute hard cutoff: If a trade is profitable at 25m, the 29-minute cutoff is bypassed to let the runner pursue Take Profit (with trailing floor locked to Breakeven + Fees). If a trade is underwater or stagnant after 25m, it exits before minute 30 to lock in the 0% Delta exit fee waiver and prevent deep stop-loss drift.
+                  </p>
+                  {riskConfig.smart_stall_exit_enabled !== false && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 pl-6.5">
+                      <div>
+                        <label className="text-[10px] font-mono text-slate-500 uppercase block mb-1">Stall Evaluation (Mins)</label>
+                        <input
+                          type="number"
+                          value={riskConfig.stall_evaluation_minutes || 25}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, stall_evaluation_minutes: parseInputNumber(e.target.value) })}
+                          className="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
+                          min={15}
+                          max={28}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-mono text-slate-500 uppercase block mb-1">Max Runner Ceiling (Mins)</label>
+                        <input
+                          type="number"
+                          value={riskConfig.max_trade_duration_minutes || 60}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, max_trade_duration_minutes: parseInputNumber(e.target.value) })}
+                          className="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
+                          min={35}
+                          max={180}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

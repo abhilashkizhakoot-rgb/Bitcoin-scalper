@@ -948,8 +948,8 @@ class TradingEngine {
         `DETAILED EXIT STATE SNAPSHOT FOR OFFLINE OPTIMIZATION:\n` +
         `  - Exit Market Regime : ${this.currentRegime}\n` +
         `  - Exit RSI (14-period): ${currentRsi.toFixed(2)}\n` +
-        `  - Max Favorable Excursion (MFE): ${(trade.max_favorable_excursion * 100).toFixed(4)}%\n` +
-        `  - Max Adverse Excursion (MAE) : ${(trade.max_adverse_excursion * 100).toFixed(4)}%\n` +
+        `  - Max Favorable Excursion (MFE): ${(trade.max_favorable_excursion || 0).toFixed(4)}%\n` +
+        `  - Max Adverse Excursion (MAE) : ${(trade.max_adverse_excursion || 0).toFixed(4)}%\n` +
         `  - Final Position QuantityBTC : ${trade.quantity_btc} BTC\n` +
         `  - Final PNL % (including leverage): ${(trade.pnl_pct || 0).toFixed(4)}%\n` +
         `  - Entry Feature Snapshot Dump: ${JSON.stringify(trade.feature_snapshot || {})}\n` +
@@ -11499,12 +11499,30 @@ class TradingEngine {
     this.activeTrade.pnl_pct = currentPnLPct;
 
     // Record excursions (MFE and MAE)
-    if (priceReturnPct > this.activeTrade.max_favorable_excursion) {
-      this.activeTrade.max_favorable_excursion = Number(priceReturnPct.toFixed(4));
+    // Compare against current price return as well as recent candle extremes to capture intraday wicks
+    let peakFavPct = priceReturnPct;
+    let peakAdvPct = -priceReturnPct;
+
+    if (this.candles1m && this.candles1m.length > 0) {
+      const latestCandle = this.candles1m[this.candles1m.length - 1];
+      if (direction === TradeDirection.LONG) {
+        const wickFav = ((latestCandle.high - entryPrice) / entryPrice) * 100;
+        const wickAdv = ((entryPrice - latestCandle.low) / entryPrice) * 100;
+        if (wickFav > peakFavPct) peakFavPct = wickFav;
+        if (wickAdv > peakAdvPct) peakAdvPct = wickAdv;
+      } else {
+        const wickFav = ((entryPrice - latestCandle.low) / entryPrice) * 100;
+        const wickAdv = ((latestCandle.high - entryPrice) / entryPrice) * 100;
+        if (wickFav > peakFavPct) peakFavPct = wickFav;
+        if (wickAdv > peakAdvPct) peakAdvPct = wickAdv;
+      }
     }
-    const adversePct = -priceReturnPct;
-    if (adversePct > this.activeTrade.max_adverse_excursion) {
-      this.activeTrade.max_adverse_excursion = Number(adversePct.toFixed(4));
+
+    if (peakFavPct > (this.activeTrade.max_favorable_excursion || 0)) {
+      this.activeTrade.max_favorable_excursion = Number(peakFavPct.toFixed(4));
+    }
+    if (peakAdvPct > (this.activeTrade.max_adverse_excursion || 0)) {
+      this.activeTrade.max_adverse_excursion = Number(peakAdvPct.toFixed(4));
     }
 
     // Check exit conditions
@@ -11740,6 +11758,22 @@ class TradingEngine {
     const exitFee = this.calculateTradingFee(currentPrice * trade.quantity_btc, false, trade.hold_duration_seconds);
     const totalFeesPaid = Number((entryFee + exitFee).toFixed(4));
 
+    // Calculate final excursion reaching at exit price
+    const finalReturnPct = trade.direction === TradeDirection.LONG
+      ? ((currentPrice - trade.entry_price) / trade.entry_price) * 100
+      : ((trade.entry_price - currentPrice) / trade.entry_price) * 100;
+
+    let finalMfe = trade.max_favorable_excursion || 0;
+    let finalMae = trade.max_adverse_excursion || 0;
+
+    if (finalReturnPct > finalMfe) {
+      finalMfe = Number(finalReturnPct.toFixed(4));
+    }
+    const finalAdverse = -finalReturnPct;
+    if (finalAdverse > finalMae) {
+      finalMae = Number(finalAdverse.toFixed(4));
+    }
+
     // Update trade fields
     const updated = dbManager.updateTrade(trade.id, {
       exit_timestamp: new Date().toISOString(),
@@ -11750,6 +11784,8 @@ class TradingEngine {
       is_win: isWin,
       hold_duration_seconds: trade.hold_duration_seconds,
       fees_paid_usdt: totalFeesPaid,
+      max_favorable_excursion: finalMfe,
+      max_adverse_excursion: finalMae,
     });
 
     this.logTradeExitToFile(updated);

@@ -639,7 +639,7 @@ export default function Dashboard({
 
             {/* Price Candlestick chart */}
             <div className="h-[280px] w-full" id="live-futures-chart">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: 10, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                   <XAxis dataKey="time" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
@@ -654,20 +654,20 @@ export default function Dashboard({
                   <Tooltip content={<CustomTooltip />} />
                   
                   {/* Invisible bounds for high/low to force perfect YAxis auto-scaling */}
-                  <Line type="monotone" dataKey="high" stroke="none" dot={false} activeDot={false} legendType="none" />
-                  <Line type="monotone" dataKey="low" stroke="none" dot={false} activeDot={false} legendType="none" />
+                  <Line type="monotone" dataKey="high" stroke="none" dot={false} activeDot={false} legendType="none" isAnimationActive={false} />
+                  <Line type="monotone" dataKey="low" stroke="none" dot={false} activeDot={false} legendType="none" isAnimationActive={false} />
                   
                   {/* Candlestick bodies and wicks */}
-                  <Bar dataKey="candlestickRange" shape={<CandlestickBar />} />
+                  <Bar dataKey="candlestickRange" shape={<CandlestickBar />} isAnimationActive={false} />
                   
                   {/* EMA overlays */}
-                  <Line type="monotone" dataKey="ema21" stroke="#3b82f6" strokeWidth={1.5} dot={false} strokeDasharray="3 3" />
-                  <Line type="monotone" dataKey="ema50" stroke="#f59e0b" strokeWidth={1.5} dot={false} strokeDasharray="4 4" />
+                  <Line type="monotone" dataKey="ema21" stroke="#3b82f6" strokeWidth={1.5} dot={false} strokeDasharray="3 3" isAnimationActive={false} />
+                  <Line type="monotone" dataKey="ema50" stroke="#f59e0b" strokeWidth={1.5} dot={false} strokeDasharray="4 4" isAnimationActive={false} />
 
                   {/* VWAP overlays */}
-                  <Line type="monotone" dataKey="vwap" stroke="#8b5cf6" strokeWidth={1.5} dot={false} strokeDasharray="5 5" />
-                  <Line type="monotone" dataKey="vwap_upper" stroke="#f43f5e" strokeWidth={1} dot={false} strokeDasharray="2 2" />
-                  <Line type="monotone" dataKey="vwap_lower" stroke="#f43f5e" strokeWidth={1} dot={false} strokeDasharray="2 2" />
+                  <Line type="monotone" dataKey="vwap" stroke="#8b5cf6" strokeWidth={1.5} dot={false} strokeDasharray="5 5" isAnimationActive={false} />
+                  <Line type="monotone" dataKey="vwap_upper" stroke="#f43f5e" strokeWidth={1} dot={false} strokeDasharray="2 2" isAnimationActive={false} />
+                  <Line type="monotone" dataKey="vwap_lower" stroke="#f43f5e" strokeWidth={1} dot={false} strokeDasharray="2 2" isAnimationActive={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>

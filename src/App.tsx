@@ -128,7 +128,14 @@ export default function App() {
   const [testingConnection, setTestingConnection] = useState(false);
 
   // Synchronize all REST datasets
+  const configRef = useRef<StrategyConfig | null>(null);
+  configRef.current = config;
+  const isFetchingRef = useRef(false);
+  const formInitializedRef = useRef(false);
+
   const fetchAllData = async (forceConfig = true) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     try {
       // Server Status
       const statusRes = await apiFetch("/api/status");
@@ -139,8 +146,9 @@ export default function App() {
       if (credsRes.ok) {
         const credsData = await credsRes.json();
         setCredentials(credsData);
-        // Only update form inputs when the drawer is NOT open, to avoid resetting active edits
-        if (!showExchangePanelRef.current && !formApiKey) {
+        // Only update form inputs on first load when drawer is not open
+        if (!showExchangePanelRef.current && !formInitializedRef.current && credsData.api_key !== undefined) {
+          formInitializedRef.current = true;
           setFormApiKey(credsData.api_key || "");
           setFormApiSecret(credsData.api_secret || "");
           setFormEmail(credsData.account_email || "");
@@ -163,7 +171,7 @@ export default function App() {
       if (logsRes.ok) setLogs(await logsRes.json());
 
       // Configuration
-      if (forceConfig || !config) {
+      if (forceConfig || !configRef.current) {
         const configRes = await apiFetch("/api/config");
         if (configRes.ok) setConfig(await configRes.json());
 
@@ -188,6 +196,8 @@ export default function App() {
       if (regimeRes.ok) setRegimeStats(await regimeRes.json());
     } catch (e) {
       console.warn("Backend offline. Retrying synchronization loop in background...", e);
+    } finally {
+      isFetchingRef.current = false;
     }
   };
 

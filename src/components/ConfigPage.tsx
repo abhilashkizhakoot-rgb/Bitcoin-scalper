@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { apiFetch } from "../utils/api.ts";
 import {
   Settings,
@@ -200,19 +200,17 @@ export default function ConfigPage({
     timeframe_minutes: 5,
   });
 
+  const configJson = useMemo(() => (config ? JSON.stringify(config) : ""), [config]);
+
   useEffect(() => {
-    const configStr = JSON.stringify(config);
-    const prevStr = JSON.stringify(prevConfigRef.current);
-    if (prevStr !== configStr) {
-      prevConfigRef.current = config;
-      if (config.general) setGeneralConfig(config.general);
-      if (config.ml_settings) setMlConfig(config.ml_settings);
-      if (config.sentiment_settings) setSentimentConfig(config.sentiment_settings);
-      if (config.risk_management) setRiskConfig(config.risk_management);
-      if (config.market_structure) setMsConfig(config.market_structure);
-      if (config.gate_scoring) setGateScoringConfig(config.gate_scoring);
-    }
-  }, [config]);
+    if (!config) return;
+    if (config.general) setGeneralConfig(config.general);
+    if (config.ml_settings) setMlConfig(config.ml_settings);
+    if (config.sentiment_settings) setSentimentConfig(config.sentiment_settings);
+    if (config.risk_management) setRiskConfig(config.risk_management);
+    if (config.market_structure) setMsConfig(config.market_structure);
+    if (config.gate_scoring) setGateScoringConfig(config.gate_scoring);
+  }, [configJson]);
 
   const sanitizeCategoryData = (category: string, data: any) => {
     const cleaned = { ...data };
@@ -1053,75 +1051,6 @@ export default function ConfigPage({
                           id="config-max-allowed-wick-ratio"
                         />
                         <p className="text-[9px] text-slate-400">Ratio of candle wicks to total range. Values &gt; 0.60 indicate aggressive whipsaw noise.</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Directional Exhaustion Wick Protection Controls */}
-                <div className="md:col-span-2 border border-rose-200 rounded-lg p-4 bg-rose-50/30 space-y-3">
-                  <div className="flex items-center justify-between border-b border-rose-100 pb-2">
-                    <div>
-                      <span className="text-xs font-bold text-slate-800 font-sans block">Overhead Supply & Exhaustion Wick Protection</span>
-                      <span className="text-[10px] text-slate-500">Detects multiple upper rejection wicks (or lower wicks) at local extreme highs/lows where price action shows trend exhaustion and overhead supply absorption, strictly blocking dangerous entries directly below resistance wick clusters.</span>
-                    </div>
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={generalConfig.enable_exhaustion_wick_filter !== false}
-                        onChange={(e) => setGeneralConfig({ ...generalConfig, enable_exhaustion_wick_filter: e.target.checked })}
-                        className="rounded border-slate-300 text-rose-600 focus:ring-rose-400 h-4 w-4 cursor-pointer"
-                        id="config-enable-exhaustion-wick-filter"
-                      />
-                      <span className="text-xs font-semibold text-slate-700">Active</span>
-                    </label>
-                  </div>
-
-                  {generalConfig.enable_exhaustion_wick_filter !== false && (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
-                      <div className="space-y-1">
-                        <label className="block text-[11px] font-semibold text-slate-700">Min Exhaustion Wicks</label>
-                        <input
-                          type="number"
-                          step="1"
-                          min="1"
-                          max="5"
-                          value={generalConfig.exhaustion_wick_min_count !== undefined ? generalConfig.exhaustion_wick_min_count : 2}
-                          onChange={(e) => setGeneralConfig({ ...generalConfig, exhaustion_wick_min_count: parseInputNumber(e.target.value, false) })}
-                          className="w-full text-xs rounded border border-slate-300 px-3 py-1.5 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 bg-white font-mono"
-                          id="config-exhaustion-wick-min-count"
-                        />
-                        <p className="text-[9px] text-slate-400">Minimum number of rejection wicks required at local high/low to trigger exhaustion block (Default: 2).</p>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="block text-[11px] font-semibold text-slate-700">Min Wick-to-Range Ratio</label>
-                        <input
-                          type="number"
-                          step="0.05"
-                          min="0.20"
-                          max="0.80"
-                          value={generalConfig.exhaustion_wick_min_ratio !== undefined ? generalConfig.exhaustion_wick_min_ratio : 0.35}
-                          onChange={(e) => setGeneralConfig({ ...generalConfig, exhaustion_wick_min_ratio: parseInputNumber(e.target.value, true) })}
-                          className="w-full text-xs rounded border border-slate-300 px-3 py-1.5 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 bg-white font-mono"
-                          id="config-exhaustion-wick-min-ratio"
-                        />
-                        <p className="text-[9px] text-slate-400">Minimum wick proportion of the candle range (e.g. 0.35 = 35% wick shadow) (Default: 0.35).</p>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="block text-[11px] font-semibold text-slate-700">Exhaustion Lookback Candles</label>
-                        <input
-                          type="number"
-                          step="1"
-                          min="3"
-                          max="15"
-                          value={generalConfig.exhaustion_wick_lookback !== undefined ? generalConfig.exhaustion_wick_lookback : 6}
-                          onChange={(e) => setGeneralConfig({ ...generalConfig, exhaustion_wick_lookback: parseInputNumber(e.target.value, false) })}
-                          className="w-full text-xs rounded border border-slate-300 px-3 py-1.5 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 bg-white font-mono"
-                          id="config-exhaustion-wick-lookback"
-                        />
-                        <p className="text-[9px] text-slate-400">Lookback window of 1m candles scanned for overhead supply / demand floor wick clusters (Default: 6).</p>
                       </div>
                     </div>
                   )}

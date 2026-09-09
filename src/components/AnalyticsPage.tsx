@@ -397,7 +397,7 @@ export default function AnalyticsPage({
           </div>
 
           <div className="h-[250px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <AreaChart data={formattedEquityData} margin={{ top: 5, right: 10, left: 15, bottom: 5 }}>
                 <defs>
                   <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
@@ -421,7 +421,7 @@ export default function AnalyticsPage({
                   itemStyle={{ fontSize: "11px", color: "#1e293b" }}
                   formatter={(val: any) => [`$${safeFormatNumber(val)}`, "Portfolio Balance"]}
                 />
-                <Area type="monotone" dataKey="balance" stroke="#4f46e5" strokeWidth={2} fillOpacity={1} fill="url(#colorBalance)" />
+                <Area type="monotone" dataKey="balance" stroke="#4f46e5" strokeWidth={2} fillOpacity={1} fill="url(#colorBalance)" isAnimationActive={false} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -440,7 +440,7 @@ export default function AnalyticsPage({
           </div>
 
           <div className="h-[250px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <BarChart data={formattedDailyData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="dateStr" stroke="#94a3b8" fontSize={9} tickLine={false} axisLine={false} />
@@ -451,7 +451,7 @@ export default function AnalyticsPage({
                   itemStyle={{ fontSize: "11px", color: "#1e293b" }}
                   formatter={(val) => [`$${val}`, "Net PnL"]}
                 />
-                <Bar dataKey="net_profit_usdt">
+                <Bar dataKey="net_profit_usdt" isAnimationActive={false}>
                   {formattedDailyData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.net_profit_usdt >= 0 ? "#10b981" : "#ef4444"} />
                   ))}

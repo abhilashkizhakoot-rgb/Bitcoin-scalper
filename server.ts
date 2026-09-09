@@ -310,13 +310,6 @@ async function startServer() {
     res.json({ status: "testing_initiated", is_mock: false });
   });
 
-  app.post("/api/exchange/disconnect", (req, res) => {
-    const disconnected = dbManager.updateCredentials({
-      connection_status: ConnectionStatus.DISABLED,
-    });
-    res.json(disconnected);
-  });
-
   // ----------------------------------------------------
   // REST API: Trading Control
   // ----------------------------------------------------

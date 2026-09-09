@@ -339,6 +339,12 @@ export interface StrategyConfig {
     smc_tp_targeting_enabled?: boolean; // Enable SMC Dynamic Take-Profit targeting opposing liquidity
     pinbar_two_candle_confirmation_enabled?: boolean; // Require 2-candle confirmation for Pin Bars / Rejection Wicks (default: true)
     pinbar_min_wick_ratio?: number; // Minimum wick ratio to qualify as a pin bar (default: 0.50)
+    candlestick_enhancements_enabled?: boolean; // Enable Mind Math Money Candlestick Enhancements (CSI, Three Methods, etc.) (default: true)
+    csi_min_threshold?: number; // Minimum Candle Strength Index (CSI) for momentum/breakout candles (default: 0.50)
+    rising_falling_three_methods_enabled?: boolean; // Enable Rising/Falling Three Methods continuation patterns (default: true)
+    inverted_hammer_hanging_man_enabled?: boolean; // Enable 2-candle confirmed Inverted Hammer & Hanging Man (default: true)
+    doji_breakout_confirmation_enabled?: boolean; // Enable post-Doji/Spinning Top breakout confirmation (default: true)
+    max_confirmation_candle_atr?: number; // Max ATR multiple for confirmation candle to prevent 1m late exhaustion entries (default: 1.8)
     failed_auction_strategy_enabled?: boolean; // Enable Range Failed Auction / SFP Reclaim Strategy (Setup 9) (default: true)
     failed_auction_max_deviation_atr_mult?: number; // Maximum price poke beyond range boundary in ATR multiples (default: 0.8)
     failed_auction_max_candles_outside?: number; // Maximum candles price spent outside boundary before reclaiming (default: 3)

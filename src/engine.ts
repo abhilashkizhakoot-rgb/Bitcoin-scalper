@@ -18,7 +18,6 @@ import {
   Trade,
   TradeDirection,
   ExitReason,
-  TradingSignal,
   StrategyConfig,
   MarketStructureConfig,
 } from "./types.js";
@@ -93,7 +92,6 @@ class TradingEngine {
     marketStructure: new Map<string, any>(),
     volumeProfile: new Map<string, any>(),
   };
-  private currentVolume24h: number = 125400;
   private logs: string[] = [];
   private liveActiveTrade: Trade | null = null;
   private paperActiveTrade: Trade | null = null;
@@ -131,10 +129,6 @@ class TradingEngine {
     lastUpdateSecs: 0,
   };
   private openInterestHistory: { timestamp: number; oi: number; price: number }[] = [];
-
-  public getOpenInterestStats() {
-    return { ...this.openInterestStats };
-  }
 
   public getTradeSizeMultiplier(): number {
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
@@ -486,21 +480,6 @@ class TradingEngine {
     const mandatory = config.general.mandatory_gates || [];
     if (mandatory.includes(gateId)) return true;
     if (gateId === "preflight" && mandatory.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g))) return true;
-    return false;
-  }
-
-  private isGateWeighted(config: StrategyConfig, name: string): boolean {
-    const gateId = this.getGateIdByName(name);
-    // Value extension and Anti-Whipsaw are strictly mandatory safety gates, never diluted by weighted scoring
-    if (gateId === "value_extension" || gateId === "whipsaw") return false;
-
-    const adaptiveStatus = this.getRegimeAdaptiveGateStatus(config, gateId);
-    if (adaptiveStatus === "WEIGHTED") return true;
-    if (adaptiveStatus === "MANDATORY" || adaptiveStatus === "BYPASSED") return false;
-
-    const weighted = config.general.weighted_gates || [];
-    if (weighted.includes(gateId)) return true;
-    if (gateId === "preflight" && weighted.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g))) return true;
     return false;
   }
 
@@ -1253,7 +1232,7 @@ class TradingEngine {
     let confidenceThreshold = config.gate_scoring?.confidence_threshold ?? 70;
     let tacticalConfidenceMet = true;
     let safetyGates: string[] = [];
-    let tacticalGatesMap: { condName: string; weightKey: "catboost_ai" | "market_regime" | "trend_alignment" | "adx_strength" | "relative_volume" | "overextension" | "ema100_overextension" | "wedge_filter" | "order_flow" | "squeeze_filter" | "order_book" | "volume_profile" }[] = [];
+    let tacticalGatesMap: { condName: string; weightKey: "catboost_ai" | "market_regime" | "trend_alignment" | "adx_strength" | "relative_volume" | "overextension" | "order_flow" | "squeeze_filter" | "order_book" | "volume_profile" }[] = [];
     let activeWeights: any = {};
     let marketStructurePassed = true;
     let totalTacticalWeight = 0;
@@ -1370,10 +1349,6 @@ class TradingEngine {
                                  ema20Val > ema50Val && ema50Val > ema100Val;
     const isSuperStrongDowntrend = (this.currentRegime === MarketRegime.STRONG_DOWNTREND || adxValue >= superTrendAdx) && 
                                    ema20Val < ema50Val && ema50Val < ema100Val;
-
-    // We block any entries on lower low breakouts (SHORT) or higher high breakouts (LONG)
-    // and instead only enter at pushback at 20/50 EMA.
-    const isSpecialSuperStrongTrendLogicActive = false;
 
     let isLongBreakout = false;
     let isShortBreakout = false;
@@ -1972,7 +1947,7 @@ class TradingEngine {
     // Dynamic Z_dist Threshold based on Regime and Pressure capped by configured max_allowed_z_dist
     const userMaxZCap = rm.max_allowed_z_dist !== undefined ? rm.max_allowed_z_dist : 2.20;
     const baseZLimit = Math.min(isTrending ? 2.20 : 2.00, userMaxZCap);
-    const maxZLimit = Math.min((isSpecialSuperStrongTrendLogicActive || hasExtremeRealtimePressure) ? 3.20 : baseZLimit, userMaxZCap);
+    const maxZLimit = Math.min(hasExtremeRealtimePressure ? 3.20 : baseZLimit, userMaxZCap);
 
     // Absolute Z-score and Single-Component Exhaustion Hard-Locks (MANDATORY SAFETY GATE)
     // 1. |Z_dist| hard ceiling of 2.50 sigma
@@ -2034,49 +2009,6 @@ class TradingEngine {
 
     // C15: Market Structure & Entry Confirmation Check (Pullback, Retest, Reversal, High-Vol Confirmation)
     const structCheck = this.evaluateMarketStructureConfirmation(signalDirection, probabilityLong);
-    
-    // Override market structure confirmation if Special Super Strong Trend Logic is active
-    if (isSpecialSuperStrongTrendLogicActive) {
-      if (isSuperStrongUptrend) {
-        const pullbackHasFormed = struct.pullbackLongMet && struct.current_HH;
-        if (pullbackHasFormed && struct.current_HH) {
-          const isHHBreakout = currentPrice > struct.current_HH.price;
-          const isNotOverextended = currentPrice <= struct.current_HH.price + 1.2 * currentAtr_cp;
-          if (isHHBreakout && isNotOverextended) {
-            structCheck.confirmed = true;
-            structCheck.message = `[Super Strong Trend] Pullback breakout confirmed! Price ($${currentPrice.toFixed(2)}) broke above previous HH ($${struct.current_HH.price.toFixed(2)}).`;
-          } else if (isHHBreakout) {
-            structCheck.confirmed = false;
-            structCheck.message = `[Super Strong Trend] Blocked: Price ($${currentPrice.toFixed(2)}) is overextended above HH ($${struct.current_HH.price.toFixed(2)}).`;
-          } else {
-            structCheck.confirmed = false;
-            structCheck.message = `[Super Strong Trend] Pullback is developing. Waiting for breakout above previous HH ($${struct.current_HH.price.toFixed(2)}).`;
-          }
-        } else {
-          structCheck.confirmed = false;
-          structCheck.message = `[Super Strong Trend] Price far from 100 EMA. Waiting for pullback to form before scanning breakouts.`;
-        }
-      } else if (isSuperStrongDowntrend) {
-        const pullbackHasFormed = struct.pullbackShortMet && struct.current_LL;
-        if (pullbackHasFormed && struct.current_LL) {
-          const isLLBreakout = currentPrice < struct.current_LL.price;
-          const isNotOverextended = currentPrice >= struct.current_LL.price - 1.2 * currentAtr_cp;
-          if (isLLBreakout && isNotOverextended) {
-            structCheck.confirmed = true;
-            structCheck.message = `[Super Strong Trend] Pullback breakdown confirmed! Price ($${currentPrice.toFixed(2)}) broke below previous LL ($${struct.current_LL.price.toFixed(2)}).`;
-          } else if (isLLBreakout) {
-            structCheck.confirmed = false;
-            structCheck.message = `[Super Strong Trend] Blocked: Price ($${currentPrice.toFixed(2)}) is overextended below LL ($${struct.current_LL.price.toFixed(2)}).`;
-          } else {
-            structCheck.confirmed = false;
-            structCheck.message = `[Super Strong Trend] Pullback is developing. Waiting for breakdown below previous LL ($${struct.current_LL.price.toFixed(2)}).`;
-          }
-        } else {
-          structCheck.confirmed = false;
-          structCheck.message = `[Super Strong Trend] Price far from 100 EMA. Waiting for pullback to form before scanning breakdowns.`;
-        }
-      }
-    }
 
     conditions.push({
       name: "Market Structure Confirmation",
@@ -3749,157 +3681,6 @@ class TradingEngine {
       dominantWickZone: { min: 0, max: 0 },
       qualifyingCandleIndices: [],
       description: "Neutral direction.",
-    };
-  }
-
-  public detectWedgePattern(): {
-    risingWedge: boolean;
-    fallingWedge: boolean;
-    upperSlope: number;
-    lowerSlope: number;
-    ratio: number;
-    upperLineCurrent: number;
-    lowerLineCurrent: number;
-  } {
-    const defaultResult = {
-      risingWedge: false,
-      fallingWedge: false,
-      upperSlope: 0,
-      lowerSlope: 0,
-      ratio: 1.0,
-      upperLineCurrent: this.currentPrice,
-      lowerLineCurrent: this.currentPrice,
-    };
-
-    const closes = this.candles1m.map((c) => c.close);
-    const highs = this.candles1m.map((c) => c.high);
-    const lows = this.candles1m.map((c) => c.low);
-    const lastIdx = closes.length - 1;
-
-    if (closes.length < 30) {
-      return defaultResult;
-    }
-
-    // 1. Detect Swing Highs and Swing Lows (Fractals)
-    const rawHighs: { index: number; price: number }[] = [];
-    const rawLows: { index: number; price: number }[] = [];
-
-    // Search backwards over the last 80 candles
-    const lookbackRange = Math.min(80, lastIdx - 1);
-    for (let i = lastIdx - 1; i >= lastIdx - lookbackRange; i--) {
-      const isHigh = highs[i] > highs[i - 1] && highs[i] > highs[i + 1];
-      const isLow = lows[i] < lows[i - 1] && lows[i] < lows[i + 1];
-
-      if (isHigh) {
-        rawHighs.push({ index: i, price: highs[i] });
-      }
-      if (isLow) {
-        rawLows.push({ index: i, price: lows[i] });
-      }
-    }
-
-    // 2. Intelligent Noise Filtering: Enforce minimum separation between swing points
-    const swingHighs: { index: number; price: number }[] = [];
-    for (const sh of rawHighs) {
-      if (swingHighs.length === 0) {
-        swingHighs.push(sh);
-      } else {
-        const prevAccepted = swingHighs[swingHighs.length - 1];
-        // Ensure at least 4 bars of separation to filter out micro-fluctuations
-        if (prevAccepted.index - sh.index >= 4) {
-          swingHighs.push(sh);
-        }
-      }
-      if (swingHighs.length >= 3) break;
-    }
-
-    const swingLows: { index: number; price: number }[] = [];
-    for (const sl of rawLows) {
-      if (swingLows.length === 0) {
-        swingLows.push(sl);
-      } else {
-        const prevAccepted = swingLows[swingLows.length - 1];
-        if (prevAccepted.index - sl.index >= 4) {
-          swingLows.push(sl);
-        }
-      }
-      if (swingLows.length >= 3) break;
-    }
-
-    if (swingHighs.length < 2 || swingLows.length < 2) {
-      return defaultResult;
-    }
-
-    // Connect the two most recent robust swing highs and swing lows
-    const h2 = swingHighs[0]; // most recent major swing high
-    const h1 = swingHighs[1]; // previous major swing high
-
-    const l2 = swingLows[0]; // most recent major swing low
-    const l1 = swingLows[1]; // previous major swing low
-
-    // 3. Staleness Guard: If the most recent touch point of the wedge is too old, ignore the pattern
-    const maxStalenessBars = 25;
-    if ((lastIdx - h2.index > maxStalenessBars) || (lastIdx - l2.index > maxStalenessBars)) {
-      return defaultResult;
-    }
-
-    const barH1 = h1.index;
-    const barH2 = h2.index;
-    const high1 = h1.price;
-    const high2 = h2.price;
-
-    const barL1 = l1.index;
-    const barL2 = l2.index;
-    const low1 = l1.price;
-    const low2 = l2.price;
-
-    if (barH2 === barH1 || barL2 === barL1) {
-      return defaultResult;
-    }
-
-    // Calculate slopes
-    const upperSlope = (high2 - high1) / (barH2 - barH1);
-    const lowerSlope = (low2 - low1) / (barL2 - barL1);
-
-    // Initial and current width calculation
-    const xStart = Math.min(barH1, barL1);
-
-    const upperLineAt = (x: number) => high1 + upperSlope * (x - barH1);
-    const lowerLineAt = (x: number) => low1 + lowerSlope * (x - barL1);
-
-    const initialWidth = upperLineAt(xStart) - lowerLineAt(xStart);
-    const currentWidth = upperLineAt(lastIdx) - lowerLineAt(lastIdx);
-
-    if (initialWidth <= 0 || currentWidth <= 0) {
-      return defaultResult;
-    }
-
-    const ratio = currentWidth / initialWidth;
-    // An intelligent ratio of < 0.75 captures both early converging structures and fully compressed structures
-    const isCompressing = ratio < 0.75;
-
-    // Rising Wedge: Higher highs (upperSlope > 0), Higher lows (lowerSlope > 0), lower trendline steeper (lowerSlope > upperSlope)
-    const risingWedge =
-      upperSlope > 0 &&
-      lowerSlope > 0 &&
-      lowerSlope > upperSlope &&
-      isCompressing;
-
-    // Falling Wedge: Lower highs (upperSlope < 0), Lower lows (lowerSlope < 0), upper trendline steeper (upperSlope < lowerSlope)
-    const fallingWedge =
-      upperSlope < 0 &&
-      lowerSlope < 0 &&
-      upperSlope < lowerSlope &&
-      isCompressing;
-
-    return {
-      risingWedge,
-      fallingWedge,
-      upperSlope,
-      lowerSlope,
-      ratio,
-      upperLineCurrent: upperLineAt(lastIdx),
-      lowerLineCurrent: lowerLineAt(lastIdx),
     };
   }
 
@@ -6764,56 +6545,6 @@ class TradingEngine {
     return { isAbsorption: false, type: "", description: "No order flow absorption detected" };
   }
 
-  public evaluateVolatilitySqueeze(): {
-    isSqueezed: boolean;
-    squeezeFired: boolean;
-    squeezeFiredDirection: "LONG" | "SHORT" | "NONE";
-    bbWidth: number;
-    keltnerWidth: number;
-    description: string;
-  } {
-    const closes = this.candles1m.map(c => c.close);
-    const lastIdx = closes.length - 1;
-    if (lastIdx < 20) {
-      return { isSqueezed: false, squeezeFired: false, squeezeFiredDirection: "NONE", bbWidth: 0, keltnerWidth: 0, description: "Insufficient data" };
-    }
-
-    const atr14 = this.calculateATR(this.candles1m, 14);
-    const currentAtr = atr14[lastIdx] || 50;
-    const bb = this.calculateBollingerBands(closes, 20, 2);
-    const bbWidth = bb.upper - bb.lower;
-    const keltnerWidth = 2 * 1.5 * currentAtr;
-
-    const isSqueezed = bbWidth <= keltnerWidth;
-
-    // Check prior candle to see if squeeze just fired (compression release)
-    const prevCloses = closes.slice(0, -1);
-    const prevBb = this.calculateBollingerBands(prevCloses, 20, 2);
-    const prevAtr = (atr14[lastIdx - 1]) || currentAtr;
-    const prevBbWidth = prevBb.upper - prevBb.lower;
-    const prevKeltnerWidth = 2 * 1.5 * prevAtr;
-    const prevWasSqueezed = prevBbWidth <= prevKeltnerWidth;
-
-    const squeezeFired = prevWasSqueezed && !isSqueezed;
-    let squeezeFiredDirection: "LONG" | "SHORT" | "NONE" = "NONE";
-
-    if (squeezeFired || isSqueezed) {
-      const ema20Series = this.calculateEMA(closes, 20);
-      const ema20 = ema20Series[lastIdx] || this.currentPrice;
-      const momentum = this.currentPrice - ema20;
-      if (momentum > 0.10 * currentAtr) squeezeFiredDirection = "LONG";
-      else if (momentum < -0.10 * currentAtr) squeezeFiredDirection = "SHORT";
-    }
-
-    const desc = isSqueezed
-      ? `Volatility Squeeze Active (BB Width: $${bbWidth.toFixed(2)} <= Keltner: $${keltnerWidth.toFixed(2)})`
-      : squeezeFired
-        ? `Volatility Squeeze FIRED (${squeezeFiredDirection}): Momentum releasing from compression!`
-        : `Normal Volatility (BB Width: $${bbWidth.toFixed(2)} > Keltner: $${keltnerWidth.toFixed(2)})`;
-
-    return { isSqueezed, squeezeFired, squeezeFiredDirection, bbWidth, keltnerWidth, description: desc };
-  }
-
   /**
    * FEATURE: Setup 4 - Fair Value Gap (FVG) / Institutional Imbalance Retest Setup
    * Optimized for 1-minute scalping with:
@@ -9105,8 +8836,16 @@ class TradingEngine {
   private isMultiCandleLongRejection(lastIdx: number, currentAtr: number): { confirmed: boolean; type: string } {
     if (lastIdx < 0 || this.candles1m.length === 0) return { confirmed: false, type: "" };
     const config = dbManager.getConfig();
-    const requirePinBarConfirmation = config.market_structure.pinbar_two_candle_confirmation_enabled !== false;
-    const minWickRatio = config.market_structure.pinbar_min_wick_ratio || 0.50;
+    const ms = config.market_structure;
+    const requirePinBarConfirmation = ms.pinbar_two_candle_confirmation_enabled !== false;
+    const minWickRatio = ms.pinbar_min_wick_ratio || 0.50;
+
+    const candlestickEnhancements = ms.candlestick_enhancements_enabled !== false;
+    const minCsi = ms.csi_min_threshold !== undefined ? ms.csi_min_threshold : 0.50;
+    const maxAtrMult = ms.max_confirmation_candle_atr !== undefined ? ms.max_confirmation_candle_atr : 1.8;
+    const allowThreeMethods = ms.rising_falling_three_methods_enabled !== false;
+    const allowInvertedHammer = ms.inverted_hammer_hanging_man_enabled !== false;
+    const allowDojiBreakout = ms.doji_breakout_confirmation_enabled !== false;
 
     // The confirmation candle MUST be a finished, closed candle (not an in-progress, 0-second unclosed candle)
     const closedIdx = (lastIdx === this.candles1m.length - 1 && this.candles1m.length >= 2) ? lastIdx - 1 : lastIdx;
@@ -9120,11 +8859,22 @@ class TradingEngine {
     const isBullish = confirmCandle.close > confirmCandle.open;
     const setupCandle = closedIdx >= 1 ? this.candles1m[closedIdx - 1] : null;
 
+    // 1m Scalping Exhaustion Guard: Reject single-candle climax impulse if range > maxAtrMult * ATR
+    const isClimaxExhausted = candlestickEnhancements && confirmRange > maxAtrMult * currentAtr;
+
+    // Mind Math Money Candle Strength Index (CSI):
+    // Measures proximity of close to candle extreme multiplied by body-to-range dominance
+    const bullishCloseProximity = confirmRange > 0 ? (confirmCandle.close - confirmCandle.low) / confirmRange : 0;
+    const bullishBodyRatio = confirmRange > 0 ? confirmBody / confirmRange : 0;
+    const bullishCsi = confirmRange > 0 ? Number((bullishCloseProximity * bullishBodyRatio).toFixed(4)) : 0;
+    // High conviction candle: CSI >= minCsi, close in top 30% of range, upper wick <= 25% of range
+    const hasStrongCsi = isBullish && bullishCsi >= minCsi && (confirmUpperWick <= 0.25 * confirmRange);
+
     // Single Candle Patterns on finished closed candle
     const isPinBar = confirmRange > 0 && confirmLowerWick >= minWickRatio * confirmRange && confirmUpperWick <= 0.25 * confirmRange;
     const isMajorWickRejection = confirmRange > 0 && confirmLowerWick >= 0.65 * confirmRange;
     const hasStrongClose = confirmRange > 0 && (confirmCandle.close - confirmCandle.low) / confirmRange >= 0.70;
-    const isMomentumCandle = isBullish && confirmBody >= 0.7 * currentAtr;
+    const isMomentumCandle = isBullish && confirmBody >= 0.65 * currentAtr && (candlestickEnhancements ? hasStrongCsi : true);
     const isIndecision = confirmRange > 0 && 
       ((confirmBody / confirmRange < 0.20) || (confirmRange < 0.25 * currentAtr && !isPinBar && !isMajorWickRejection)) && 
       !isPinBar && !isMajorWickRejection;
@@ -9165,6 +8915,32 @@ class TradingEngine {
       }
     }
 
+    // 2-Candle Confirmed Inverted Hammer (Mind Math Money Chapters 65-70)
+    // Setup candle has long upper wick (>= 2x body or >= 45% range) at low, with small body at lower third.
+    // Confirm candle MUST close green, hold setup candle's low, and close above the Inverted Hammer's body with body expansion.
+    let isConfirmedInvertedHammer = false;
+    if (candlestickEnhancements && allowInvertedHammer && setupCandle) {
+      const setupRange = setupCandle.high - setupCandle.low;
+      const setupBody = Math.abs(setupCandle.close - setupCandle.open);
+      const setupUpperWick = setupCandle.high - Math.max(setupCandle.open, setupCandle.close);
+      const setupLowerWick = Math.min(setupCandle.open, setupCandle.close) - setupCandle.low;
+
+      const setupIsInvHammer = setupRange > 0 &&
+        setupUpperWick >= 0.45 * setupRange &&
+        setupUpperWick >= 1.8 * Math.max(setupBody, 0.05 * currentAtr) &&
+        setupLowerWick <= 0.25 * setupRange &&
+        (Math.max(setupCandle.open, setupCandle.close) - setupCandle.low) <= 0.45 * setupRange;
+
+      const isConfirmGreen = confirmCandle.close > confirmCandle.open;
+      const holdsInvLow = confirmCandle.low >= setupCandle.low - 0.05 * currentAtr;
+      const breaksInvBody = confirmCandle.close > Math.max(setupCandle.open, setupCandle.close);
+      const hasExpansion = confirmBody >= 0.22 * currentAtr || (confirmRange > 0 && confirmBody >= 0.30 * confirmRange);
+
+      if (setupIsInvHammer && isConfirmGreen && holdsInvLow && breaksInvBody && hasExpansion) {
+        isConfirmedInvertedHammer = true;
+      }
+    }
+
     // Two-Candle Patterns (Evaluated on completed, closed candles)
     const minEngulfBody = Math.max(0.35 * currentAtr, 0.35 * confirmRange);
     const prevBody = setupCandle ? Math.abs(setupCandle.close - setupCandle.open) : 0;
@@ -9185,7 +8961,7 @@ class TradingEngine {
     let isTweezerBottom = false;
     if (setupCandle) {
       const prevRange = setupCandle.high - setupCandle.low;
-      const prevLowerWick = Math.min(setupCandle.close, setupCandle.open) - setupCandle.low;
+      const prevLowerWick = Math.min(setupCandle.open, setupCandle.close) - setupCandle.low;
       const matchingLows = Math.abs(confirmCandle.low - setupCandle.low) < 0.05 * currentAtr;
       const currentHasLowerWick = confirmRange > 0 && confirmLowerWick >= 0.25 * confirmRange;
       const prevHasLowerWick = prevRange > 0 && prevLowerWick >= 0.25 * prevRange;
@@ -9227,6 +9003,19 @@ class TradingEngine {
 
       if (isPrevBearish && isBullish && opensInsideMotherBody && closesInsideMotherBody && isInsideMotherRange && hasPositiveDisplacement) {
         isBullishHarami = true;
+      }
+    }
+
+    // Post-Doji / Spinning Top Breakout Confirmation (Mind Math Money Chapters 115-122)
+    // If prior candle was an equilibrium/indecision Doji, confirm when current candle breaks out above Doji high
+    let isPostDojiBreakout = false;
+    if (candlestickEnhancements && allowDojiBreakout && setupCandle) {
+      const setupRange = setupCandle.high - setupCandle.low;
+      const setupBody = Math.abs(setupCandle.close - setupCandle.open);
+      const setupIsDoji = setupRange > 0 && ((setupBody / setupRange < 0.22) || (setupRange < 0.30 * currentAtr));
+
+      if (setupIsDoji && isBullish && confirmCandle.close > setupCandle.high && (confirmBody >= 0.25 * currentAtr || hasStrongCsi)) {
+        isPostDojiBreakout = true;
       }
     }
 
@@ -9281,6 +9070,46 @@ class TradingEngine {
       }
     }
 
+    // Rising Three Methods (Mind Math Money Chapters 78-83 Trend Continuation):
+    // 1 strong green mother candle, followed by 2-3 small inside rest bars, resolved by a strong green breakout bar.
+    let isRisingThreeMethods = false;
+    if (candlestickEnhancements && allowThreeMethods && closedIdx >= 3) {
+      // Check 5-candle (3 rest bars) or 4-candle (2 rest bars)
+      const testLengths = [3, 2];
+      for (const restCount of testLengths) {
+        if (closedIdx < restCount + 1) continue;
+        const motherIdx = closedIdx - restCount - 1;
+        const cMother = this.candles1m[motherIdx];
+        const motherRange = cMother.high - cMother.low;
+        const motherBody = cMother.close - cMother.open;
+        const isMotherBullish = cMother.close > cMother.open && motherBody >= 0.35 * currentAtr && (motherRange > 0 && motherBody / motherRange >= 0.45);
+
+        if (!isMotherBullish) continue;
+
+        let restContained = true;
+        let avgRestBody = 0;
+        for (let i = 1; i <= restCount; i++) {
+          const rCandle = this.candles1m[motherIdx + i];
+          const rBody = Math.abs(rCandle.close - rCandle.open);
+          avgRestBody += rBody;
+          // Must not break below mother bar's low
+          if (rCandle.low < cMother.low - 0.05 * currentAtr || rCandle.high > cMother.high + 0.15 * currentAtr) {
+            restContained = false;
+            break;
+          }
+        }
+        avgRestBody /= restCount;
+
+        const isBreakoutBar = isBullish && confirmCandle.close > cMother.close && confirmBody >= 0.28 * currentAtr;
+        const restBarsConsolidated = avgRestBody <= 0.60 * motherBody;
+
+        if (restContained && restBarsConsolidated && isBreakoutBar) {
+          isRisingThreeMethods = true;
+          break;
+        }
+      }
+    }
+
     // Institutional Order Flow Absorption and Early Wick Rejection Checks
     // NOTE: Order flow metrics (CVD / order book imbalance) must NEVER bypass candlestick confirmation on falling red candles.
     // Bullish reversal confirmation STRICTLY requires a completed, closed GREEN candle (close > open) with positive upward displacement.
@@ -9293,9 +9122,17 @@ class TradingEngine {
       return { confirmed: true, type: "Early Lower Wick Absorption Support Rejection" };
     }
 
+    // 1m Scalping Exhaustion Guard: If candle is an extreme climax spike (> 1.8 ATR), protect against late entry on single-candle triggers
+    if (isClimaxExhausted && !isConfirmedBullishPinBar && !isConfirmedInvertedHammer && !isRisingThreeMethods) {
+      return { confirmed: false, type: "Blocked: 1m Candle Climax Exhaustion (> 1.8 ATR blow-off)" };
+    }
+
     // Priority Check: Every pattern MUST be supported by a green close (isBullish) or verified 2-candle confirmation
+    if (isRisingThreeMethods) return { confirmed: true, type: "Rising Three Methods Continuation Pattern" };
     if (isConfirmedBullishPinBar) return { confirmed: true, type: "2-Candle Confirmed Bullish Pin Bar" };
+    if (isConfirmedInvertedHammer) return { confirmed: true, type: "2-Candle Confirmed Inverted Hammer Reversal" };
     if (isConfirmedMajorWickRejection) return { confirmed: true, type: "2-Candle Confirmed 65%+ Lower Wick Rejection" };
+    if (isPostDojiBreakout) return { confirmed: true, type: "Post-Doji Bullish Breakout Confirmation" };
     if (isBullishEngulfing) return { confirmed: !isIndecision, type: "Bullish Engulfing Pattern" };
     if (hasMultiWickRejection && isBullish) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
     if (isTweezerBottom && isBullish) return { confirmed: !isIndecision, type: "Tweezer Bottom Reversal Pattern" };
@@ -9303,7 +9140,7 @@ class TradingEngine {
     if (isBullishHarami) return { confirmed: !isIndecision, type: "Bullish Harami Reversal Pattern" };
     if (isMorningStar) return { confirmed: !isIndecision, type: "Morning Star Reversal Pattern" };
     if (isThreeWhiteSoldiers) return { confirmed: !isIndecision, type: "Three White Soldiers Continuation Pattern" };
-    if (isMomentumCandle && hasStrongClose && isBullish) return { confirmed: !isIndecision, type: "Bullish Momentum Candle" };
+    if (isMomentumCandle && (hasStrongCsi || hasStrongClose) && isBullish) return { confirmed: !isIndecision, type: `Bullish Momentum (CSI ${(bullishCsi * 100).toFixed(0)}%)` };
     if (hasStrongClose && isBullish && confirmLowerWick > confirmUpperWick) return { confirmed: !isIndecision, type: "Strong Close Support Rejection" };
 
     // If 2-candle confirmation is DISABLED, allow legacy immediate 1-candle entry (strictly requiring green close)
@@ -9318,8 +9155,16 @@ class TradingEngine {
   private isMultiCandleShortRejection(lastIdx: number, currentAtr: number): { confirmed: boolean; type: string } {
     if (lastIdx < 0 || this.candles1m.length === 0) return { confirmed: false, type: "" };
     const config = dbManager.getConfig();
-    const requirePinBarConfirmation = config.market_structure.pinbar_two_candle_confirmation_enabled !== false;
-    const minWickRatio = config.market_structure.pinbar_min_wick_ratio || 0.50;
+    const ms = config.market_structure;
+    const requirePinBarConfirmation = ms.pinbar_two_candle_confirmation_enabled !== false;
+    const minWickRatio = ms.pinbar_min_wick_ratio || 0.50;
+
+    const candlestickEnhancements = ms.candlestick_enhancements_enabled !== false;
+    const minCsi = ms.csi_min_threshold !== undefined ? ms.csi_min_threshold : 0.50;
+    const maxAtrMult = ms.max_confirmation_candle_atr !== undefined ? ms.max_confirmation_candle_atr : 1.8;
+    const allowThreeMethods = ms.rising_falling_three_methods_enabled !== false;
+    const allowHangingMan = ms.inverted_hammer_hanging_man_enabled !== false;
+    const allowDojiBreakout = ms.doji_breakout_confirmation_enabled !== false;
 
     // The confirmation candle MUST be a finished, closed candle (not an in-progress, 0-second unclosed candle)
     const closedIdx = (lastIdx === this.candles1m.length - 1 && this.candles1m.length >= 2) ? lastIdx - 1 : lastIdx;
@@ -9333,11 +9178,22 @@ class TradingEngine {
     const isBearish = confirmCandle.close < confirmCandle.open;
     const setupCandle = closedIdx >= 1 ? this.candles1m[closedIdx - 1] : null;
 
+    // 1m Scalping Exhaustion Guard: Reject single-candle climax impulse if range > maxAtrMult * ATR
+    const isClimaxExhausted = candlestickEnhancements && confirmRange > maxAtrMult * currentAtr;
+
+    // Mind Math Money Candle Strength Index (CSI):
+    // Measures proximity of close to candle extreme (low) multiplied by body-to-range dominance
+    const bearishCloseProximity = confirmRange > 0 ? (confirmCandle.high - confirmCandle.close) / confirmRange : 0;
+    const bearishBodyRatio = confirmRange > 0 ? confirmBody / confirmRange : 0;
+    const bearishCsi = confirmRange > 0 ? Number((bearishCloseProximity * bearishBodyRatio).toFixed(4)) : 0;
+    // High conviction candle: CSI >= minCsi, close in bottom 30% of range, lower wick <= 25% of range
+    const hasStrongCsi = isBearish && bearishCsi >= minCsi && (confirmLowerWick <= 0.25 * confirmRange);
+
     // Single Candle Patterns on finished closed candle
     const isPinBar = confirmRange > 0 && confirmUpperWick >= minWickRatio * confirmRange && confirmLowerWick <= 0.25 * confirmRange;
     const isMajorWickRejection = confirmRange > 0 && confirmUpperWick >= 0.65 * confirmRange;
     const hasStrongClose = confirmRange > 0 && (confirmCandle.high - confirmCandle.close) / confirmRange >= 0.70;
-    const isMomentumCandle = isBearish && confirmBody >= 0.7 * currentAtr;
+    const isMomentumCandle = isBearish && confirmBody >= 0.65 * currentAtr && (candlestickEnhancements ? hasStrongCsi : true);
     const isIndecision = confirmRange > 0 && 
       ((confirmBody / confirmRange < 0.20) || (confirmRange < 0.25 * currentAtr && !isPinBar && !isMajorWickRejection)) && 
       !isPinBar && !isMajorWickRejection;
@@ -9375,6 +9231,32 @@ class TradingEngine {
       }
       if (setupIsMajorWick && isConfirmRed && hasVerifiedBodyExpansion && holdsPinHigh && (breaksPinLower || hasDownwardFollowThrough)) {
         isConfirmedMajorWickRejection = true;
+      }
+    }
+
+    // 2-Candle Confirmed Hanging Man (Mind Math Money Chapters 71-76)
+    // Setup candle has long lower wick (>= 2x body or >= 45% range) at swing high, with small body at upper third.
+    // Confirm candle MUST close red, hold setup candle's high, and close below Hanging Man's body with body expansion.
+    let isConfirmedHangingMan = false;
+    if (candlestickEnhancements && allowHangingMan && setupCandle) {
+      const setupRange = setupCandle.high - setupCandle.low;
+      const setupBody = Math.abs(setupCandle.close - setupCandle.open);
+      const setupLowerWick = Math.min(setupCandle.open, setupCandle.close) - setupCandle.low;
+      const setupUpperWick = setupCandle.high - Math.max(setupCandle.open, setupCandle.close);
+
+      const setupIsHangingMan = setupRange > 0 &&
+        setupLowerWick >= 0.45 * setupRange &&
+        setupLowerWick >= 1.8 * Math.max(setupBody, 0.05 * currentAtr) &&
+        setupUpperWick <= 0.25 * setupRange &&
+        (setupCandle.high - Math.min(setupCandle.open, setupCandle.close)) <= 0.45 * setupRange;
+
+      const isConfirmRed = confirmCandle.close < confirmCandle.open;
+      const holdsHangHigh = confirmCandle.high <= setupCandle.high + 0.05 * currentAtr;
+      const breaksHangBody = confirmCandle.close < Math.min(setupCandle.open, setupCandle.close);
+      const hasExpansion = confirmBody >= 0.22 * currentAtr || (confirmRange > 0 && confirmBody >= 0.30 * confirmRange);
+
+      if (setupIsHangingMan && isConfirmRed && holdsHangHigh && breaksHangBody && hasExpansion) {
+        isConfirmedHangingMan = true;
       }
     }
 
@@ -9443,6 +9325,19 @@ class TradingEngine {
       }
     }
 
+    // Post-Doji / Spinning Top Breakdown Confirmation (Mind Math Money Chapters 115-122)
+    // If prior candle was an equilibrium/indecision Doji, confirm when current candle breaks down below Doji low
+    let isPostDojiBreakdown = false;
+    if (candlestickEnhancements && allowDojiBreakout && setupCandle) {
+      const setupRange = setupCandle.high - setupCandle.low;
+      const setupBody = Math.abs(setupCandle.close - setupCandle.open);
+      const setupIsDoji = setupRange > 0 && ((setupBody / setupRange < 0.22) || (setupRange < 0.30 * currentAtr));
+
+      if (setupIsDoji && isBearish && confirmCandle.close < setupCandle.low && (confirmBody >= 0.25 * currentAtr || hasStrongCsi)) {
+        isPostDojiBreakdown = true;
+      }
+    }
+
     // Three-Candle Patterns
     // 4. Evening Star
     let isEveningStar = false;
@@ -9494,6 +9389,46 @@ class TradingEngine {
       }
     }
 
+    // Falling Three Methods (Mind Math Money Chapters 84-88 Trend Continuation):
+    // 1 strong red mother candle, followed by 2-3 small inside rest bars, resolved by a strong red breakdown bar.
+    let isFallingThreeMethods = false;
+    if (candlestickEnhancements && allowThreeMethods && closedIdx >= 3) {
+      // Check 5-candle (3 rest bars) or 4-candle (2 rest bars)
+      const testLengths = [3, 2];
+      for (const restCount of testLengths) {
+        if (closedIdx < restCount + 1) continue;
+        const motherIdx = closedIdx - restCount - 1;
+        const cMother = this.candles1m[motherIdx];
+        const motherRange = cMother.high - cMother.low;
+        const motherBody = cMother.open - cMother.close;
+        const isMotherBearish = cMother.close < cMother.open && motherBody >= 0.35 * currentAtr && (motherRange > 0 && motherBody / motherRange >= 0.45);
+
+        if (!isMotherBearish) continue;
+
+        let restContained = true;
+        let avgRestBody = 0;
+        for (let i = 1; i <= restCount; i++) {
+          const rCandle = this.candles1m[motherIdx + i];
+          const rBody = Math.abs(rCandle.close - rCandle.open);
+          avgRestBody += rBody;
+          // Must not break above mother bar's high
+          if (rCandle.high > cMother.high + 0.05 * currentAtr || rCandle.low < cMother.low - 0.15 * currentAtr) {
+            restContained = false;
+            break;
+          }
+        }
+        avgRestBody /= restCount;
+
+        const isBreakoutBar = isBearish && confirmCandle.close < cMother.close && confirmBody >= 0.28 * currentAtr;
+        const restBarsConsolidated = avgRestBody <= 0.60 * motherBody;
+
+        if (restContained && restBarsConsolidated && isBreakoutBar) {
+          isFallingThreeMethods = true;
+          break;
+        }
+      }
+    }
+
     // Institutional Order Flow Absorption and Early Wick Rejection Checks
     // NOTE: Order flow metrics (CVD / order book imbalance) must NEVER bypass candlestick confirmation on rising green candles.
     // Bearish reversal confirmation STRICTLY requires a completed, closed RED candle (close < open) with negative downward displacement.
@@ -9506,9 +9441,17 @@ class TradingEngine {
       return { confirmed: true, type: "Early Upper Wick Absorption Resistance Rejection" };
     }
 
+    // 1m Scalping Exhaustion Guard: If candle is an extreme climax spike (> 1.8 ATR), protect against late entry on single-candle triggers
+    if (isClimaxExhausted && !isConfirmedBearishPinBar && !isConfirmedHangingMan && !isFallingThreeMethods) {
+      return { confirmed: false, type: "Blocked: 1m Candle Climax Exhaustion (> 1.8 ATR blow-off)" };
+    }
+
     // Priority Check: Every pattern MUST be supported by a red close (isBearish) or verified 2-candle confirmation
+    if (isFallingThreeMethods) return { confirmed: true, type: "Falling Three Methods Continuation Pattern" };
     if (isConfirmedBearishPinBar) return { confirmed: true, type: "2-Candle Confirmed Bearish Pin Bar" };
+    if (isConfirmedHangingMan) return { confirmed: true, type: "2-Candle Confirmed Hanging Man Reversal" };
     if (isConfirmedMajorWickRejection) return { confirmed: true, type: "2-Candle Confirmed 65%+ Upper Wick Rejection" };
+    if (isPostDojiBreakdown) return { confirmed: true, type: "Post-Doji Bearish Breakdown Confirmation" };
     if (isBearishEngulfing) return { confirmed: !isIndecision, type: "Bearish Engulfing Pattern" };
     if (hasMultiWickRejection && isBearish) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
     if (isTweezerTop && isBearish) return { confirmed: !isIndecision, type: "Tweezer Top Reversal Pattern" };
@@ -9516,7 +9459,7 @@ class TradingEngine {
     if (isBearishHarami) return { confirmed: !isIndecision, type: "Bearish Harami Reversal Pattern" };
     if (isEveningStar) return { confirmed: !isIndecision, type: "Evening Star Reversal Pattern" };
     if (isThreeBlackCrows) return { confirmed: !isIndecision, type: "Three Black Crows Continuation Pattern" };
-    if (isMomentumCandle && hasStrongClose && isBearish) return { confirmed: !isIndecision, type: "Bearish Momentum Candle" };
+    if (isMomentumCandle && (hasStrongCsi || hasStrongClose) && isBearish) return { confirmed: !isIndecision, type: `Bearish Momentum (CSI ${(bearishCsi * 100).toFixed(0)}%)` };
     if (hasStrongClose && isBearish && confirmUpperWick > confirmLowerWick) return { confirmed: !isIndecision, type: "Strong Close Resistance Rejection" };
 
     // If 2-candle confirmation is DISABLED, allow legacy immediate 1-candle entry (strictly requiring red close)

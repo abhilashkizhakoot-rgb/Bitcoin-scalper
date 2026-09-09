@@ -297,6 +297,12 @@ const DEFAULT_CONFIG: StrategyConfig = {
     smc_tp_targeting_enabled: true,
     pinbar_two_candle_confirmation_enabled: true,
     pinbar_min_wick_ratio: 0.50,
+    candlestick_enhancements_enabled: true,
+    csi_min_threshold: 0.50,
+    rising_falling_three_methods_enabled: true,
+    inverted_hammer_hanging_man_enabled: true,
+    doji_breakout_confirmation_enabled: true,
+    max_confirmation_candle_atr: 1.8,
     failed_auction_strategy_enabled: true,
     failed_auction_max_deviation_atr_mult: 0.8,
     failed_auction_max_candles_outside: 3,
@@ -1282,6 +1288,12 @@ class DatabaseManager {
       if (ms.fvg_trend_filter_enabled === undefined) { ms.fvg_trend_filter_enabled = def.fvg_trend_filter_enabled !== false; changed = true; }
       if (ms.pinbar_two_candle_confirmation_enabled === undefined) { ms.pinbar_two_candle_confirmation_enabled = def.pinbar_two_candle_confirmation_enabled !== undefined ? def.pinbar_two_candle_confirmation_enabled : true; changed = true; }
       if (ms.pinbar_min_wick_ratio === undefined) { ms.pinbar_min_wick_ratio = def.pinbar_min_wick_ratio || 0.50; changed = true; }
+      if (ms.candlestick_enhancements_enabled === undefined) { ms.candlestick_enhancements_enabled = def.candlestick_enhancements_enabled !== false; changed = true; }
+      if (ms.csi_min_threshold === undefined) { ms.csi_min_threshold = def.csi_min_threshold || 0.50; changed = true; }
+      if (ms.rising_falling_three_methods_enabled === undefined) { ms.rising_falling_three_methods_enabled = def.rising_falling_three_methods_enabled !== false; changed = true; }
+      if (ms.inverted_hammer_hanging_man_enabled === undefined) { ms.inverted_hammer_hanging_man_enabled = def.inverted_hammer_hanging_man_enabled !== false; changed = true; }
+      if (ms.doji_breakout_confirmation_enabled === undefined) { ms.doji_breakout_confirmation_enabled = def.doji_breakout_confirmation_enabled !== false; changed = true; }
+      if (ms.max_confirmation_candle_atr === undefined) { ms.max_confirmation_candle_atr = def.max_confirmation_candle_atr || 1.8; changed = true; }
       if (ms.failed_auction_strategy_enabled === undefined) { ms.failed_auction_strategy_enabled = def.failed_auction_strategy_enabled !== false; changed = true; }
       if (ms.failed_auction_max_deviation_atr_mult === undefined) { ms.failed_auction_max_deviation_atr_mult = def.failed_auction_max_deviation_atr_mult || 0.8; changed = true; }
       if (ms.failed_auction_max_candles_outside === undefined) { ms.failed_auction_max_candles_outside = def.failed_auction_max_candles_outside || 3; changed = true; }

@@ -3904,6 +3904,130 @@ export default function ConfigPage({
                 </div>
               </div>
 
+              {/* Grid 4b: Mind Math Money Advanced Candlestick Confirmation & Scalping Guardrails */}
+              <div className="border-t border-slate-100 pt-4 space-y-4">
+                <div className="flex items-center justify-between bg-indigo-50/50 border border-indigo-100 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-sans font-semibold text-indigo-900">Mind Math Money Candlestick Enhancements</span>
+                      <span className="px-1.5 py-0.5 text-[9px] font-mono bg-indigo-100 text-indigo-700 rounded font-bold uppercase">1m Scalping</span>
+                    </div>
+                    <p className="text-[10px] text-indigo-600/80">Activates Candle Strength Index (CSI), Three Methods continuation, 2-candle Inverted Hammer/Hanging Man, and 1m climax exhaustion guardrails.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, candlestick_enhancements_enabled: msConfig.candlestick_enhancements_enabled === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.candlestick_enhancements_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.candlestick_enhancements_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="space-y-1.5 bg-slate-50 border border-slate-200/60 rounded-xl p-3 flex flex-col justify-between">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Rising/Falling Three Methods</span>
+                      <p className="text-[10px] text-slate-400">Continuation pattern: 1 mother bar + 2-3 inside rest bars + breakout bar.</p>
+                    </div>
+                    <div className="pt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setMsConfig({ ...msConfig, rising_falling_three_methods_enabled: msConfig.rising_falling_three_methods_enabled === false ? true : false })}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          msConfig.rising_falling_three_methods_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            msConfig.rising_falling_three_methods_enabled !== false ? "translate-x-4" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 bg-slate-50 border border-slate-200/60 rounded-xl p-3 flex flex-col justify-between">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Inverted Hammer & Hanging Man</span>
+                      <p className="text-[10px] text-slate-400">Strict 2-candle confirmation requiring opposite close breaking through body.</p>
+                    </div>
+                    <div className="pt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setMsConfig({ ...msConfig, inverted_hammer_hanging_man_enabled: msConfig.inverted_hammer_hanging_man_enabled === false ? true : false })}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          msConfig.inverted_hammer_hanging_man_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            msConfig.inverted_hammer_hanging_man_enabled !== false ? "translate-x-4" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 bg-slate-50 border border-slate-200/60 rounded-xl p-3 flex flex-col justify-between">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Post-Doji Breakout Logic</span>
+                      <p className="text-[10px] text-slate-400">Validates explosive directional breakout after low-volatility Doji candle.</p>
+                    </div>
+                    <div className="pt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setMsConfig({ ...msConfig, doji_breakout_confirmation_enabled: msConfig.doji_breakout_confirmation_enabled === false ? true : false })}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          msConfig.doji_breakout_confirmation_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            msConfig.doji_breakout_confirmation_enabled !== false ? "translate-x-4" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 bg-slate-50 border border-slate-200/60 rounded-xl p-3">
+                    <label className="text-xs font-mono text-slate-500 uppercase">Min CSI Threshold</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.30"
+                      max="0.85"
+                      value={msConfig.csi_min_threshold || 0.50}
+                      onChange={(e) => setMsConfig({ ...msConfig, csi_min_threshold: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Close proximity * body ratio (Standard: 0.50).</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">1m Max Confirmation Candle ATR Multiple (Exhaustion Guard)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="1.0"
+                      max="3.5"
+                      value={msConfig.max_confirmation_candle_atr || 1.8}
+                      onChange={(e) => setMsConfig({ ...msConfig, max_confirmation_candle_atr: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Rejects entering at the peak of blown-out climax bars exceeding this ATR multiple (prevents late 1-minute exhaustion entries; Standard: 1.8x).</p>
+                  </div>
+                </div>
+              </div>
+
               {/* Grid 5: Range Failed Auction / SFP Reclaim (Setup 9) */}
               <div className="border-t border-slate-100 pt-4 space-y-4">
                 <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">

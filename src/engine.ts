@@ -130,11 +130,31 @@ class TradingEngine {
   };
   private openInterestHistory: { timestamp: number; oi: number; price: number }[] = [];
 
-  public getTradeSizeMultiplier(): number {
+  public getTradeSizeMultiplier(direction?: TradeDirection | "LONG" | "SHORT", probability?: number): number {
+    let mult = 1.0;
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
-      return 0.5; // Reduce position size by 50% under low volatility to preserve capital
+      mult = 0.5; // Reduce position size by 50% under low volatility to preserve capital
     }
-    return 1.0;
+    // AI Model Confidence-Weighted Fractional Sizing (Non-blocking risk reduction):
+    // If trade direction and CatBoost probability are provided, scale exposure dynamically:
+    if (direction && probability !== undefined && !isNaN(probability)) {
+      const isLong = (direction as string) === "LONG" || direction === TradeDirection.LONG;
+      const modelProb = isLong ? probability : (1 - probability);
+      if (modelProb >= 0.65) {
+        // High alignment: full size
+        mult *= 1.0;
+      } else if (modelProb >= 0.45) {
+        // Moderate alignment: 0.75x size
+        mult *= 0.75;
+      } else if (modelProb >= 0.30) {
+        // Low/counter alignment: scale down to 0.45x size
+        mult *= 0.45;
+      } else {
+        // Severe opposing model (e.g. <30% aligned / >70% opposing): scale down to 0.25x size
+        mult *= 0.25;
+      }
+    }
+    return mult;
   }
 
   public getActiveMLModelName(): string {
@@ -1631,10 +1651,15 @@ class TradingEngine {
       : 0.55;
     const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold) : false;
     const pShortMet = signalDirection === "SHORT" ? (probabilityShort >= catboostThreshold) : false;
+    const opposingProb = signalDirection === "LONG" ? probabilityShort : probabilityLong;
+    const isModelOpposing = opposingProb >= 0.65;
+    const aiPenaltyPts = isModelOpposing ? Math.min(30, Math.round(15 + (opposingProb - 0.65) * 45)) : 0;
+    const aiPenaltyDesc = isModelOpposing ? ` (Opposing Model Confluence Penalty: -${aiPenaltyPts} pts)` : "";
+
     conditions.push({
       name: "CatBoost AI Prediction",
       met: (pLongMet || pShortMet),
-      current_value: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}% | P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%`,
+      current_value: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}% | P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%${aiPenaltyDesc}`,
       required: signalDirection === "LONG"
         ? `P(LONG) >= ${((this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? (smcFreshMomentumActive ? "46" : "50") : "55")}% (Evaluating LONG Trade)`
         : `P(SHORT) >= ${((this.currentRegime === MarketRegime.RANGE_BOUND || isSmcActive) ? (smcFreshMomentumActive ? "46" : "50") : "55")}% (Evaluating SHORT Trade)`,
@@ -2395,7 +2420,19 @@ class TradingEngine {
       }
 
       if (totalTacticalWeight > 0) {
-        confidenceScore = Math.round((earnedTacticalWeight / totalTacticalWeight) * 100);
+        let calculatedScore = Math.round((earnedTacticalWeight / totalTacticalWeight) * 100);
+
+        // Adaptive AI Alignment Penalty (Non-Blocking):
+        // If CatBoost model strongly predicts the OPPOSING direction (P(opposing) >= 65%),
+        // rather than hard-blocking the setup, deduct a dynamic confidence penalty.
+        // This ensures a trade can only execute against strong AI opposition if remaining tactical confluence is near-unanimous (>92%).
+        const opposingProb = signalDirection === "LONG" ? probabilityShort : probabilityLong;
+        if (opposingProb >= 0.65) {
+          const aiPenalty = Math.min(30, Math.round(15 + (opposingProb - 0.65) * 45)); // 15 to 30 point penalty
+          calculatedScore = Math.max(0, calculatedScore - aiPenalty);
+        }
+
+        confidenceScore = calculatedScore;
       }
       tacticalConfidenceMet = confidenceScore >= confidenceThreshold;
 
@@ -10746,6 +10783,36 @@ class TradingEngine {
     const atr14 = this.calculateATR(this.candles1m, 14);
     const lastAtr = atr14[closes.length - 1] || 150;
     const bb = this.calculateBollingerBands(closes, 20, 2);
+    const bbWidth = Math.max(1, bb.upper - bb.lower);
+    const bbDevPosition = (currentPrice - bb.lower) / bbWidth;
+
+    // Calculate 3-candle BB bandwidth expansion derivative (dBBW/dt)
+    const closesPrev3 = closes.slice(0, Math.max(1, closes.length - 3));
+    const bbPrev3 = this.calculateBollingerBands(closesPrev3, 20, 2);
+    const prevBbWidth = Math.max(1, bbPrev3.upper - bbPrev3.lower);
+    const isBbExpanding = bbWidth > prevBbWidth * 1.05; // True volatility blowout
+
+    // Adaptive Micro-Retest Execution Price (Non-Blocking):
+    // If Bollinger Bands are static/converging and price is extended at the band extremes,
+    // market-buying the top tick or shorting the bottom tick suffers immediate retest stopouts.
+    // Instead of blocking the trade, execute at the micro-retest pullback limit fill level.
+    let executedEntryPrice = currentPrice;
+    if (!isBbExpanding) {
+      if (execDirection === "LONG" && bbDevPosition > 0.70) {
+        const retestBuffer = Math.min(0.25 * lastAtr, (bbDevPosition - 0.65) * bbWidth);
+        if (retestBuffer > 2.0) {
+          executedEntryPrice = Number((currentPrice - retestBuffer).toFixed(2));
+          this.log(`  [Bollinger Micro-Retest LONG] Bands static ($${bbWidth.toFixed(1)} vs prev $${prevBbWidth.toFixed(1)}, dev: ${(bbDevPosition * 100).toFixed(1)}%). Executing at micro-retest level: $${executedEntryPrice.toFixed(2)} (-$${retestBuffer.toFixed(2)})`);
+        }
+      } else if (execDirection === "SHORT" && bbDevPosition < 0.30) {
+        const retestBuffer = Math.min(0.25 * lastAtr, (0.35 - bbDevPosition) * bbWidth);
+        if (retestBuffer > 2.0) {
+          executedEntryPrice = Number((currentPrice + retestBuffer).toFixed(2));
+          this.log(`  [Bollinger Micro-Retest SHORT] Bands static ($${bbWidth.toFixed(1)} vs prev $${prevBbWidth.toFixed(1)}, dev: ${(bbDevPosition * 100).toFixed(1)}%). Executing at micro-retest level: $${executedEntryPrice.toFixed(2)} (+$${retestBuffer.toFixed(2)})`);
+        }
+      }
+    }
+
     const ema9 = this.calculateEMA(closes, 9);
     const lastIdx = closes.length - 1;
     const ema9Val = ema9[lastIdx] || currentPrice;
@@ -10845,26 +10912,29 @@ class TradingEngine {
     }
 
     // --- IMPROVEMENT 4: ADX-ADAPTIVE TARGET COMPRESSION (QUICK-SCALP MODE) ---
-    // In low-ADX environments (< 18.0) or choppy range-bound markets, price lacks momentum to reach wide targets (2.0x+ ATR).
+    // In low-ADX environments (< 22.0) or choppy range-bound markets, price lacks momentum to reach wide targets (2.0x+ ATR).
     // Demanding standard 2.2:1 RR results in price stalling and reversing into stop-loss.
     // When enabled, compress TP to a high-probability quick-scalp target (1.05x ATR / ~1:1 RR) so wins are secured quickly.
     const adxList = this.calculateADX(this.candles1m, 14);
-    const currentAdx = adxList.length > 0 ? (adxList[adxList.length - 1] || 25) : 25;
+    const adxLen = adxList.length;
+    const currentAdx = adxLen > 0 ? (adxList[adxLen - 1] || 25) : 25;
+    const prevAdx = adxLen > 2 ? (adxList[adxLen - 3] || currentAdx) : currentAdx;
+    const adxSlope = currentAdx - prevAdx;
     const enableAdxCompression = config.risk_management.enable_adx_target_compression !== false;
-    const adxThreshold = config.risk_management.adx_quick_scalp_threshold || 18.0;
+    const adxThreshold = config.risk_management.adx_quick_scalp_threshold || 22.0;
     const quickScalpTpAtr = config.risk_management.adx_quick_scalp_tp_atr || 1.05;
 
     let isQuickScalpActive = false;
-    if (enableAdxCompression && (currentAdx < adxThreshold || this.currentRegime === MarketRegime.RANGE_BOUND)) {
+    if (enableAdxCompression && ((currentAdx < adxThreshold && adxSlope < 1.0) || this.currentRegime === MarketRegime.RANGE_BOUND)) {
       effectiveTpAtrMult = quickScalpTpAtr;
       isQuickScalpActive = true;
-      this.log(`  [Quick-Scalp Target Active] Low ADX (${currentAdx.toFixed(1)} < ${adxThreshold}) or Range-Bound: Compressed Take Profit to ${effectiveTpAtrMult.toFixed(2)}x ATR`);
+      this.log(`  [Quick-Scalp Target Active] Low/Flat ADX (${currentAdx.toFixed(1)}, slope: ${adxSlope >= 0 ? "+" : ""}${adxSlope.toFixed(2)}) or Range-Bound: Compressed Take Profit to ${effectiveTpAtrMult.toFixed(2)}x ATR`);
     }
 
     // Enforce a sensible minimum stop loss distance floor to prevent sub-tick anomalies without overriding ATR scaling
     const usdFloor = config.risk_management.min_stop_loss_distance_usd !== undefined ? config.risk_management.min_stop_loss_distance_usd : 35;
     const pctFloorVal = config.risk_management.min_stop_loss_distance_pct !== undefined ? config.risk_management.min_stop_loss_distance_pct : 0.045;
-    const minSlDistance = Math.max(usdFloor, currentPrice * (pctFloorVal / 100));
+    const minSlDistance = Math.max(usdFloor, executedEntryPrice * (pctFloorVal / 100));
     
     const isStaticSl = config.risk_management.static_stop_loss_enabled === true;
     const staticSlVal = config.risk_management.static_stop_loss_value_usd !== undefined ? config.risk_management.static_stop_loss_value_usd : 150;
@@ -10876,19 +10946,42 @@ class TradingEngine {
           minSlDistance
         );
 
-    const structuralSlDistance = stopLossDistance;
+    // Structure-Anchored Stop Loss (Non-Blocking):
+    // Anchor SL behind the origin / swing of recent 3 candles with an ATR buffer to prevent micro-noise stopouts
+    let structuralSlDistance = stopLossDistance;
+    if (!isStaticSl) {
+      const recent3Candles = this.candles1m.slice(-3);
+      if (recent3Candles.length > 0) {
+        if (execDirection === "LONG") {
+          const microSwingLow = Math.min(...recent3Candles.map(c => c.low));
+          const structDist = (executedEntryPrice - microSwingLow) + (0.20 * lastAtr);
+          if (structDist > structuralSlDistance && structDist <= 2.2 * (lastAtr * effectiveSlAtrMult)) {
+            structuralSlDistance = structDist;
+            this.log(`  [Structural Stop Anchor (LONG)] Anchored behind recent 3m swing low ($${microSwingLow.toFixed(2)}) + 0.20x ATR -> Dist: $${structuralSlDistance.toFixed(2)}`);
+          }
+        } else {
+          const microSwingHigh = Math.max(...recent3Candles.map(c => c.high));
+          const structDist = (microSwingHigh - executedEntryPrice) + (0.20 * lastAtr);
+          if (structDist > structuralSlDistance && structDist <= 2.2 * (lastAtr * effectiveSlAtrMult)) {
+            structuralSlDistance = structDist;
+            this.log(`  [Structural Stop Anchor (SHORT)] Anchored behind recent 3m swing high ($${microSwingHigh.toFixed(2)}) + 0.20x ATR -> Dist: $${structuralSlDistance.toFixed(2)}`);
+          }
+        }
+      }
+    }
 
-    // Use the configured default quantity (fixed standard trade size)
-    const sizeMultiplier = this.getTradeSizeMultiplier();
+    // Adaptive Confidence-Weighted Sizing & Constant Dollar Risk Scaling:
+    const sizeMultiplier = this.getTradeSizeMultiplier(execDirection, probability);
     const baseQty = config.risk_management.default_quantity_btc || 0.001;
-    const positionQtyBtc = Number((baseQty * sizeMultiplier).toFixed(5));
+    const slRiskScaling = structuralSlDistance > stopLossDistance ? Math.max(0.4, stopLossDistance / structuralSlDistance) : 1.0;
+    const positionQtyBtc = Number((baseQty * sizeMultiplier * slRiskScaling).toFixed(5));
     const leverage = config.risk_management.leverage || 20;
 
     // Fee-Aware Take Profit Target Floor:
     // Estimate round-trip exchange fees (taker ~0.05% entry + 0.05% exit + GST ≈ 0.10 - 0.118%).
     // Minimum Take Profit distance must cover at least 1.5x the round-trip fee distance so net profit is always solidly positive (> +$0.03 to +$0.06+).
     const estRoundTripFeeRate = config.risk_management.delta_india_gst_enabled ? 0.00118 : 0.0010;
-    const minFeeCoverDistance = currentPrice * estRoundTripFeeRate * 1.5;
+    const minFeeCoverDistance = executedEntryPrice * estRoundTripFeeRate * 1.5;
 
     // Positive R:R Guarantee:
     // Ensure planned TP Distance is at least 1.25x - 1.35x of Stop Loss Distance (or 0.95x in quick-scalp low ADX mode)
@@ -10910,7 +11003,7 @@ class TradingEngine {
 
     const vpCheck = this.evaluateMultiTimeframeVolumeProfile(
       execDirection,
-      currentPrice,
+      executedEntryPrice,
       lastAtr,
       this.calculateAccurateRelativeVolume(),
       { confirmed: true, message: `Setup execution: ${execDirection}` },
@@ -10918,7 +11011,7 @@ class TradingEngine {
     );
 
     if (vpCheck.nearestBarrierPrice) {
-      const distToBarrier = Math.abs(vpCheck.nearestBarrierPrice - currentPrice);
+      const distToBarrier = Math.abs(vpCheck.nearestBarrierPrice - executedEntryPrice);
       // If opposing HVN barrier provides reasonable scalp room (between 0.9x ATR and 3.0x ATR), anchor TP right before the liquidity node
       if (distToBarrier >= 0.9 * lastAtr && distToBarrier <= 3.0 * lastAtr) {
         vpTargetTpDistance = distToBarrier;
@@ -10928,7 +11021,7 @@ class TradingEngine {
     const finalTpDistance = vpTargetTpDistance;
     const finalSlDistance = vpTargetSlDistance;
 
-    const initialSlPrice = execDirection === "LONG" ? currentPrice - finalSlDistance : currentPrice + finalSlDistance;
+    const initialSlPrice = execDirection === "LONG" ? executedEntryPrice - finalSlDistance : executedEntryPrice + finalSlDistance;
 
     // --- FLAW 3 FIX: STRUCTURAL STOP PLACEMENT AROUND MAJOR ROUND NUMBERS ---
     // Major psychological round numbers (multiples of $500 and $1,000 like $80,000, $80,500)
@@ -10939,36 +11032,36 @@ class TradingEngine {
     const roundStep = 500;
     let adjustedSlPrice = initialSlPrice;
     if (execDirection === "LONG") {
-      const nearestRoundBelow = Math.floor(currentPrice / roundStep) * roundStep;
+      const nearestRoundBelow = Math.floor(executedEntryPrice / roundStep) * roundStep;
       // If entry is above the round level and stop loss lands right above it (within $45 or 0.8x ATR)
-      if (currentPrice > nearestRoundBelow && adjustedSlPrice >= nearestRoundBelow && (adjustedSlPrice - nearestRoundBelow) <= Math.max(45, 0.8 * lastAtr)) {
+      if (executedEntryPrice > nearestRoundBelow && adjustedSlPrice >= nearestRoundBelow && (adjustedSlPrice - nearestRoundBelow) <= Math.max(45, 0.8 * lastAtr)) {
         const bufferedSl = nearestRoundBelow - Math.max(35, 0.55 * lastAtr);
         // Only buffer if it keeps the SL within 2.35x ATR to preserve risk boundaries
-        if ((currentPrice - bufferedSl) <= 2.35 * (lastAtr * effectiveSlAtrMult)) {
+        if ((executedEntryPrice - bufferedSl) <= 2.35 * (lastAtr * effectiveSlAtrMult)) {
           adjustedSlPrice = bufferedSl;
         }
       }
     } else if (execDirection === "SHORT") {
-      const nearestRoundAbove = Math.ceil(currentPrice / roundStep) * roundStep;
+      const nearestRoundAbove = Math.ceil(executedEntryPrice / roundStep) * roundStep;
       // If entry is below the round level and stop loss lands right below it (within $45 or 0.8x ATR)
-      if (currentPrice < nearestRoundAbove && adjustedSlPrice <= nearestRoundAbove && (nearestRoundAbove - adjustedSlPrice) <= Math.max(45, 0.8 * lastAtr)) {
+      if (executedEntryPrice < nearestRoundAbove && adjustedSlPrice <= nearestRoundAbove && (nearestRoundAbove - adjustedSlPrice) <= Math.max(45, 0.8 * lastAtr)) {
         const bufferedSl = nearestRoundAbove + Math.max(35, 0.55 * lastAtr);
-        if ((bufferedSl - currentPrice) <= 2.35 * (lastAtr * effectiveSlAtrMult)) {
+        if ((bufferedSl - executedEntryPrice) <= 2.35 * (lastAtr * effectiveSlAtrMult)) {
           adjustedSlPrice = bufferedSl;
         }
       }
     }
 
     const stopLossPrice = adjustedSlPrice;
-    const actualSLDistance = Math.abs(currentPrice - stopLossPrice);
+    const actualSLDistance = Math.abs(executedEntryPrice - stopLossPrice);
 
     // Maintain favorable Risk-to-Reward ratio if SL was adjusted
     const requiredTpDist = Math.max(finalTpDistance, actualSLDistance * minRRMultiplier);
-    const takeProfitPrice = execDirection === "LONG" ? currentPrice + requiredTpDist : currentPrice - requiredTpDist;
-    const actualTPDistance = Math.abs(currentPrice - takeProfitPrice);
+    const takeProfitPrice = execDirection === "LONG" ? executedEntryPrice + requiredTpDist : executedEntryPrice - requiredTpDist;
+    const actualTPDistance = Math.abs(executedEntryPrice - takeProfitPrice);
 
     this.log(
-      `Computed Execution Parameters (${execDirection}${isInverted ? " - INVERTED" : ""}): Entry=$${currentPrice.toFixed(2)}, StopLoss=$${stopLossPrice.toFixed(2)} (Dist: $${actualSLDistance.toFixed(
+      `Computed Execution Parameters (${execDirection}${isInverted ? " - INVERTED" : ""}): Entry=$${executedEntryPrice.toFixed(2)}, StopLoss=$${stopLossPrice.toFixed(2)} (Dist: $${actualSLDistance.toFixed(
         2
       )} [${effectiveSlAtrMult}x ATR | Regime: ${this.currentRegime}]), TakeProfit=$${takeProfitPrice.toFixed(2)} (Dist: $${actualTPDistance.toFixed(
         2
@@ -10980,13 +11073,13 @@ class TradingEngine {
       entry_timestamp: new Date().toISOString(),
       exit_timestamp: null,
       direction: execDirection === "LONG" ? TradeDirection.LONG : TradeDirection.SHORT,
-      entry_price: currentPrice,
+      entry_price: executedEntryPrice,
       exit_price: null,
       quantity_btc: positionQtyBtc,
       leverage,
       pnl_usdt: null,
       pnl_pct: null,
-      fees_paid_usdt: this.calculateTradingFee(currentPrice * positionQtyBtc, true, 0), // entry commission fee
+      fees_paid_usdt: this.calculateTradingFee(executedEntryPrice * positionQtyBtc, true, 0), // entry commission fee
       exit_reason: null,
       catboost_probability: probability,
       regime_at_entry: this.currentRegime,
@@ -10998,13 +11091,15 @@ class TradingEngine {
       hold_duration_seconds: 0,
       is_win: null,
       feature_snapshot: {
-        last_price: currentPrice,
+        last_price: executedEntryPrice,
         atr_14: lastAtr,
         regime: this.currentRegime,
         average_sentiment: sentiment,
         stop_loss_price: stopLossPrice,
         take_profit_price: takeProfitPrice,
         inverted_from_signal: isInverted ? direction : undefined,
+        adx_quick_scalp: isQuickScalpActive,
+        structural_sl_applied: structuralSlDistance > stopLossDistance,
       },
     });
 
@@ -11294,10 +11389,13 @@ class TradingEngine {
           finalStopLossPrice = stopLossPrice;
         }
 
-        // Dynamic Breakeven Floor: Once profit touches >= 1.15x ATR, lock SL to Entry + Fees + Positive tick gain
+        // Dynamic Breakeven Floor: In standard regimes locks when profit >= 1.15x ATR;
+        // in low-ADX / quick-scalp regimes, compresses trigger to 0.65x ATR to protect against stall reversals
+        const isQuickScalpTrade = this.activeTrade.feature_snapshot?.adx_quick_scalp === true || this.currentRegime === MarketRegime.RANGE_BOUND;
+        const defaultBeTrigger = isQuickScalpTrade ? 0.65 : 1.15;
         const beTriggerAtr = config.risk_management.breakeven_trigger_atr !== undefined
-          ? config.risk_management.breakeven_trigger_atr
-          : 1.15;
+          ? (isQuickScalpTrade ? Math.min(config.risk_management.breakeven_trigger_atr, 0.70) : config.risk_management.breakeven_trigger_atr)
+          : defaultBeTrigger;
         if ((peakPrice - entryPrice) >= (lastAtr * beTriggerAtr)) {
           // Standard round-trip taker fee buffer (~0.10% of notional) + guaranteed green tick ($2.50)
           const feeBufferUsd = Math.max(entryPrice * 0.0010, (entryFee + exitFeeProj) / (qty || 0.001));
@@ -11305,8 +11403,8 @@ class TradingEngine {
           const targetBe = entryPrice + feeBufferUsd + positiveTickGain;
 
           // Invariant Safety Guard: Breakeven SL must NEVER choke the active trade.
-          // It must stay at least 0.85 * ATR below current market price and not exceed peakPrice.
-          const maxAllowedBe = Math.min(currentPrice - 0.85 * lastAtr, peakPrice - 0.85 * lastAtr);
+          // It must stay with proper breathing room below current market price and not exceed peakPrice.
+          const maxAllowedBe = Math.min(currentPrice - (isQuickScalpTrade ? 0.40 : 0.85) * lastAtr, peakPrice - (isQuickScalpTrade ? 0.40 : 0.85) * lastAtr);
           if (targetBe <= maxAllowedBe && targetBe > stopLossPrice) {
             finalStopLossPrice = Math.max(finalStopLossPrice, targetBe);
           }
@@ -11359,19 +11457,22 @@ class TradingEngine {
           finalStopLossPrice = stopLossPrice;
         }
 
-        // Dynamic Breakeven Floor: Once profit touches >= 1.15x ATR, lock SL to Entry - Fees - Positive tick gain
-        const beTriggerAtr = config.risk_management.breakeven_trigger_atr !== undefined
-          ? config.risk_management.breakeven_trigger_atr
-          : 1.15;
-        if ((entryPrice - valleyPrice) >= (lastAtr * beTriggerAtr)) {
+        // Dynamic Breakeven Floor: In standard regimes locks when profit >= 1.15x ATR;
+        // in low-ADX / quick-scalp regimes, compresses trigger to 0.65x ATR to protect against stall reversals
+        const isQuickScalpTradeShort = this.activeTrade.feature_snapshot?.adx_quick_scalp === true || this.currentRegime === MarketRegime.RANGE_BOUND;
+        const defaultBeTriggerShort = isQuickScalpTradeShort ? 0.65 : 1.15;
+        const beTriggerAtrShort = config.risk_management.breakeven_trigger_atr !== undefined
+          ? (isQuickScalpTradeShort ? Math.min(config.risk_management.breakeven_trigger_atr, 0.70) : config.risk_management.breakeven_trigger_atr)
+          : defaultBeTriggerShort;
+        if ((entryPrice - valleyPrice) >= (lastAtr * beTriggerAtrShort)) {
           // Standard round-trip taker fee buffer (~0.10% of notional) + guaranteed green tick ($2.50)
           const feeBufferUsd = Math.max(entryPrice * 0.0010, (entryFee + exitFeeProj) / (qty || 0.001));
           const positiveTickGain = Math.max(2.5, 0.08 * lastAtr);
           const targetBe = entryPrice - feeBufferUsd - positiveTickGain;
 
           // Invariant Safety Guard: Breakeven SL must NEVER choke the active trade.
-          // It must stay at least 0.85 * ATR above current market price and not drop below valleyPrice.
-          const minAllowedBe = Math.max(currentPrice + 0.85 * lastAtr, valleyPrice + 0.85 * lastAtr);
+          // It must stay with proper breathing room above current market price and not drop below valleyPrice.
+          const minAllowedBe = Math.max(currentPrice + (isQuickScalpTradeShort ? 0.40 : 0.85) * lastAtr, valleyPrice + (isQuickScalpTradeShort ? 0.40 : 0.85) * lastAtr);
           if (targetBe >= minAllowedBe && targetBe < stopLossPrice) {
             finalStopLossPrice = Math.min(finalStopLossPrice, targetBe);
           }

@@ -202,7 +202,10 @@ const DEFAULT_CONFIG: StrategyConfig = {
     take_profit_ratio: 1.5,
     take_profit_atr_multiplier: 1.65,
     take_profit_mode: "ATR_SCALP",
-    breakeven_trigger_atr: 0.85,
+    enable_adx_target_compression: true,
+    adx_quick_scalp_threshold: 18.0,
+    adx_quick_scalp_tp_atr: 1.05,
+    breakeven_trigger_atr: 1.15,
     max_consecutive_losses: 3,
     consecutive_losses_cooldown_minutes: 30,
     daily_loss_limit_pct: 2.0,
@@ -1168,7 +1171,19 @@ class DatabaseManager {
         changed = true;
       }
       if (this.cache.config.risk_management.breakeven_trigger_atr === undefined) {
-        this.cache.config.risk_management.breakeven_trigger_atr = 1.0;
+        this.cache.config.risk_management.breakeven_trigger_atr = 1.15;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.enable_adx_target_compression === undefined) {
+        this.cache.config.risk_management.enable_adx_target_compression = true;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.adx_quick_scalp_threshold === undefined) {
+        this.cache.config.risk_management.adx_quick_scalp_threshold = 18.0;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.adx_quick_scalp_tp_atr === undefined) {
+        this.cache.config.risk_management.adx_quick_scalp_tp_atr = 1.05;
         changed = true;
       }
       if (this.cache.config.risk_management.default_order_execution === undefined) {

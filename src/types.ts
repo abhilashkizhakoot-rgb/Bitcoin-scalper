@@ -243,6 +243,9 @@ export interface StrategyConfig {
     take_profit_ratio: number; // e.g. 2.0 (1:2 R:R)
     take_profit_atr_multiplier?: number; // Direct ATR multiplier for Take Profit (e.g. 1.35x ATR for high win-rate scalping)
     take_profit_mode?: "ATR_SCALP" | "RR_RATIO"; // Target mode: "ATR_SCALP" (direct 1.35x ATR target) or "RR_RATIO" (R:R multiple)
+    enable_adx_target_compression?: boolean; // Automatically compress TP targets to high-probability quick-scalp levels in low ADX / chop
+    adx_quick_scalp_threshold?: number; // ADX threshold below which quick-scalp target compression activates (default: 18.0)
+    adx_quick_scalp_tp_atr?: number; // Quick-scalp TP multiplier in low ADX markets (default: 1.05x ATR)
     breakeven_trigger_atr?: number; // ATR gain threshold to lock stop-loss to Breakeven + Fees (e.g. 1.0x ATR)
     max_consecutive_losses: number; // e.g. 3
     consecutive_losses_cooldown_minutes: number; // e.g. 30

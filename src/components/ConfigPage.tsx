@@ -243,7 +243,10 @@ export default function ConfigPage({
         take_profit_ratio: 1.5,
         take_profit_atr_multiplier: 1.50,
         take_profit_mode: "ATR_SCALP",
-        breakeven_trigger_atr: 0.75,
+        enable_adx_target_compression: true,
+        adx_quick_scalp_threshold: 18.0,
+        adx_quick_scalp_tp_atr: 1.05,
+        breakeven_trigger_atr: 1.15,
         min_stop_loss_distance_usd: 25,
         min_stop_loss_distance_pct: 0.035,
         static_stop_loss_value_usd: 150,
@@ -2021,6 +2024,63 @@ export default function ConfigPage({
                   </div>
                 </div>
 
+                {/* ADX-Adaptive Quick-Scalp Target Compression */}
+                <div className="col-span-1 md:col-span-2 border border-emerald-100 rounded-xl p-4 bg-emerald-50/30 space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none text-xs font-bold text-emerald-950 uppercase tracking-wide">
+                      <input
+                        type="checkbox"
+                        checked={riskConfig.enable_adx_target_compression !== false}
+                        onChange={(e) => setRiskConfig({ ...riskConfig, enable_adx_target_compression: e.target.checked })}
+                        className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                      />
+                      ADX & Regime-Adaptive Quick-Scalp Target Compression
+                    </label>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold">
+                      {riskConfig.enable_adx_target_compression !== false ? "ENABLED" : "OFF"}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-emerald-900/80 leading-relaxed">
+                    In low-momentum environments (ADX &lt; 18.0) or Range-Bound chop, price lacks velocity to reach ambitious 2.0x+ ATR targets. Automatically compresses Take Profit to a high-probability quick-scalp level (1.05x ATR) to capture early gains before pullbacks reverse into stop loss.
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-1">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                        <span>Low ADX Threshold</span>
+                        <span className="font-bold text-slate-700">{riskConfig.adx_quick_scalp_threshold ?? 18.0}</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        value={riskConfig.adx_quick_scalp_threshold ?? 18.0}
+                        onChange={(e) => setRiskConfig({ ...riskConfig, adx_quick_scalp_threshold: parseInputNumber(e.target.value, true) })}
+                        className="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
+                      />
+                      <p className="text-[9px] text-slate-400 leading-relaxed">
+                        When ADX(14) drops below this level, quick-scalp target compression activates.
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-mono text-slate-500 uppercase flex justify-between">
+                        <span>Quick-Scalp TP Multiplier (ATR)</span>
+                        <span className="font-bold text-slate-700">{riskConfig.adx_quick_scalp_tp_atr ?? 1.05}x</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        value={riskConfig.adx_quick_scalp_tp_atr ?? 1.05}
+                        onChange={(e) => setRiskConfig({ ...riskConfig, adx_quick_scalp_tp_atr: parseInputNumber(e.target.value, true) })}
+                        className="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
+                      />
+                      <p className="text-[9px] text-slate-400 leading-relaxed">
+                        Compressed target distance: ATR(14) * multiplier (~$30–$45 BTC scalp target).
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-1.5">
                   <label className="text-xs font-mono text-slate-400 uppercase">Base Scalp TP ATR Multiplier (Fallback)</label>
                   <input
@@ -2054,12 +2114,12 @@ export default function ConfigPage({
                   <input
                     type="number"
                     step="0.05"
-                    value={riskConfig.breakeven_trigger_atr ?? 0.75}
+                    value={riskConfig.breakeven_trigger_atr ?? 1.15}
                     onChange={(e) => setRiskConfig({ ...riskConfig, breakeven_trigger_atr: parseInputNumber(e.target.value, true) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Peak ATR gain required to lock Stop Loss to Breakeven + Fees. Protects trades from multi-wave reversals once in solid profit (Default: 0.75x ATR).
+                    Peak ATR gain required to lock Stop Loss to Breakeven + Fees + green tick buffer. Guarded by a 0.85x ATR anti-choke safety distance to give the position breathing room (Default: 1.15x ATR).
                   </p>
                 </div>
 
@@ -2252,7 +2312,7 @@ export default function ConfigPage({
                     <span className="text-xs font-semibold text-indigo-700 font-bold">Activate Dynamic Trailing Stop Loss</span>
                   </label>
                   <p className="text-[10px] text-slate-500 leading-relaxed pl-6.5">
-                    When active, the stop loss price is dynamically moved in the profitable direction as the market price climbs. Once the price reverses, the position is immediately closed at the trailing stop, securing maximum trend payout.
+                    When active, the stop loss is anchored to the peak (Long) or valley (Short) with an ATR trailing distance and an invariant 1.35x ATR anti-choke floor. Once price reverses, profits are protected without premature micro-wick cutoffs.
                   </p>
                 </div>
 
@@ -2268,7 +2328,7 @@ export default function ConfigPage({
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                       />
                       <p className="text-[9px] text-slate-400 leading-relaxed text-slate-500">
-                        Distance to trail behind the peak/valley, computed as ATR(14) * multiplier. Narrower trailing secures near-term gains faster; wider trailing captures longer trends (Standard: 1.2 - 2.0).
+                        Distance to trail behind the peak/valley, computed as ATR(14) * multiplier. Guarded by a 1.35x ATR anti-choke floor from current price (Standard: 1.35 - 1.80).
                       </p>
                     </div>
 
@@ -2282,7 +2342,7 @@ export default function ConfigPage({
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
                       />
                       <p className="text-[9px] text-slate-400 leading-relaxed text-slate-500">
-                        The multiple of the initial stop loss distance (risk) required in profit before trailing is armed (e.g., 1.2x means a 1:1.2 R:R profit level). Keeps stop loss wide early so the trade can breathe!
+                        The multiple of the initial stop loss distance (risk) required in profit before trailing is armed (e.g., 1.0x - 1.2x). Keeps stop loss wide early so the trade can breathe!
                       </p>
                     </div>
                   </div>

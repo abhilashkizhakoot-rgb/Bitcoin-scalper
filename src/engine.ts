@@ -10816,6 +10816,23 @@ class TradingEngine {
       }
     }
 
+    // --- IMPROVEMENT 4: ADX-ADAPTIVE TARGET COMPRESSION (QUICK-SCALP MODE) ---
+    // In low-ADX environments (< 18.0) or choppy range-bound markets, price lacks momentum to reach wide targets (2.0x+ ATR).
+    // Demanding standard 2.2:1 RR results in price stalling and reversing into stop-loss.
+    // When enabled, compress TP to a high-probability quick-scalp target (1.05x ATR / ~1:1 RR) so wins are secured quickly.
+    const adxList = this.calculateADX(this.candles1m, 14);
+    const currentAdx = adxList.length > 0 ? (adxList[adxList.length - 1] || 25) : 25;
+    const enableAdxCompression = config.risk_management.enable_adx_target_compression !== false;
+    const adxThreshold = config.risk_management.adx_quick_scalp_threshold || 18.0;
+    const quickScalpTpAtr = config.risk_management.adx_quick_scalp_tp_atr || 1.05;
+
+    let isQuickScalpActive = false;
+    if (enableAdxCompression && (currentAdx < adxThreshold || this.currentRegime === MarketRegime.RANGE_BOUND)) {
+      effectiveTpAtrMult = quickScalpTpAtr;
+      isQuickScalpActive = true;
+      this.log(`  [Quick-Scalp Target Active] Low ADX (${currentAdx.toFixed(1)} < ${adxThreshold}) or Range-Bound: Compressed Take Profit to ${effectiveTpAtrMult.toFixed(2)}x ATR`);
+    }
+
     // Enforce a sensible minimum stop loss distance floor to prevent sub-tick anomalies without overriding ATR scaling
     const usdFloor = config.risk_management.min_stop_loss_distance_usd !== undefined ? config.risk_management.min_stop_loss_distance_usd : 35;
     const pctFloorVal = config.risk_management.min_stop_loss_distance_pct !== undefined ? config.risk_management.min_stop_loss_distance_pct : 0.045;
@@ -10846,12 +10863,12 @@ class TradingEngine {
     const minFeeCoverDistance = currentPrice * estRoundTripFeeRate * 1.5;
 
     // Positive R:R Guarantee:
-    // Ensure planned TP Distance is at least 1.25x - 1.35x of Stop Loss Distance (preventing 1 SL from wiping multiple TPs)
+    // Ensure planned TP Distance is at least 1.25x - 1.35x of Stop Loss Distance (or 0.95x in quick-scalp low ADX mode)
     const minRRMultiplier = config.risk_management.min_rr_ratio_floor !== undefined
       ? config.risk_management.min_rr_ratio_floor
-      : (this.currentRegime === MarketRegime.RANGE_BOUND ? 1.15 : 1.35);
+      : (isQuickScalpActive ? 0.95 : (this.currentRegime === MarketRegime.RANGE_BOUND ? 1.15 : 1.35));
 
-    const isAtrScalpMode = config.risk_management.take_profit_mode !== "RR_RATIO";
+    const isAtrScalpMode = config.risk_management.take_profit_mode !== "RR_RATIO" || isQuickScalpActive;
     const rawTpDist = isAtrScalpMode
       ? Math.max(lastAtr * effectiveTpAtrMult, structuralSlDistance * minRRMultiplier)
       : structuralSlDistance * Math.max(config.risk_management.take_profit_ratio, minRRMultiplier);
@@ -11194,6 +11211,12 @@ class TradingEngine {
       
       // Get the last 3 closed 1-minute candles for structural swing trailing
       const closedCandles = this.candles1m.slice(-4, -1);
+
+      // Trailing distance multiplier (default: 1.45x ATR, min 35 USD)
+      const trailDistMult = config.risk_management.trailing_stop_loss_distance_atr !== undefined && !isNaN(config.risk_management.trailing_stop_loss_distance_atr) && config.risk_management.trailing_stop_loss_distance_atr > 0
+        ? config.risk_management.trailing_stop_loss_distance_atr
+        : 1.45;
+      const trailingBuffer = Math.max(lastAtr * trailDistMult, 35);
       
       if (direction === TradeDirection.LONG) {
         // Track maximum price observed since entry
@@ -11203,7 +11226,10 @@ class TradingEngine {
         );
         this.activeTrade.feature_snapshot.peak_price = peakPrice;
         
-        // 1. Calculate structural anchor: lowest low of last 3 closed candles (or Higher Low swing)
+        // 1. Calculate trailing stop anchored to PEAK price with ATR buffer
+        const atrTrailingSl = peakPrice - trailingBuffer;
+
+        // Structural swing anchor: lowest low of last 3 closed candles (or Higher Low swing)
         const lowestOf3Candles = closedCandles.length > 0
           ? Math.min(...closedCandles.map(c => c.low))
           : entryPrice;
@@ -11211,13 +11237,16 @@ class TradingEngine {
           ? Math.max(lowestOf3Candles, struct.current_HL.price)
           : lowestOf3Candles;
           
-        // 2. Anti-Choking Hard Floor: Never place trailing stop closer than 1.2 * ATR from current market price
-        const maxAllowedTrailingSl = currentPrice - 1.2 * lastAtr;
-        const candidateTrailingSl = Math.min(structuralAnchor, maxAllowedTrailingSl);
+        // De-choking guard: structural anchor must NOT pull SL tighter than peakPrice - trailingBuffer
+        const candidateTrailingSl = Math.min(structuralAnchor, atrTrailingSl);
+        
+        // 2. Anti-Choking Hard Floor: Never place trailing stop closer than 1.35 * ATR from current market price
+        const maxAllowedTrailingSl = currentPrice - 1.35 * lastAtr;
+        const safeTrailingSl = Math.min(candidateTrailingSl, maxAllowedTrailingSl);
         
         // 3. Monotonic ratcheting: Trailing stop must never move backward
         const previousTrailingSl = this.activeTrade.feature_snapshot.trailing_stop_loss_price || stopLossPrice;
-        const trailingSl = Math.max(previousTrailingSl, candidateTrailingSl);
+        const trailingSl = Math.max(previousTrailingSl, safeTrailingSl);
         this.activeTrade.feature_snapshot.trailing_stop_loss_price = trailingSl;
         
         // Check activation condition if not already activated
@@ -11237,20 +11266,21 @@ class TradingEngine {
           finalStopLossPrice = stopLossPrice;
         }
 
-        // Dynamic Breakeven Floor: Once profit touches >= 0.75x ATR, lock SL to Entry + Fees (with strict safety limits)
+        // Dynamic Breakeven Floor: Once profit touches >= 1.15x ATR, lock SL to Entry + Fees + Positive tick gain
         const beTriggerAtr = config.risk_management.breakeven_trigger_atr !== undefined
           ? config.risk_management.breakeven_trigger_atr
-          : 0.75;
+          : 1.15;
         if ((peakPrice - entryPrice) >= (lastAtr * beTriggerAtr)) {
-          // Standard round-trip taker fee buffer (~0.08% of notional)
-          const feeBufferUsd = Math.min(entryPrice * 0.0008, (entryFee + exitFeeProj) / (qty || 0.001));
-          const targetBe = entryPrice + feeBufferUsd + 1.0;
+          // Standard round-trip taker fee buffer (~0.10% of notional) + guaranteed green tick ($2.50)
+          const feeBufferUsd = Math.max(entryPrice * 0.0010, (entryFee + exitFeeProj) / (qty || 0.001));
+          const positiveTickGain = Math.max(2.5, 0.08 * lastAtr);
+          const targetBe = entryPrice + feeBufferUsd + positiveTickGain;
+
           // Invariant Safety Guard: Breakeven SL must NEVER choke the active trade.
-          // It must stay at least 0.4 * ATR below current market price and not exceed peakPrice.
-          const maxAllowedBe = Math.min(currentPrice - 0.4 * lastAtr, peakPrice - 0.4 * lastAtr);
-          const safeBeFloor = Math.min(targetBe, maxAllowedBe);
-          if (safeBeFloor > stopLossPrice) {
-            finalStopLossPrice = Math.max(finalStopLossPrice, safeBeFloor);
+          // It must stay at least 0.85 * ATR below current market price and not exceed peakPrice.
+          const maxAllowedBe = Math.min(currentPrice - 0.85 * lastAtr, peakPrice - 0.85 * lastAtr);
+          if (targetBe <= maxAllowedBe && targetBe > stopLossPrice) {
+            finalStopLossPrice = Math.max(finalStopLossPrice, targetBe);
           }
         }
       } else {
@@ -11261,7 +11291,10 @@ class TradingEngine {
         );
         this.activeTrade.feature_snapshot.valley_price = valleyPrice;
         
-        // 1. Calculate structural anchor: highest high of last 3 closed candles (or Lower High swing)
+        // 1. Calculate trailing stop anchored to VALLEY price with ATR buffer
+        const atrTrailingSl = valleyPrice + trailingBuffer;
+
+        // Structural swing anchor: highest high of last 3 closed candles (or Lower High swing)
         const highestOf3Candles = closedCandles.length > 0
           ? Math.max(...closedCandles.map(c => c.high))
           : entryPrice;
@@ -11269,13 +11302,16 @@ class TradingEngine {
           ? Math.min(highestOf3Candles, struct.current_LH.price)
           : highestOf3Candles;
           
-        // 2. Anti-Choking Hard Floor: Never place trailing stop closer than 1.2 * ATR from current market price
-        const minAllowedTrailingSl = currentPrice + 1.2 * lastAtr;
-        const candidateTrailingSl = Math.max(structuralAnchor, minAllowedTrailingSl);
+        // De-choking guard: structural anchor must NOT pull SL tighter than valleyPrice + trailingBuffer
+        const candidateTrailingSl = Math.max(structuralAnchor, atrTrailingSl);
         
-        // 3. Monotonic ratcheting: Trailing stop must never move backward
+        // 2. Anti-Choking Hard Floor: Never place trailing stop closer than 1.35 * ATR from current market price
+        const minAllowedTrailingSl = currentPrice + 1.35 * lastAtr;
+        const safeTrailingSl = Math.max(candidateTrailingSl, minAllowedTrailingSl);
+        
+        // 3. Monotonic ratcheting: Trailing stop must never move backward (downward for shorts)
         const previousTrailingSl = this.activeTrade.feature_snapshot.trailing_stop_loss_price || stopLossPrice;
-        const trailingSl = Math.min(previousTrailingSl, candidateTrailingSl);
+        const trailingSl = Math.min(previousTrailingSl, safeTrailingSl);
         this.activeTrade.feature_snapshot.trailing_stop_loss_price = trailingSl;
         
         // Check activation condition if not already activated
@@ -11295,20 +11331,21 @@ class TradingEngine {
           finalStopLossPrice = stopLossPrice;
         }
 
-        // Dynamic Breakeven Floor: Once profit touches >= 0.75x ATR, lock SL to Entry - Fees (with strict safety limits)
+        // Dynamic Breakeven Floor: Once profit touches >= 1.15x ATR, lock SL to Entry - Fees - Positive tick gain
         const beTriggerAtr = config.risk_management.breakeven_trigger_atr !== undefined
           ? config.risk_management.breakeven_trigger_atr
-          : 0.75;
+          : 1.15;
         if ((entryPrice - valleyPrice) >= (lastAtr * beTriggerAtr)) {
-          // Standard round-trip taker fee buffer (~0.08% of notional)
-          const feeBufferUsd = Math.min(entryPrice * 0.0008, (entryFee + exitFeeProj) / (qty || 0.001));
-          const targetBe = entryPrice - feeBufferUsd - 1.0;
+          // Standard round-trip taker fee buffer (~0.10% of notional) + guaranteed green tick ($2.50)
+          const feeBufferUsd = Math.max(entryPrice * 0.0010, (entryFee + exitFeeProj) / (qty || 0.001));
+          const positiveTickGain = Math.max(2.5, 0.08 * lastAtr);
+          const targetBe = entryPrice - feeBufferUsd - positiveTickGain;
+
           // Invariant Safety Guard: Breakeven SL must NEVER choke the active trade.
-          // It must stay at least 0.4 * ATR above current market price and not drop below valleyPrice.
-          const minAllowedBe = Math.max(currentPrice + 0.4 * lastAtr, valleyPrice + 0.4 * lastAtr);
-          const safeBeFloor = Math.max(targetBe, minAllowedBe);
-          if (safeBeFloor < stopLossPrice) {
-            finalStopLossPrice = Math.min(finalStopLossPrice, safeBeFloor);
+          // It must stay at least 0.85 * ATR above current market price and not drop below valleyPrice.
+          const minAllowedBe = Math.max(currentPrice + 0.85 * lastAtr, valleyPrice + 0.85 * lastAtr);
+          if (targetBe >= minAllowedBe && targetBe < stopLossPrice) {
+            finalStopLossPrice = Math.min(finalStopLossPrice, targetBe);
           }
         }
       }

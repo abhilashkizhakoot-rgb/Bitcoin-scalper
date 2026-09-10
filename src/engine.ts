@@ -4484,13 +4484,20 @@ class TradingEngine {
       const isHighAdxConsolidation = adxValue >= strongTrendAdx && isRecentBreakout && isNearBreakoutLevel && !isDominantDumping && netDisplacement >= 0 && hasRetestedRoundLevel;
       
       // Targeted Fix: Candle Direction & Reversal Confirmation Guard
-      // Strictly enforces that long entries require a closed green candle with positive upward displacement.
-      const isLongGreen = currentCandle.close > currentCandle.open;
+      // Evaluates confirmation on the completed closed candle (which formed the reversal pattern)
+      // while ensuring the active in-progress candle is holding above support and not dumping.
+      const lastClosedCandle = (lastIdx === this.candles1m.length - 1 && this.candles1m.length >= 2)
+        ? this.candles1m[lastIdx - 1]
+        : currentCandle;
+      const isCurrentHoldingSupport = currentCandle.close >= (lastClosedCandle.low - 0.08 * currentAtr);
+      const isLongGreen = (isLongRejectionConfirmed && isCurrentHoldingSupport) || (currentCandle.close > currentCandle.open);
       const isLongCandleStabilized = (() => {
-        if (!currentCandle || !isLongGreen) return false;
-        const range = Math.max(0.001, currentCandle.high - currentCandle.low);
-        const body = currentCandle.close - currentCandle.open;
-        return isLongGreen && (body / range >= 0.20 || isLongRejectionConfirmed);
+        const targetCandle = isLongRejectionConfirmed ? lastClosedCandle : currentCandle;
+        if (!targetCandle) return false;
+        const range = Math.max(0.001, targetCandle.high - targetCandle.low);
+        const body = Math.abs(targetCandle.close - targetCandle.open);
+        const isTargetGreen = targetCandle.close >= targetCandle.open;
+        return (isTargetGreen && body / range >= 0.20) || isLongRejectionConfirmed;
       })();
 
       const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close >= reclaimThreshold) && isLongCandleStabilized && isLongRejectionConfirmed;
@@ -4499,7 +4506,7 @@ class TradingEngine {
       let pullbackRetestMessage = "";
       if (breakoutIdx !== -1 && boBodyRatioMet && !isChasing && !isSetup1Invalidated && (hasPulledBackToZone || isShallowConsolidationHolding)) {
         const isRejection = isLongRejectionConfirmed;
-        const isContinuation = isLongGreen && (currentCandle.close >= breakoutLevel || isLongRejectionConfirmed);
+        const isContinuation = (currentCandle.close >= breakoutLevel || isLongRejectionConfirmed) && isCurrentHoldingSupport;
         
         // Strict Candlestick Confirmation Mandate:
         // Requires a verified bullish reversal candlestick pattern (isLongRejectionConfirmed) AND a green close
@@ -4518,7 +4525,7 @@ class TradingEngine {
         } else {
           condDict["Pullback & Retest Setup (Setup 1)"] = {
             status: "FAIL",
-            reason: `Waiting for verified bullish reversal candlestick pattern (Hammer, Morning Star, Bullish Engulfing, Tweezer Bottom) at broken HH support level $${breakoutLevel.toFixed(2)}. (Current candle: ${isLongGreen ? 'green without pattern confirmation' : 'falling red candle'}).`
+            reason: `Waiting for verified bullish reversal candlestick pattern (Hammer, Morning Star, Bullish Engulfing, Tweezer Bottom) at broken HH support level $${breakoutLevel.toFixed(2)}. (Closed candle: ${lastClosedCandle.close >= lastClosedCandle.open ? 'green' : 'red'}, active candle: ${currentCandle.close >= currentCandle.open ? 'green' : 'red'}).`
           };
         }
       } else {
@@ -4576,7 +4583,7 @@ class TradingEngine {
         } else if (touchesFirstEma || touchesSecondEma || hasRetracedToEMA) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = {
             status: "FAIL",
-            reason: `Retraced to dynamic EMA support ($${matchedEmaVal.toFixed(2)}), but waiting for a verified closed bullish reversal candlestick pattern (Hammer, Bullish Engulfing, Morning Star, Tweezer Bottom). Current candle is ${isLongGreen ? 'green without pattern confirmation' : 'falling red candle'}.`
+            reason: `Retraced to dynamic EMA support ($${matchedEmaVal.toFixed(2)}), but waiting for a verified closed bullish reversal candlestick pattern (Hammer, Bullish Engulfing, Morning Star, Tweezer Bottom). (Closed candle: ${lastClosedCandle.close >= lastClosedCandle.open ? 'green' : 'red'}, active candle: ${currentCandle.close >= currentCandle.open ? 'green' : 'red'}).`
           };
         } else {
           const thresholdVal = Math.max(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
@@ -4830,13 +4837,20 @@ class TradingEngine {
       const isHighAdxConsolidation = adxValue >= strongTrendAdx && isRecentBreakout && isNearBreakoutLevel && !isDominantPumping && netDisplacement <= 0 && hasRetestedRoundLevel;
       
       // Targeted Fix: Candle Direction & Reversal Confirmation Guard
-      // Strictly enforces that short entries require a closed red candle with negative downward displacement.
-      const isShortRed = currentCandle.close < currentCandle.open;
+      // Evaluates confirmation on the completed closed candle (which formed the reversal pattern)
+      // while ensuring the active in-progress candle is holding below resistance and not pumping.
+      const lastClosedCandle = (lastIdx === this.candles1m.length - 1 && this.candles1m.length >= 2)
+        ? this.candles1m[lastIdx - 1]
+        : currentCandle;
+      const isCurrentHoldingResistance = currentCandle.close <= (lastClosedCandle.high + 0.08 * currentAtr);
+      const isShortRed = (isShortRejectionConfirmed && isCurrentHoldingResistance) || (currentCandle.close < currentCandle.open);
       const isShortCandleStabilized = (() => {
-        if (!currentCandle || !isShortRed) return false;
-        const range = Math.max(0.001, currentCandle.high - currentCandle.low);
-        const body = currentCandle.open - currentCandle.close;
-        return isShortRed && (body / range >= 0.20 || isShortRejectionConfirmed);
+        const targetCandle = isShortRejectionConfirmed ? lastClosedCandle : currentCandle;
+        if (!targetCandle) return false;
+        const range = Math.max(0.001, targetCandle.high - targetCandle.low);
+        const body = Math.abs(targetCandle.close - targetCandle.open);
+        const isTargetRed = targetCandle.close <= targetCandle.open;
+        return (isTargetRed && body / range >= 0.20) || isShortRejectionConfirmed;
       })();
 
       const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close <= reclaimThreshold) && isShortCandleStabilized && isShortRejectionConfirmed;
@@ -4845,7 +4859,7 @@ class TradingEngine {
       let pullbackRetestMessage = "";
       if (breakoutIdx !== -1 && boBodyRatioMet && !isChasing && !isSetup1Invalidated && (hasPulledBackToZone || isShallowConsolidationHolding)) {
         const isRejection = isShortRejectionConfirmed;
-        const isContinuation = isShortRed && (currentCandle.close <= breakoutLevel || isShortRejectionConfirmed);
+        const isContinuation = (currentCandle.close <= breakoutLevel || isShortRejectionConfirmed) && isCurrentHoldingResistance;
         
         // Strict Candlestick Confirmation Mandate:
         // Requires a verified bearish reversal candlestick pattern (isShortRejectionConfirmed) AND a red close
@@ -4864,7 +4878,7 @@ class TradingEngine {
         } else {
           condDict["Pullback & Retest Setup (Setup 1)"] = {
             status: "FAIL",
-            reason: `Waiting for verified bearish reversal candlestick pattern (Shooting Star, Evening Star, Bearish Engulfing, Tweezer Top) at broken LL resistance level $${breakoutLevel.toFixed(2)}. (Current candle: ${isShortRed ? 'red without pattern confirmation' : 'rising green candle'}).`
+            reason: `Waiting for verified bearish reversal candlestick pattern (Shooting Star, Evening Star, Bearish Engulfing, Tweezer Top) at broken LL resistance level $${breakoutLevel.toFixed(2)}. (Closed candle: ${lastClosedCandle.close <= lastClosedCandle.open ? 'red' : 'green'}, active candle: ${currentCandle.close <= currentCandle.open ? 'red' : 'green'}).`
           };
         }
       } else {
@@ -4922,7 +4936,7 @@ class TradingEngine {
         } else if (touchesFirstEma || touchesSecondEma || hasRetracedToEMA) {
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = {
             status: "FAIL",
-            reason: `Retraced to dynamic EMA resistance ($${matchedEmaVal.toFixed(2)}), but waiting for a verified closed bearish reversal candlestick pattern (Shooting Star, Bearish Engulfing, Evening Star, Tweezer Top). Current candle is ${isShortRed ? 'red without pattern confirmation' : 'rising green candle'}.`
+            reason: `Retraced to dynamic EMA resistance ($${matchedEmaVal.toFixed(2)}), but waiting for a verified closed bearish reversal candlestick pattern (Shooting Star, Bearish Engulfing, Evening Star, Tweezer Top). (Closed candle: ${lastClosedCandle.close <= lastClosedCandle.open ? 'red' : 'green'}, active candle: ${currentCandle.close <= currentCandle.open ? 'red' : 'green'}).`
           };
         } else {
           const thresholdVal = Math.min(emaRetraceThresholdFirst, emaRetraceThresholdSecond);
@@ -5793,13 +5807,15 @@ class TradingEngine {
       // 4. Candlestick Rejection / Absorption Pattern
       const candleRange = Math.max(0.01, currentCandle.high - currentCandle.low);
       const lowerWick = Math.min(currentCandle.open, currentCandle.close) - currentCandle.low;
-      const isHammerOrPin = lowerWick / candleRange >= 0.35;
+      const upperWick = currentCandle.high - Math.max(currentCandle.open, currentCandle.close);
+      const isHammerOrPin = lowerWick / candleRange >= 0.35 && upperWick <= 0.25 * candleRange;
       const isBullishCandle = currentCandle.close > currentCandle.open;
-      const isEngulfing = isBullishCandle && currentCandle.close > prevCandle.open && currentCandle.open <= prevCandle.close;
+      const isEngulfing = isBullishCandle && currentCandle.close > prevCandle.open && currentCandle.open <= prevCandle.close + 0.08 * currentAtr;
       const anyRecentHammer = recentCandles.slice(-3).some(c => {
         const rng = Math.max(0.01, c.high - c.low);
         const lw = Math.min(c.open, c.close) - c.low;
-        return lw / rng >= 0.38;
+        const uw = c.high - Math.max(c.open, c.close);
+        return lw / rng >= 0.38 && uw <= 0.25 * rng;
       });
       const candlestickRejection = isHammerOrPin || isEngulfing || anyRecentHammer || (isBullishCandle && isRsiHookingUp);
 
@@ -5893,13 +5909,15 @@ class TradingEngine {
       // 4. Candlestick Rejection / Absorption Pattern
       const candleRange = Math.max(0.01, currentCandle.high - currentCandle.low);
       const upperWick = currentCandle.high - Math.max(currentCandle.open, currentCandle.close);
-      const isStarOrPin = upperWick / candleRange >= 0.35;
+      const lowerWick = Math.min(currentCandle.open, currentCandle.close) - currentCandle.low;
+      const isStarOrPin = upperWick / candleRange >= 0.35 && lowerWick <= 0.25 * candleRange;
       const isBearishCandle = currentCandle.close < currentCandle.open;
-      const isEngulfing = isBearishCandle && currentCandle.close < prevCandle.open && currentCandle.open >= prevCandle.close;
+      const isEngulfing = isBearishCandle && currentCandle.close < prevCandle.open && currentCandle.open >= prevCandle.close - 0.08 * currentAtr;
       const anyRecentStar = recentCandles.slice(-3).some(c => {
         const rng = Math.max(0.01, c.high - c.low);
         const uw = c.high - Math.max(c.open, c.close);
-        return uw / rng >= 0.38;
+        const lw = Math.min(c.open, c.close) - c.low;
+        return uw / rng >= 0.38 && lw <= 0.25 * rng;
       });
       const candlestickRejection = isStarOrPin || isEngulfing || anyRecentStar || (isBearishCandle && isRsiHookingDown);
 
@@ -7422,8 +7440,9 @@ class TradingEngine {
 
       // Check candlestick reversal at double bottom (must strictly close green and hold above EQL support)
       const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtr);
-      const isCandleGreen = currentCandle.close > currentCandle.open;
-      const isAboveEql = currentCandle.close > matchedEql.price;
+      const closedCandle = (lastIdx === this.candles1m.length - 1 && this.candles1m.length >= 2) ? this.candles1m[lastIdx - 1] : currentCandle;
+      const isCandleGreen = (rejectionCheck.confirmed && currentCandle.close >= (closedCandle.low - 0.08 * currentAtr)) || (closedCandle.close >= closedCandle.open) || (currentCandle.close > currentCandle.open);
+      const isAboveEql = Math.max(currentCandle.close, closedCandle.close) > matchedEql.price && currentCandle.low >= (matchedEql.price - 0.20 * currentAtr);
       const isReversalConfirmed = rejectionCheck.confirmed || (isCandleGreen && isAboveEql);
 
       if ((!isReversalConfirmed || !isCandleGreen || !isAboveEql) && ms.eqh_eql_require_candlestick_reversal !== false) {
@@ -7565,8 +7584,9 @@ class TradingEngine {
 
       // Check candlestick reversal at double top (must strictly close red and stay below EQH resistance)
       const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtr);
-      const isCandleRed = currentCandle.close < currentCandle.open;
-      const isBelowEqh = currentCandle.close < matchedEqh.price;
+      const closedCandle = (lastIdx === this.candles1m.length - 1 && this.candles1m.length >= 2) ? this.candles1m[lastIdx - 1] : currentCandle;
+      const isCandleRed = (rejectionCheck.confirmed && currentCandle.close <= (closedCandle.high + 0.08 * currentAtr)) || (closedCandle.close <= closedCandle.open) || (currentCandle.close < currentCandle.open);
+      const isBelowEqh = Math.min(currentCandle.close, closedCandle.close) < matchedEqh.price && currentCandle.high <= (matchedEqh.price + 0.20 * currentAtr);
       const isReversalConfirmed = rejectionCheck.confirmed || (isCandleRed && isBelowEqh);
 
       if ((!isReversalConfirmed || !isCandleRed || !isBelowEqh) && ms.eqh_eql_require_candlestick_reversal !== false) {
@@ -8575,7 +8595,7 @@ class TradingEngine {
     const hasStrongClose = confirmRange > 0 && (confirmCandle.close - confirmCandle.low) / confirmRange >= 0.70;
     const isMomentumCandle = isBullish && confirmBody >= 0.65 * currentAtr && (candlestickEnhancements ? hasStrongCsi : true);
     const isIndecision = confirmRange > 0 && 
-      ((confirmBody / confirmRange < 0.20) || (confirmRange < 0.25 * currentAtr && !isPinBar && !isMajorWickRejection)) && 
+      ((confirmBody / confirmRange < 0.18) || (confirmBody / confirmRange < 0.30 && confirmRange < 0.25 * currentAtr)) && 
       !isPinBar && !isMajorWickRejection;
 
     // 2-Candle Confirmed Bullish Pin Bar / Major Wick Rejection:
@@ -8626,7 +8646,7 @@ class TradingEngine {
 
       const setupIsInvHammer = setupRange > 0 &&
         setupUpperWick >= 0.45 * setupRange &&
-        setupUpperWick >= 1.8 * Math.max(setupBody, 0.05 * currentAtr) &&
+        setupUpperWick >= 1.8 * Math.max(setupBody, 0.01 * currentAtr) &&
         setupLowerWick <= 0.25 * setupRange &&
         (Math.max(setupCandle.open, setupCandle.close) - setupCandle.low) <= 0.45 * setupRange;
 
@@ -8647,9 +8667,9 @@ class TradingEngine {
       (setupCandle.close < setupCandle.open) && 
       isBullish && 
       (confirmCandle.close >= setupCandle.open) && 
-      (confirmCandle.open <= setupCandle.close) &&
+      (confirmCandle.open <= setupCandle.close + 0.08 * currentAtr) &&
       (confirmBody >= minEngulfBody) &&
-      (prevBody >= 0.20 * currentAtr);
+      (prevBody >= 0.12 * currentAtr || (setupCandle.high - setupCandle.low) >= 0.25 * currentAtr);
 
     const hasMultiWickRejection = setupCandle && 
       (confirmLowerWick >= 0.35 * confirmRange) && 
@@ -8711,7 +8731,7 @@ class TradingEngine {
     if (candlestickEnhancements && allowDojiBreakout && setupCandle) {
       const setupRange = setupCandle.high - setupCandle.low;
       const setupBody = Math.abs(setupCandle.close - setupCandle.open);
-      const setupIsDoji = setupRange > 0 && ((setupBody / setupRange < 0.22) || (setupRange < 0.30 * currentAtr));
+      const setupIsDoji = setupRange > 0 && (setupBody / setupRange <= 0.22);
 
       if (setupIsDoji && isBullish && confirmCandle.close > setupCandle.high && (confirmBody >= 0.25 * currentAtr || hasStrongCsi)) {
         isPostDojiBreakout = true;
@@ -8761,10 +8781,14 @@ class TradingEngine {
       const b1 = c1.close - c1.open;
       const b0 = c0.close - c0.open;
 
+      const c0UpperWick = c0.high - Math.max(c0.open, c0.close);
+      const c0Range = c0.high - c0.low;
+      const noUpperWickExhaustion = c0Range > 0 && (c0UpperWick / c0Range <= 0.35);
+
       const healthyBodies = b2 >= 0.2 * currentAtr && b1 >= 0.2 * currentAtr && b0 >= 0.2 * currentAtr;
       const isCurrentCandleHoldingHighs = this.currentPrice >= c0.low;
 
-      if (c2Bullish && c1Bullish && c0Bullish && ascendingCloses && healthyBodies && isCurrentCandleHoldingHighs) {
+      if (c2Bullish && c1Bullish && c0Bullish && ascendingCloses && healthyBodies && noUpperWickExhaustion && isCurrentCandleHoldingHighs) {
         isThreeWhiteSoldiers = true;
       }
     }
@@ -8809,6 +8833,11 @@ class TradingEngine {
       }
     }
 
+    // 1m Scalping Exhaustion Guard: If candle is an extreme climax spike (> 1.8 ATR), protect against late entry on single-candle triggers
+    if (isClimaxExhausted && !isConfirmedBullishPinBar && !isConfirmedInvertedHammer && !isRisingThreeMethods) {
+      return { confirmed: false, type: "Blocked: 1m Candle Climax Exhaustion (> 1.8 ATR blow-off)" };
+    }
+
     // Institutional Order Flow Absorption and Early Wick Rejection Checks
     // NOTE: Order flow metrics (CVD / order book imbalance) must NEVER bypass candlestick confirmation on falling red candles.
     // Bullish reversal confirmation STRICTLY requires a completed, closed GREEN candle (close > open) with positive upward displacement.
@@ -8821,24 +8850,19 @@ class TradingEngine {
       return { confirmed: true, type: "Early Lower Wick Absorption Support Rejection" };
     }
 
-    // 1m Scalping Exhaustion Guard: If candle is an extreme climax spike (> 1.8 ATR), protect against late entry on single-candle triggers
-    if (isClimaxExhausted && !isConfirmedBullishPinBar && !isConfirmedInvertedHammer && !isRisingThreeMethods) {
-      return { confirmed: false, type: "Blocked: 1m Candle Climax Exhaustion (> 1.8 ATR blow-off)" };
-    }
-
     // Priority Check: Every pattern MUST be supported by a green close (isBullish) or verified 2-candle confirmation
     if (isRisingThreeMethods) return { confirmed: true, type: "Rising Three Methods Continuation Pattern" };
     if (isConfirmedBullishPinBar) return { confirmed: true, type: "2-Candle Confirmed Bullish Pin Bar" };
     if (isConfirmedInvertedHammer) return { confirmed: true, type: "2-Candle Confirmed Inverted Hammer Reversal" };
     if (isConfirmedMajorWickRejection) return { confirmed: true, type: "2-Candle Confirmed 65%+ Lower Wick Rejection" };
     if (isPostDojiBreakout) return { confirmed: true, type: "Post-Doji Bullish Breakout Confirmation" };
-    if (isBullishEngulfing) return { confirmed: !isIndecision, type: "Bullish Engulfing Pattern" };
+    if (isBullishEngulfing) return { confirmed: true, type: "Bullish Engulfing Pattern" };
     if (hasMultiWickRejection && isBullish) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
-    if (isTweezerBottom && isBullish) return { confirmed: !isIndecision, type: "Tweezer Bottom Reversal Pattern" };
-    if (isPiercingLine) return { confirmed: !isIndecision, type: "Piercing Line Reversal Pattern" };
+    if (isTweezerBottom && isBullish) return { confirmed: true, type: "Tweezer Bottom Reversal Pattern" };
+    if (isPiercingLine) return { confirmed: true, type: "Piercing Line Reversal Pattern" };
     if (isBullishHarami) return { confirmed: !isIndecision, type: "Bullish Harami Reversal Pattern" };
-    if (isMorningStar) return { confirmed: !isIndecision, type: "Morning Star Reversal Pattern" };
-    if (isThreeWhiteSoldiers) return { confirmed: !isIndecision, type: "Three White Soldiers Continuation Pattern" };
+    if (isMorningStar) return { confirmed: true, type: "Morning Star Reversal Pattern" };
+    if (isThreeWhiteSoldiers) return { confirmed: true, type: "Three White Soldiers Continuation Pattern" };
     if (isMomentumCandle && (hasStrongCsi || hasStrongClose) && isBullish) return { confirmed: !isIndecision, type: `Bullish Momentum (CSI ${(bullishCsi * 100).toFixed(0)}%)` };
     if (hasStrongClose && isBullish && confirmLowerWick > confirmUpperWick) return { confirmed: !isIndecision, type: "Strong Close Support Rejection" };
 
@@ -8894,7 +8918,7 @@ class TradingEngine {
     const hasStrongClose = confirmRange > 0 && (confirmCandle.high - confirmCandle.close) / confirmRange >= 0.70;
     const isMomentumCandle = isBearish && confirmBody >= 0.65 * currentAtr && (candlestickEnhancements ? hasStrongCsi : true);
     const isIndecision = confirmRange > 0 && 
-      ((confirmBody / confirmRange < 0.20) || (confirmRange < 0.25 * currentAtr && !isPinBar && !isMajorWickRejection)) && 
+      ((confirmBody / confirmRange < 0.18) || (confirmBody / confirmRange < 0.30 && confirmRange < 0.25 * currentAtr)) && 
       !isPinBar && !isMajorWickRejection;
 
     // 2-Candle Confirmed Bearish Pin Bar / Major Wick Rejection:
@@ -8945,7 +8969,7 @@ class TradingEngine {
 
       const setupIsHangingMan = setupRange > 0 &&
         setupLowerWick >= 0.45 * setupRange &&
-        setupLowerWick >= 1.8 * Math.max(setupBody, 0.05 * currentAtr) &&
+        setupLowerWick >= 1.8 * Math.max(setupBody, 0.01 * currentAtr) &&
         setupUpperWick <= 0.25 * setupRange &&
         (setupCandle.high - Math.min(setupCandle.open, setupCandle.close)) <= 0.45 * setupRange;
 
@@ -8966,9 +8990,9 @@ class TradingEngine {
       (setupCandle.close > setupCandle.open) && 
       isBearish && 
       (confirmCandle.close <= setupCandle.open) && 
-      (confirmCandle.open >= setupCandle.close) &&
+      (confirmCandle.open >= setupCandle.close - 0.08 * currentAtr) &&
       (confirmBody >= minEngulfBody) &&
-      (prevBody >= 0.20 * currentAtr);
+      (prevBody >= 0.12 * currentAtr || (setupCandle.high - setupCandle.low) >= 0.25 * currentAtr);
 
     const hasMultiWickRejection = setupCandle && 
       (confirmUpperWick >= 0.35 * confirmRange) && 
@@ -9030,7 +9054,7 @@ class TradingEngine {
     if (candlestickEnhancements && allowDojiBreakout && setupCandle) {
       const setupRange = setupCandle.high - setupCandle.low;
       const setupBody = Math.abs(setupCandle.close - setupCandle.open);
-      const setupIsDoji = setupRange > 0 && ((setupBody / setupRange < 0.22) || (setupRange < 0.30 * currentAtr));
+      const setupIsDoji = setupRange > 0 && (setupBody / setupRange <= 0.22);
 
       if (setupIsDoji && isBearish && confirmCandle.close < setupCandle.low && (confirmBody >= 0.25 * currentAtr || hasStrongCsi)) {
         isPostDojiBreakdown = true;
@@ -9080,10 +9104,14 @@ class TradingEngine {
       const b1 = c1.open - c1.close;
       const b0 = c0.open - c0.close;
 
+      const c0LowerWick = Math.min(c0.open, c0.close) - c0.low;
+      const c0Range = c0.high - c0.low;
+      const noLowerWickExhaustion = c0Range > 0 && (c0LowerWick / c0Range <= 0.35);
+
       const healthyBodies = b2 >= 0.2 * currentAtr && b1 >= 0.2 * currentAtr && b0 >= 0.2 * currentAtr;
       const isCurrentCandleHoldingLows = this.currentPrice <= c0.high;
 
-      if (c2Bearish && c1Bearish && c0Bearish && descendingCloses && healthyBodies && isCurrentCandleHoldingLows) {
+      if (c2Bearish && c1Bearish && c0Bearish && descendingCloses && healthyBodies && noLowerWickExhaustion && isCurrentCandleHoldingLows) {
         isThreeBlackCrows = true;
       }
     }
@@ -9128,6 +9156,11 @@ class TradingEngine {
       }
     }
 
+    // 1m Scalping Exhaustion Guard: If candle is an extreme climax spike (> 1.8 ATR), protect against late entry on single-candle triggers
+    if (isClimaxExhausted && !isConfirmedBearishPinBar && !isConfirmedHangingMan && !isFallingThreeMethods) {
+      return { confirmed: false, type: "Blocked: 1m Candle Climax Exhaustion (> 1.8 ATR blow-off)" };
+    }
+
     // Institutional Order Flow Absorption and Early Wick Rejection Checks
     // NOTE: Order flow metrics (CVD / order book imbalance) must NEVER bypass candlestick confirmation on rising green candles.
     // Bearish reversal confirmation STRICTLY requires a completed, closed RED candle (close < open) with negative downward displacement.
@@ -9140,24 +9173,19 @@ class TradingEngine {
       return { confirmed: true, type: "Early Upper Wick Absorption Resistance Rejection" };
     }
 
-    // 1m Scalping Exhaustion Guard: If candle is an extreme climax spike (> 1.8 ATR), protect against late entry on single-candle triggers
-    if (isClimaxExhausted && !isConfirmedBearishPinBar && !isConfirmedHangingMan && !isFallingThreeMethods) {
-      return { confirmed: false, type: "Blocked: 1m Candle Climax Exhaustion (> 1.8 ATR blow-off)" };
-    }
-
     // Priority Check: Every pattern MUST be supported by a red close (isBearish) or verified 2-candle confirmation
     if (isFallingThreeMethods) return { confirmed: true, type: "Falling Three Methods Continuation Pattern" };
     if (isConfirmedBearishPinBar) return { confirmed: true, type: "2-Candle Confirmed Bearish Pin Bar" };
     if (isConfirmedHangingMan) return { confirmed: true, type: "2-Candle Confirmed Hanging Man Reversal" };
     if (isConfirmedMajorWickRejection) return { confirmed: true, type: "2-Candle Confirmed 65%+ Upper Wick Rejection" };
     if (isPostDojiBreakdown) return { confirmed: true, type: "Post-Doji Bearish Breakdown Confirmation" };
-    if (isBearishEngulfing) return { confirmed: !isIndecision, type: "Bearish Engulfing Pattern" };
+    if (isBearishEngulfing) return { confirmed: true, type: "Bearish Engulfing Pattern" };
     if (hasMultiWickRejection && isBearish) return { confirmed: !isIndecision, type: "Multi-Candle Wick Rejection" };
-    if (isTweezerTop && isBearish) return { confirmed: !isIndecision, type: "Tweezer Top Reversal Pattern" };
-    if (isDarkCloudCover) return { confirmed: !isIndecision, type: "Dark Cloud Cover Reversal Pattern" };
+    if (isTweezerTop && isBearish) return { confirmed: true, type: "Tweezer Top Reversal Pattern" };
+    if (isDarkCloudCover) return { confirmed: true, type: "Dark Cloud Cover Reversal Pattern" };
     if (isBearishHarami) return { confirmed: !isIndecision, type: "Bearish Harami Reversal Pattern" };
-    if (isEveningStar) return { confirmed: !isIndecision, type: "Evening Star Reversal Pattern" };
-    if (isThreeBlackCrows) return { confirmed: !isIndecision, type: "Three Black Crows Continuation Pattern" };
+    if (isEveningStar) return { confirmed: true, type: "Evening Star Reversal Pattern" };
+    if (isThreeBlackCrows) return { confirmed: true, type: "Three Black Crows Continuation Pattern" };
     if (isMomentumCandle && (hasStrongCsi || hasStrongClose) && isBearish) return { confirmed: !isIndecision, type: `Bearish Momentum (CSI ${(bearishCsi * 100).toFixed(0)}%)` };
     if (hasStrongClose && isBearish && confirmUpperWick > confirmLowerWick) return { confirmed: !isIndecision, type: "Strong Close Resistance Rejection" };
 

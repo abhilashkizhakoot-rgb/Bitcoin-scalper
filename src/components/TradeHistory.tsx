@@ -164,6 +164,7 @@ interface TradeHistoryProps {
 export default function TradeHistory({ trades, isPaperMode = true, onRefresh, config }: TradeHistoryProps) {
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
   const [directionFilter, setDirectionFilter] = useState<"ALL" | "LONG" | "SHORT">("ALL");
+  const [setupFilter, setSetupFilter] = useState<string>("ALL");
   const [winFilter, setWinFilter] = useState<"ALL" | "WINS" | "LOSSES">("ALL");
   const [reasonFilter, setReasonFilter] = useState<"ALL" | ExitReason>("ALL");
   const [windowFilter, setWindowFilter] = useState<string>("ALL");
@@ -251,9 +252,19 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
     }
   });
 
+  const uniqueSetups = Array.from(
+    new Set(
+      trades.map((t) => t.setup_triggered || t.feature_snapshot?.setup_triggered || "Setup 1: Pullback & Retest")
+    )
+  ).sort();
+
   // Apply filters
   const filteredTrades = trades.filter((t) => {
     if (directionFilter !== "ALL" && t.direction !== directionFilter) return false;
+    if (setupFilter !== "ALL") {
+      const s = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Setup 1: Pullback & Retest";
+      if (s !== setupFilter) return false;
+    }
     if (winFilter === "WINS" && !t.is_win) return false;
     if (winFilter === "LOSSES" && t.is_win) return false;
     if (reasonFilter !== "ALL" && t.exit_reason !== reasonFilter) return false;
@@ -281,6 +292,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
     const headers = [
       "Timestamp (UTC)",
       "Direction",
+      "Setup Triggered",
       "Size (BTC)",
       "Entry Price ($)",
       "Exit Price ($)",
@@ -311,10 +323,12 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
       const atr = t.feature_snapshot?.atr_14 !== undefined
         ? t.feature_snapshot.atr_14
         : "";
+      const setupTriggered = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Setup 1: Pullback & Retest";
 
       return [
         t.entry_timestamp,
         t.direction,
+        setupTriggered,
         t.quantity_btc,
         t.entry_price,
         t.exit_price || "Active",
@@ -463,6 +477,21 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
             </select>
           </div>
 
+          {/* Setup Trigger Filter */}
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-slate-400 font-mono text-[10px] uppercase">Setup</span>
+            <select
+              value={setupFilter}
+              onChange={(e) => setSetupFilter(e.target.value)}
+              className="bg-slate-50 border border-slate-200 text-slate-800 p-1.5 rounded-lg text-xs font-sans outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 max-w-[190px] truncate"
+            >
+              <option value="ALL">All Setups ({uniqueSetups.length})</option>
+              {uniqueSetups.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Win/Loss Filter */}
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-slate-400 font-mono text-[10px] uppercase">Status</span>
@@ -581,6 +610,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
               <tr className="bg-slate-50/70 border-b border-slate-200 font-mono text-[10px] text-slate-400 uppercase">
                 <th className="py-3 px-4 font-normal">Timestamp</th>
                 <th className="py-3 px-4 font-normal">Direction</th>
+                <th className="py-3 px-4 font-normal">Setup Triggered</th>
                 <th className="py-3 px-4 font-normal">Size (BTC)</th>
                 <th className="py-3 px-4 font-normal">Entry Price</th>
                 {showTargetsInTable && (
@@ -603,6 +633,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
               {filteredTrades.map((t) => {
                 const isSelected = selectedTradeId === t.id;
                 const tWindow = getTradeTimingWindow(t.entry_timestamp, windowsList);
+                const setupName = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Setup 1: Pullback & Retest";
                 return (
                   <React.Fragment key={t.id}>
                                          <tr
@@ -620,6 +651,14 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                           }`}>
                             {t.direction === TradeDirection.LONG ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                             {t.direction}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-indigo-50/70 border border-indigo-150 text-indigo-750 font-sans shadow-2xs">
+                            <Layers className="w-3 h-3 text-indigo-500 shrink-0" />
+                            <span className="truncate max-w-[170px]" title={setupName}>
+                              {setupName}
+                            </span>
                           </span>
                         </td>
                         <td className="py-3.5 px-4 font-sans font-semibold text-slate-800">
@@ -690,12 +729,18 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                      {/* Trade Detail Drawer */}
                      {isSelected && (
                        <tr>
-                         <td colSpan={(showTargetsInTable ? 11 : 9) + (showAtrInTable ? 1 : 0)} className="bg-slate-50 border-t border-b border-slate-100 p-5">
+                         <td colSpan={(showTargetsInTable ? 12 : 10) + (showAtrInTable ? 1 : 0)} className="bg-slate-50 border-t border-b border-slate-100 p-5">
                            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-slate-600" id={`trade-drawer-${t.id}`}>
                              {/* Execution stats */}
                              <div className="space-y-3">
                                <h4 className="text-[10px] font-mono text-indigo-650 uppercase tracking-wider">Trade Parameters</h4>
                                <div className="space-y-1.5 text-xs font-sans">
+                                 <div className="flex justify-between border-b border-slate-200/50 pb-1">
+                                   <span className="text-slate-400">Triggered Setup:</span>
+                                   <span className="font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded text-[10.5px]">
+                                     {setupName}
+                                   </span>
+                                 </div>
                                  <div className="flex justify-between border-b border-slate-200/50 pb-1">
                                    <span className="text-slate-400">Leverage:</span>
                                    <span className="font-semibold text-slate-700">{t.leverage}x Cross</span>
@@ -790,7 +835,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                })}
                {filteredTrades.length === 0 && (
                  <tr>
-                   <td colSpan={(showTargetsInTable ? 11 : 9) + (showAtrInTable ? 1 : 0)} className="text-center font-mono text-slate-400 text-xs italic py-16">
+                   <td colSpan={(showTargetsInTable ? 12 : 10) + (showAtrInTable ? 1 : 0)} className="text-center font-mono text-slate-400 text-xs italic py-16">
                      No historical trades matching the current filter criteria...
                    </td>
                  </tr>

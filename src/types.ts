@@ -89,8 +89,24 @@ export interface Trade {
   max_adverse_excursion: number; // Max drawdown in trade direction %
   hold_duration_seconds: number;
   is_win: boolean | null;
+  setup_triggered?: string;
   feature_snapshot: Record<string, any>;
   created_at: string;
+}
+
+export interface SetupPerformanceStats {
+  setup_name: string;
+  total_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  profit_factor: number;
+  net_pnl_usdt: number;
+  avg_hold_duration_seconds: number;
+  setup?: string;
+  trades?: number;
+  pnl?: number;
+  avg_pnl?: number;
 }
 
 export interface TradingSignal {

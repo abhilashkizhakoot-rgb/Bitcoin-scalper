@@ -22,7 +22,19 @@ import {
   DailyStats,
   ApiCallLog,
   TimingWindow,
+  SetupPerformanceStats,
 } from "./types.js";
+
+export const MOCK_SETUPS = [
+  "Setup 1: Pullback & Retest",
+  "Setup 2: Dynamic EMA Pushback",
+  "Setup 14: Fresh Momentum Impulse",
+  "Setup 4: Fair Value Gap Retest",
+  "Setup 3: Liquidity Sweep Reversal",
+  "Setup 9: Range Failed Auction Reclaim",
+  "Setup 12: CVD Absorption & Delta Divergence",
+  "Setup 10: VWAP Band Rejection",
+];
 
 const DATA_DIR = process.env.DATA_DIR || process.cwd();
 if (DATA_DIR && !fs.existsSync(DATA_DIR)) {
@@ -531,11 +543,13 @@ function generateMockHistory(): DatabaseSchema {
       max_adverse_excursion: isWin ? 0.3 + Math.random() * 0.4 : 1.35,
       hold_duration_seconds: Math.floor((exitTime.getTime() - entryTime.getTime()) / 1000),
       is_win: isWin,
+      setup_triggered: MOCK_SETUPS[(26 - k) % MOCK_SETUPS.length],
       feature_snapshot: {
         adx: 32.5,
         atr_14: atrValue,
         rsi_14: direction === TradeDirection.LONG ? 62 : 38,
         macd_hist: direction === TradeDirection.LONG ? 12.5 : -14.2,
+        setup_triggered: MOCK_SETUPS[(26 - k) % MOCK_SETUPS.length],
       },
       created_at: entryTime.toISOString(),
     });
@@ -701,11 +715,13 @@ function generateMockPaperHistory(): { credentials: ExchangeCredentials; trades:
       max_adverse_excursion: isWin ? 0.2 + Math.random() * 0.4 : 1.30,
       hold_duration_seconds: Math.floor((exitTime.getTime() - entryTime.getTime()) / 1000),
       is_win: isWin,
+      setup_triggered: MOCK_SETUPS[(16 - k) % MOCK_SETUPS.length],
       feature_snapshot: {
         last_price: entryPrice,
         atr_14: atrValue,
         regime,
         average_sentiment: direction === TradeDirection.LONG ? 0.35 : -0.35,
+        setup_triggered: MOCK_SETUPS[(16 - k) % MOCK_SETUPS.length],
       },
       created_at: entryTime.toISOString(),
     });
@@ -783,7 +799,16 @@ class DatabaseManager {
               updated = true;
             }
           }
-          if (updated) {
+        }
+        if (this.cache && this.cache.trades) {
+          let tradesUpdated = false;
+          this.cache.trades.forEach((t, idx) => {
+            if (!t.setup_triggered) {
+              t.setup_triggered = (t.feature_snapshot && (t.feature_snapshot as any).setup_triggered) || MOCK_SETUPS[idx % MOCK_SETUPS.length];
+              tradesUpdated = true;
+            }
+          });
+          if (tradesUpdated) {
             this.save();
           }
         }
@@ -801,6 +826,18 @@ class DatabaseManager {
       if (fs.existsSync(DB_PAPER_FILE_PATH)) {
         const fileContent = fs.readFileSync(DB_PAPER_FILE_PATH, "utf-8");
         this.paperCache = JSON.parse(fileContent);
+        if (this.paperCache && this.paperCache.trades) {
+          let paperUpdated = false;
+          this.paperCache.trades.forEach((t, idx) => {
+            if (!t.setup_triggered) {
+              t.setup_triggered = (t.feature_snapshot && (t.feature_snapshot as any).setup_triggered) || MOCK_SETUPS[idx % MOCK_SETUPS.length];
+              paperUpdated = true;
+            }
+          });
+          if (paperUpdated) {
+            this.savePaper();
+          }
+        }
       } else {
         const mockPaperData = generateMockPaperHistory();
         this.paperCache = mockPaperData;
@@ -1574,6 +1611,51 @@ class DatabaseManager {
         trades: data.trades,
         win_rate: data.trades > 0 ? Number(((data.wins / data.trades) * 100).toFixed(2)) : 0,
         pnl: Number(data.pnl.toFixed(2)),
+      };
+    });
+
+    return result;
+  }
+
+  public getPerformanceBySetup(): Record<string, SetupPerformanceStats> {
+    const trades = this.getTrades().filter((t) => t.exit_price !== null);
+    const analysis: Record<string, { trades: number; wins: number; losses: number; pnl: number; grossProfit: number; grossLoss: number; holdTimes: number[] }> = {};
+
+    trades.forEach((t) => {
+      const setup = t.setup_triggered || (t.feature_snapshot && (t.feature_snapshot as any).setup_triggered) || "Setup 1: Pullback & Retest";
+      if (!analysis[setup]) {
+        analysis[setup] = { trades: 0, wins: 0, losses: 0, pnl: 0, grossProfit: 0, grossLoss: 0, holdTimes: [] };
+      }
+      analysis[setup].trades += 1;
+      const pnl = t.pnl_usdt || 0;
+      analysis[setup].pnl += pnl;
+      if (t.is_win) {
+        analysis[setup].wins += 1;
+        analysis[setup].grossProfit += pnl;
+      } else {
+        analysis[setup].losses += 1;
+        analysis[setup].grossLoss += Math.abs(pnl);
+      }
+      if (t.hold_duration_seconds) {
+        analysis[setup].holdTimes.push(t.hold_duration_seconds);
+      }
+    });
+
+    const result: Record<string, SetupPerformanceStats> = {};
+    Object.keys(analysis).forEach((setup) => {
+      const d = analysis[setup];
+      const winRate = d.trades > 0 ? (d.wins / d.trades) * 100 : 0;
+      const profitFactor = d.grossLoss > 0 ? d.grossProfit / d.grossLoss : (d.grossProfit > 0 ? 99.9 : 0);
+      const avgHold = d.holdTimes.length > 0 ? d.holdTimes.reduce((a, b) => a + b, 0) / d.holdTimes.length : 0;
+      result[setup] = {
+        setup_name: setup,
+        total_trades: d.trades,
+        wins: d.wins,
+        losses: d.losses,
+        win_rate: Number(winRate.toFixed(2)),
+        profit_factor: Number(profitFactor.toFixed(2)),
+        net_pnl_usdt: Number(d.pnl.toFixed(2)),
+        avg_hold_duration_seconds: Math.round(avgHold),
       };
     });
 

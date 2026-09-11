@@ -114,6 +114,7 @@ export default function App() {
   const [equityCurve, setEquityCurve] = useState<any[]>([]);
   const [dailyStats, setDailyStats] = useState<any[]>([]);
   const [regimeStats, setRegimeStats] = useState<any>({});
+  const [setupStats, setSetupStats] = useState<any[]>([]);
 
   // Exchange Config Panel visibility
   const [showExchangePanel, setShowExchangePanel] = useState(false);
@@ -194,6 +195,9 @@ export default function App() {
 
       const regimeRes = await apiFetch("/api/analytics/regime-performance");
       if (regimeRes.ok) setRegimeStats(await regimeRes.json());
+
+      const setupRes = await apiFetch("/api/analytics/setup-performance");
+      if (setupRes.ok) setSetupStats(await setupRes.json());
     } catch (e) {
       console.warn("Backend offline. Retrying synchronization loop in background...", e);
     } finally {
@@ -669,6 +673,7 @@ export default function App() {
                 equityCurve={equityCurve}
                 dailyStats={dailyStats}
                 regimeStats={regimeStats}
+                setupStats={setupStats}
                 trades={trades}
                 config={config}
               />

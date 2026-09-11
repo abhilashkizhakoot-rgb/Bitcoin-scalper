@@ -37,6 +37,7 @@ export interface MarketStructureConfirmationResult {
   message: string;
   swingHigh: number;
   swingLow: number;
+  setup_triggered?: string;
   ema_check_active?: boolean;
   ema_pair_evaluated?: string;
   ema_tested?: string;
@@ -46,6 +47,7 @@ export interface MarketStructureConfirmationResult {
 export interface TrendBreakoutSetupResult {
   confirmed: boolean;
   message: string;
+  setup_triggered?: string;
   ema_check_active?: boolean;
   ema_pair_evaluated?: string;
   ema_tested?: string;
@@ -2488,12 +2490,28 @@ class TradingEngine {
       failedConditions = conditions.filter((c) => !c.met).map((c) => c.name);
     }
 
+    const setup_triggered = structCheck.setup_triggered || (
+      structCheck.confirmed ? (
+        structCheck.message.includes("Setup 14") ? "Setup 14: Fresh Momentum Impulse" :
+        structCheck.message.includes("Setup 3") ? "Setup 3: Liquidity Sweep Reversal" :
+        structCheck.message.includes("Setup 4") ? "Setup 4: Fair Value Gap Retest" :
+        structCheck.message.includes("Setup 9") ? "Setup 9: Range Failed Auction Reclaim" :
+        structCheck.message.includes("Setup 10") ? "Setup 10: VWAP Band Rejection" :
+        structCheck.message.includes("Setup 11") ? "Setup 11: EQH/EQL Double Touch Rejection" :
+        structCheck.message.includes("Setup 12") ? "Setup 12: CVD Absorption & Delta Divergence" :
+        structCheck.message.includes("Setup 13") ? "Setup 13: OI Flush & Cascade Fade" :
+        structCheck.message.includes("Setup 2") ? "Setup 2: Dynamic EMA Pushback" :
+        "Setup 1: Pullback & Retest"
+      ) : undefined
+    );
+
     return {
       conditions,
       entry_score: entryScore,
       signal_direction: signalDirection,
       all_conditions_met: allConditionsMet,
       rejection_reason: allConditionsMet ? null : failedConditions.join(", "),
+      setup_triggered,
       // Intermediate state values returned to eliminate redundant calculation logic and Execution Path Divergence (Symmetry Risk)
       probabilityLong,
       probabilityShort,
@@ -3964,7 +3982,7 @@ class TradingEngine {
       "Fresh Momentum Impulse (Setup 14)": { status: "SKIP", reason: "No active fresh momentum impulse setup" },
     };
 
-    const getReturnObj = (confirmed: boolean, message: string) => {
+    const getReturnObj = (confirmed: boolean, message: string, triggeredSetup?: string) => {
       let specificEmaTested = "";
       if (firstEmaVal > 0 && secondEmaVal > 0) {
         let testedPeriod = firstEmaPeriod;
@@ -4000,6 +4018,7 @@ class TradingEngine {
       return {
         confirmed,
         message,
+        setup_triggered: confirmed ? triggeredSetup : undefined,
         ema_check_active: true,
         ema_pair_evaluated: emaZoneLabel,
         ema_tested: specificEmaTested,
@@ -4158,7 +4177,7 @@ class TradingEngine {
         condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Fresh momentum impulse bypasses lagging MTF" };
       }
 
-      return getReturnObj(true, fmDesc);
+      return getReturnObj(true, fmDesc, "Setup 14: Fresh Momentum Impulse");
     }
 
     if (sweepResult.isSweep) {
@@ -4177,7 +4196,8 @@ class TradingEngine {
 
       return getReturnObj(
         true,
-        `[Setup 3 - Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`
+        `[Setup 3 - Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`,
+        "Setup 3: Liquidity Sweep Reversal"
       );
     }
 
@@ -4196,7 +4216,7 @@ class TradingEngine {
         condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "FVG imbalance mitigation" };
       }
 
-      return getReturnObj(true, fvgDesc);
+      return getReturnObj(true, fvgDesc, "Setup 4: Fair Value Gap Retest");
     }
 
     if (failedAuctionResult.isValid) {
@@ -4214,7 +4234,7 @@ class TradingEngine {
         condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Range false breakout mean-reversion" };
       }
 
-      return getReturnObj(true, faDesc);
+      return getReturnObj(true, faDesc, "Setup 9: Range Failed Auction Reclaim");
     }
 
     if (vwapBandResult.isValid) {
@@ -4232,7 +4252,7 @@ class TradingEngine {
         condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "VWAP outer band mean-reversion" };
       }
 
-      return getReturnObj(true, vwapDesc);
+      return getReturnObj(true, vwapDesc, "Setup 10: VWAP Band Rejection");
     }
 
     if (eqhEqlResult.isValid) {
@@ -4250,7 +4270,7 @@ class TradingEngine {
         condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Double touch boundary mean-reversion" };
       }
 
-      return getReturnObj(true, eqDesc);
+      return getReturnObj(true, eqDesc, "Setup 11: EQH/EQL Double Touch Rejection");
     }
 
     if (cvdAbsorptionResult.isValid) {
@@ -4268,7 +4288,7 @@ class TradingEngine {
         condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Structural extreme absorption rotation" };
       }
 
-      return getReturnObj(true, cvdDesc);
+      return getReturnObj(true, cvdDesc, "Setup 12: CVD Absorption & Delta Divergence");
     }
 
     if (oiFlushResult.isValid) {
@@ -4286,7 +4306,7 @@ class TradingEngine {
         condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Forced liquidation cascade mean-reversion" };
       }
 
-      return getReturnObj(true, oiDesc);
+      return getReturnObj(true, oiDesc, "Setup 13: OI Flush & Cascade Fade");
     }
 
     // Block standard trend setups if MTF trend alignment fails
@@ -4630,12 +4650,12 @@ class TradingEngine {
 
       // Final Setup-Specific Branching for LONG
       if (isPullbackRetestValid && !pullbackRetestMessage.startsWith("Blocked")) {
-        return getReturnObj(true, pullbackRetestMessage);
+        return getReturnObj(true, pullbackRetestMessage, "Setup 1: Pullback & Retest");
       } else if (isEmaPushbackValid && !emaPushbackMessage.startsWith("Blocked")) {
         condDict["Breakout Level Confirmation"] = { status: "PASS", reason: "Satisfied via EMA Pushback Setup (Setup 2)" };
         condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Satisfied via EMA Pushback Setup (Setup 2)" };
         condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Satisfied via EMA Pushback Setup (Setup 2)" };
-        return getReturnObj(true, emaPushbackMessage);
+        return getReturnObj(true, emaPushbackMessage, "Setup 2: Dynamic EMA Pushback");
       } else {
         if (!isVolumeHealthyForPullback) {
           return getReturnObj(false, "Pullback volume is abnormally high (distribution risk); waiting for volume to dry up before confirming a safe entry.");
@@ -4983,12 +5003,12 @@ class TradingEngine {
 
       // Final Setup-Specific Branching for SHORT
       if (isPullbackRetestValid && !pullbackRetestMessage.startsWith("Blocked")) {
-        return getReturnObj(true, pullbackRetestMessage);
+        return getReturnObj(true, pullbackRetestMessage, "Setup 1: Pullback & Retest");
       } else if (isEmaPushbackValid && !emaPushbackMessage.startsWith("Blocked")) {
         condDict["Breakout Level Confirmation"] = { status: "PASS", reason: "Satisfied via EMA Pushback Setup (Setup 2)" };
         condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Satisfied via EMA Pushback Setup (Setup 2)" };
         condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Satisfied via EMA Pushback Setup (Setup 2)" };
-        return getReturnObj(true, emaPushbackMessage);
+        return getReturnObj(true, emaPushbackMessage, "Setup 2: Dynamic EMA Pushback");
       } else {
         if (!isVolumeHealthyForPullback) {
           return getReturnObj(false, "Pullback volume is abnormally high (accumulation risk); waiting for volume to dry up before confirming a safe entry.");
@@ -9604,6 +9624,7 @@ class TradingEngine {
           return {
             confirmed: true,
             message: `Ranging Bullish Reversal Confirmed: ${revSignals.longReason}. Price ($${currentPrice.toFixed(2)}) is bouncing off major range support ($${rangeLow.toFixed(2)}). ${microTrendDetails}`,
+            setup_triggered: "Setup 9: Range Support Reversal",
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -9630,6 +9651,7 @@ class TradingEngine {
           return {
             confirmed: true,
             message: `Ranging Bullish Breakout Confirmed. Price ($${currentPrice.toFixed(2)}) broke above major range resistance ($${rangeHigh.toFixed(2)}) on relative volume (${relVolume.toFixed(2)}x) with P(LONG) = ${(probabilityLong * 100).toFixed(1)}%. ${microTrendDetails}`,
+            setup_triggered: "Setup 14: Fresh Momentum Impulse",
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -9645,6 +9667,7 @@ class TradingEngine {
           return {
             confirmed: true,
             message: `${rangeLongPullbackDetails} ${microTrendDetails}`,
+            setup_triggered: "Setup 1: Pullback & Retest",
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -9676,6 +9699,7 @@ class TradingEngine {
           return {
             confirmed: true,
             message: `Ranging Bearish Reversal Confirmed: ${revSignals.shortReason}. Price ($${currentPrice.toFixed(2)}) is rejecting major range resistance ($${rangeHigh.toFixed(2)}). ${microTrendDetails}`,
+            setup_triggered: "Setup 9: Range Resistance Rejection",
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -9703,6 +9727,7 @@ class TradingEngine {
           return {
             confirmed: true,
             message: `Ranging Bearish Breakdown Confirmed. Price ($${currentPrice.toFixed(2)}) broke below major range support ($${rangeLow.toFixed(2)}) on relative volume (${relVolume.toFixed(2)}x) with P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%. ${microTrendDetails}`,
+            setup_triggered: "Setup 14: Fresh Momentum Impulse",
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -9718,6 +9743,7 @@ class TradingEngine {
           return {
             confirmed: true,
             message: `${rangeShortPullbackDetails} ${microTrendDetails}`,
+            setup_triggered: "Setup 1: Pullback & Retest",
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -9776,6 +9802,7 @@ class TradingEngine {
     return {
       confirmed,
       message,
+      setup_triggered: trendResult ? trendResult.setup_triggered : undefined,
       swingHigh: struct.swingHigh,
       swingLow: struct.swingLow,
       ema_check_active: trendResult ? trendResult.ema_check_active : undefined,
@@ -10631,6 +10658,7 @@ class TradingEngine {
       signal_direction: signalDirection,
       all_conditions_met: allConditionsMet,
       failedConditions,
+      setup_triggered,
       probabilityLong,
       avgSentiment,
       currentClose,
@@ -10734,7 +10762,7 @@ class TradingEngine {
     // 3. Trade Entry Execution: Trigger a trade if all conditions met, entry score >= hurdle, and no trade active
     const entryHurdle = isWeightedEnabled ? confidenceThreshold : 80;
     if (allConditionsMet && entryScore >= entryHurdle && !this.activeTrade && (signalDirection as string) !== "NEUTRAL") {
-      this.executeTradeEntry(signalDirection as "LONG" | "SHORT", probabilityLong, avgSentiment, entryScore, savedSignal.id);
+      this.executeTradeEntry(signalDirection as "LONG" | "SHORT", probabilityLong, avgSentiment, entryScore, savedSignal.id, setup_triggered);
     }
   }
 
@@ -10744,7 +10772,8 @@ class TradingEngine {
     probability: number,
     sentiment: number,
     score: number,
-    signalId: string
+    signalId: string,
+    triggeredSetup?: string
   ) {
     if ((direction as string) === "NEUTRAL") {
       this.log(`[WARN]  BLOCKED: Attempted to execute trade entry with NEUTRAL direction.`);
@@ -11090,6 +11119,7 @@ class TradingEngine {
       max_adverse_excursion: 0,
       hold_duration_seconds: 0,
       is_win: null,
+      setup_triggered: triggeredSetup || "Setup 1: Pullback & Retest",
       feature_snapshot: {
         last_price: executedEntryPrice,
         atr_14: lastAtr,
@@ -11100,6 +11130,7 @@ class TradingEngine {
         inverted_from_signal: isInverted ? direction : undefined,
         adx_quick_scalp: isQuickScalpActive,
         structural_sl_applied: structuralSlDistance > stopLossDistance,
+        setup_triggered: triggeredSetup || "Setup 1: Pullback & Retest",
       },
     });
 
@@ -11704,6 +11735,7 @@ class TradingEngine {
       max_adverse_excursion: 0,
       hold_duration_seconds: 0,
       is_win: null,
+      setup_triggered: "Manual Execution",
       feature_snapshot: {
         last_price: currentPrice,
         atr_14: lastAtr,
@@ -11711,6 +11743,7 @@ class TradingEngine {
         is_manual: true,
         stop_loss_price: sl,
         take_profit_price: tp,
+        setup_triggered: "Manual Execution",
       },
     });
 

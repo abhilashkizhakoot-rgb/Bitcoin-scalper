@@ -462,6 +462,10 @@ async function startServer() {
     res.json(dbManager.getPerformanceByRegime());
   });
 
+  app.get("/api/analytics/setup-performance", (req, res) => {
+    res.json(dbManager.getPerformanceBySetup());
+  });
+
   // ----------------------------------------------------
   // REST API: AI Insights (Gemini)
   // ----------------------------------------------------

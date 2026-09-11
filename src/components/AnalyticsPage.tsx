@@ -24,7 +24,10 @@ import {
   Calendar,
   AlertTriangle,
   Flame,
-  LineChart
+  LineChart,
+  Layers,
+  Award,
+  Target
 } from "lucide-react";
 import {
   AreaChart,
@@ -38,7 +41,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { DailyStats, MarketRegime, Trade, StrategyConfig } from "../types.js";
+import { DailyStats, MarketRegime, Trade, StrategyConfig, SetupPerformanceStats } from "../types.js";
 import { safeFormatDateTimeShort, safeFormatDateShort, safeFormatNumber } from "../utils/format";
 import { getTradeTimingWindow } from "./TradeHistory.tsx";
 
@@ -47,6 +50,7 @@ interface AnalyticsPageProps {
   equityCurve: { timestamp: string; balance: number }[];
   dailyStats: DailyStats[];
   regimeStats: Record<string, { trades: number; win_rate: number; pnl: number }>;
+  setupStats?: any;
   trades: Trade[];
   config: StrategyConfig | null;
 }
@@ -56,6 +60,7 @@ export default function AnalyticsPage({
   equityCurve,
   dailyStats,
   regimeStats,
+  setupStats,
   trades = [],
   config,
 }: AnalyticsPageProps) {
@@ -146,6 +151,96 @@ export default function AnalyticsPage({
     winRate: r.winRate,
     pnl: r.pnl,
   }));
+
+  // ----------------------------------------------------
+  // STRUCTURAL SETUP PERFORMANCE CALCULATION (14 SETUPS)
+  // ----------------------------------------------------
+  const setupPerformanceMap = new Map<string, {
+    setup_name: string;
+    total_trades: number;
+    wins: number;
+    losses: number;
+    win_rate: number;
+    profit_factor: number;
+    net_pnl_usdt: number;
+    avg_hold_duration_seconds: number;
+    long_count: number;
+    short_count: number;
+    gross_win_usdt: number;
+    gross_loss_usdt: number;
+  }>();
+
+  completedTrades.forEach((t) => {
+    const setupName = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Setup 1: Pullback & Retest";
+    if (!setupPerformanceMap.has(setupName)) {
+      setupPerformanceMap.set(setupName, {
+        setup_name: setupName,
+        total_trades: 0,
+        wins: 0,
+        losses: 0,
+        win_rate: 0,
+        profit_factor: 0,
+        net_pnl_usdt: 0,
+        avg_hold_duration_seconds: 0,
+        long_count: 0,
+        short_count: 0,
+        gross_win_usdt: 0,
+        gross_loss_usdt: 0,
+      });
+    }
+
+    const item = setupPerformanceMap.get(setupName)!;
+    item.total_trades += 1;
+    if (t.is_win) {
+      item.wins += 1;
+      item.gross_win_usdt += Math.max(0, t.pnl_usdt || 0);
+    } else {
+      item.losses += 1;
+      item.gross_loss_usdt += Math.abs(t.pnl_usdt || 0);
+    }
+    if (t.direction === "LONG") {
+      item.long_count += 1;
+    } else {
+      item.short_count += 1;
+    }
+    item.net_pnl_usdt += (t.pnl_usdt || 0);
+    item.avg_hold_duration_seconds += (t.hold_duration_seconds || 0);
+  });
+
+  const setupStatsEnriched = Array.from(setupPerformanceMap.values()).map((s) => {
+    const win_rate = s.total_trades > 0 ? Number(((s.wins / s.total_trades) * 100).toFixed(1)) : 0;
+    const profit_factor = s.gross_loss_usdt > 0 ? Number((s.gross_win_usdt / s.gross_loss_usdt).toFixed(2)) : (s.gross_win_usdt > 0 ? 99.9 : 0);
+    const avg_hold_duration_seconds = s.total_trades > 0 ? Math.round(s.avg_hold_duration_seconds / s.total_trades) : 0;
+    const net_pnl_usdt = Number(s.net_pnl_usdt.toFixed(2));
+    const avg_pnl = s.total_trades > 0 ? Number((s.net_pnl_usdt / s.total_trades).toFixed(2)) : 0;
+    return {
+      ...s,
+      win_rate,
+      profit_factor,
+      avg_hold_duration_seconds,
+      net_pnl_usdt,
+      avg_pnl,
+    };
+  }).sort((a, b) => b.net_pnl_usdt - a.net_pnl_usdt);
+
+  // Setup Highlights
+  const topProfitSetup = setupStatsEnriched.length > 0 ? setupStatsEnriched[0] : null;
+  const bestWinRateSetup = [...setupStatsEnriched].filter(s => s.total_trades >= 1).sort((a, b) => b.win_rate - a.win_rate)[0] || null;
+  const mostActiveSetup = [...setupStatsEnriched].sort((a, b) => b.total_trades - a.total_trades)[0] || null;
+  const totalSetupsActive = setupStatsEnriched.filter(s => s.total_trades > 0).length;
+
+  const setupChartData = setupStatsEnriched.map(s => {
+    // Short clean label for charts, e.g. "Setup 1" or "Pullback"
+    const match = s.setup_name.match(/Setup\s*(\d+)/i);
+    const code = match ? `S${match[1]}` : s.setup_name.slice(0, 8);
+    return {
+      code,
+      name: s.setup_name,
+      trades: s.total_trades,
+      winRate: s.win_rate,
+      pnl: s.net_pnl_usdt,
+    };
+  });
 
   // ----------------------------------------------------
   // ADVANCED QUANT METRICS CALCULATION
@@ -612,6 +707,243 @@ export default function AnalyticsPage({
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Structural Setup Performance & Alpha Distribution Analysis */}
+      <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6" id="quant-setup-performance">
+        {/* Section Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+              <Layers className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-sans font-bold text-slate-800 text-sm">Structural Setup Performance & Alpha Distribution</h3>
+                <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-150 text-indigo-700">
+                  {totalSetupsActive} Active / 14 Setups
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 font-sans mt-0.5">
+                Empirical win rate, profit factor, hold duration, and net P&L breakdown by algorithmic entry trigger
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* 4 Stat Metric Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          {/* Top Profit Setup */}
+          <div className="bg-slate-50/70 border border-slate-200/70 rounded-xl p-3.5 flex flex-col justify-between">
+            <div className="flex items-center justify-between text-slate-400 font-mono text-[10px] uppercase tracking-wider">
+              <span>Top Generating Setup</span>
+              <Award className="w-3.5 h-3.5 text-amber-500" />
+            </div>
+            <div className="mt-2">
+              <div className="text-xs font-bold text-slate-800 truncate" title={topProfitSetup?.setup_name || "N/A"}>
+                {topProfitSetup?.setup_name || "No trades yet"}
+              </div>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className={`text-base font-sans font-extrabold ${topProfitSetup && topProfitSetup.net_pnl_usdt >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                  {topProfitSetup ? `${topProfitSetup.net_pnl_usdt >= 0 ? "+" : ""}$${safeFormatNumber(topProfitSetup.net_pnl_usdt, 2, 2)}` : "$0.00"}
+                </span>
+                <span className="text-[11px] font-mono text-slate-500">
+                  {topProfitSetup ? `(${topProfitSetup.total_trades} trades)` : ""}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Highest Win Rate Setup */}
+          <div className="bg-slate-50/70 border border-slate-200/70 rounded-xl p-3.5 flex flex-col justify-between">
+            <div className="flex items-center justify-between text-slate-400 font-mono text-[10px] uppercase tracking-wider">
+              <span>Highest Win Rate</span>
+              <Target className="w-3.5 h-3.5 text-indigo-500" />
+            </div>
+            <div className="mt-2">
+              <div className="text-xs font-bold text-slate-800 truncate" title={bestWinRateSetup?.setup_name || "N/A"}>
+                {bestWinRateSetup?.setup_name || "No trades yet"}
+              </div>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-base font-sans font-extrabold text-indigo-600">
+                  {bestWinRateSetup ? `${bestWinRateSetup.win_rate}%` : "0%"}
+                </span>
+                <span className="text-[11px] font-mono text-slate-500">
+                  {bestWinRateSetup ? `(${bestWinRateSetup.wins}W / ${bestWinRateSetup.losses}L)` : ""}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Most Active Setup */}
+          <div className="bg-slate-50/70 border border-slate-200/70 rounded-xl p-3.5 flex flex-col justify-between">
+            <div className="flex items-center justify-between text-slate-400 font-mono text-[10px] uppercase tracking-wider">
+              <span>Primary Engine Volume</span>
+              <Zap className="w-3.5 h-3.5 text-amber-500" />
+            </div>
+            <div className="mt-2">
+              <div className="text-xs font-bold text-slate-800 truncate" title={mostActiveSetup?.setup_name || "N/A"}>
+                {mostActiveSetup?.setup_name || "No trades yet"}
+              </div>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-base font-sans font-extrabold text-slate-800">
+                  {mostActiveSetup ? `${mostActiveSetup.total_trades} Trades` : "0 Trades"}
+                </span>
+                <span className="text-[11px] font-mono text-slate-500">
+                  {mostActiveSetup && summary?.total_trades > 0 
+                    ? `${Math.round((mostActiveSetup.total_trades / summary.total_trades) * 100)}% of total`
+                    : ""}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Engine Structural Breadth */}
+          <div className="bg-slate-50/70 border border-slate-200/70 rounded-xl p-3.5 flex flex-col justify-between">
+            <div className="flex items-center justify-between text-slate-400 font-mono text-[10px] uppercase tracking-wider">
+              <span>Trigger Utilization</span>
+              <PieChart className="w-3.5 h-3.5 text-indigo-500" />
+            </div>
+            <div className="mt-2">
+              <div className="text-xs font-bold text-slate-800">
+                {totalSetupsActive} Active Triggers
+              </div>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-base font-sans font-extrabold text-emerald-600">
+                  {Math.round((totalSetupsActive / 14) * 100)}%
+                </span>
+                <span className="text-[11px] font-mono text-slate-500">of 14 engine setups</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Setups Distribution Chart and Detailed Table */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* PnL and Win Rate Mini Bar Chart */}
+          <div className="lg:col-span-1 bg-slate-50/50 border border-slate-200/60 rounded-xl p-4 flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-sans font-semibold text-slate-700">Net P&L by Setup Trigger</span>
+              <span className="text-[10px] font-mono text-slate-400">USDT</span>
+            </div>
+            <div className="h-56 w-full">
+              {setupChartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={setupChartData} layout="vertical" margin={{ top: 5, right: 20, left: 15, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" opacity={0.6} />
+                    <XAxis type="number" tick={{ fontSize: 10, fill: "#94a3b8" }} tickFormatter={(val) => `$${val}`} />
+                    <YAxis dataKey="code" type="category" tick={{ fontSize: 10, fill: "#475569", fontWeight: 600 }} />
+                    <Tooltip
+                      formatter={(value: any, name: any, item: any) => [
+                        `$${safeFormatNumber(Number(value), 2, 2)} (${item.payload.winRate}% WR, ${item.payload.trades} trades)`,
+                        item.payload.fullName
+                      ]}
+                      contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", color: "#f8fafc", fontSize: "11px", borderRadius: "8px" }}
+                    />
+                    <Bar dataKey="pnl" radius={[0, 4, 4, 0]}>
+                      {setupChartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.pnl >= 0 ? "#10b981" : "#f43f5e"} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center font-mono text-xs text-slate-400">
+                  No setup data recorded
+                </div>
+              )}
+            </div>
+            <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between mt-2 pt-2 border-t border-slate-200/40">
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span> Profitable Setups</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-rose-500 inline-block"></span> Loss / Negative</span>
+            </div>
+          </div>
+
+          {/* Setup Detailed Table */}
+          <div className="lg:col-span-2 overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-100 text-slate-400 font-mono uppercase tracking-wider text-[10px]">
+                  <th className="py-2.5 pb-2">Setup Trigger</th>
+                  <th className="py-2.5 pb-2 text-center">Trades</th>
+                  <th className="py-2.5 pb-2 text-center">W / L</th>
+                  <th className="py-2.5 pb-2 text-center">Win Rate</th>
+                  <th className="py-2.5 pb-2 text-center">Profit Factor</th>
+                  <th className="py-2.5 pb-2 text-center">Avg Hold</th>
+                  <th className="py-2.5 pb-2 text-right">Net P&L</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {setupStatsEnriched.map((setup) => (
+                  <tr key={setup.setup_name} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="py-2.5 font-sans">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-indigo-50 text-indigo-600 text-[10px] font-mono font-bold shrink-0">
+                          {setup.setup_name.match(/Setup\s*(\d+)/i)?.[1] || "S"}
+                        </span>
+                        <div>
+                          <div className="font-semibold text-slate-800 text-xs truncate max-w-[200px]" title={setup.setup_name}>
+                            {setup.setup_name}
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono">
+                            {setup.long_count}L · {setup.short_count}S
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-2.5 text-center font-mono text-slate-600 font-medium">
+                      {setup.total_trades}
+                    </td>
+                    <td className="py-2.5 text-center font-mono">
+                      <span className="text-emerald-600 font-semibold">{setup.wins}W</span>
+                      <span className="text-slate-300 mx-1">/</span>
+                      <span className="text-rose-500 font-semibold">{setup.losses}L</span>
+                    </td>
+                    <td className="py-2.5 text-center">
+                      <div className="flex flex-col items-center">
+                        <span className={`font-mono font-bold text-xs ${setup.win_rate >= 55 ? "text-emerald-600" : setup.win_rate >= 40 ? "text-amber-600" : "text-slate-500"}`}>
+                          {setup.win_rate}%
+                        </span>
+                        <div className="w-14 bg-slate-100 h-1 rounded-full overflow-hidden mt-1">
+                          <div
+                            className={`h-full ${setup.win_rate >= 55 ? "bg-emerald-500" : setup.win_rate >= 40 ? "bg-amber-500" : "bg-slate-400"}`}
+                            style={{ width: `${setup.win_rate}%` }}
+                          />
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-2.5 text-center font-mono">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                        setup.profit_factor >= 2.0 
+                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
+                          : setup.profit_factor >= 1.0 
+                          ? "bg-indigo-50 text-indigo-700 border border-indigo-200" 
+                          : "bg-slate-100 text-slate-500"
+                      }`}>
+                        {setup.profit_factor >= 99 ? "∞" : `${setup.profit_factor.toFixed(2)}x`}
+                      </span>
+                    </td>
+                    <td className="py-2.5 text-center font-mono text-slate-500 text-[11px]">
+                      {formatHoldDuration(setup.avg_hold_duration_seconds)}
+                    </td>
+                    <td className="py-2.5 text-right font-mono font-bold">
+                      <span className={setup.net_pnl_usdt >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                        {setup.net_pnl_usdt >= 0 ? "+" : ""}${safeFormatNumber(setup.net_pnl_usdt, 2, 2)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {setupStatsEnriched.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="text-center font-mono text-slate-400 text-xs italic py-8">
+                      No setup trigger records found in history
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

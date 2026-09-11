@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from "react";
+import React, { useState, useMemo } from "react";
 import {
   CheckCircle2,
   XCircle,
@@ -21,27 +21,16 @@ import {
   Target,
   Activity,
   Search,
+  Layers,
+  Filter,
+  Eye,
+  ChevronRight,
+  RefreshCw,
+  Shield,
+  Zap,
 } from "lucide-react";
-import { Trade, StrategyConfig } from "../types.js";
+import { Trade, StrategyConfig, Checkpoint, DomainGateId, DomainGateSummary } from "../types.js";
 import { safeFormatNumber } from "../utils/format";
-
-interface Checkpoint {
-  name: string;
-  met: boolean;
-  current_value: any;
-  required: string;
-  description: string;
-  priority: "CRITICAL" | "HIGH" | "MEDIUM";
-  softened?: boolean;
-  ema_check_active?: boolean;
-  ema_pair_evaluated?: string;
-  ema_tested?: string;
-  sub_conditions?: {
-    name: string;
-    status: "PASS" | "FAIL" | "SKIP";
-    reason: string;
-  }[];
-}
 
 interface CheckpointsPageProps {
   status: {
@@ -57,6 +46,7 @@ interface CheckpointsPageProps {
     account_balance_usdt: number;
     checkpoints?: {
       conditions: Checkpoint[];
+      domain_gates?: DomainGateSummary[];
       entry_score: number;
       signal_direction: "LONG" | "SHORT" | "NEUTRAL";
       all_conditions_met: boolean;
@@ -310,6 +300,156 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
     };
   };
 
+  const [selectedDomain, setSelectedDomain] = useState<DomainGateId | "ALL">("ALL");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const getDomainForCondition = (name: string): DomainGateId => {
+    const n = name.toLowerCase();
+    if (
+      n.includes("account") ||
+      n.includes("equity") ||
+      n.includes("api connection") ||
+      n.includes("daily trade") ||
+      n.includes("loss streak") ||
+      n.includes("pre-flight") ||
+      n.includes("operational safety") ||
+      n.includes("anti-whipsaw") ||
+      n.includes("direction lock")
+    ) {
+      return "account_safety";
+    }
+    if (
+      n.includes("regime") ||
+      n.includes("session timing") ||
+      n.includes("timing window") ||
+      n.includes("squeeze") ||
+      n.includes("compression") ||
+      n.includes("atr volatility") ||
+      n.includes("whip-saw") ||
+      n.includes("transition cooldown")
+    ) {
+      return "market_context";
+    }
+    if (
+      n.includes("trend alignment") ||
+      n.includes("adx trend") ||
+      n.includes("catboost")
+    ) {
+      return "trend_momentum";
+    }
+    if (
+      n.includes("market structure") ||
+      n.includes("structure confirmation")
+    ) {
+      return "market_structure";
+    }
+    if (
+      n.includes("order flow") ||
+      n.includes("order book") ||
+      n.includes("relative volume") ||
+      n.includes("volume profiling") ||
+      n.includes("horizontal liquidity")
+    ) {
+      return "order_flow_liquidity";
+    }
+    if (
+      n.includes("value extension") ||
+      n.includes("overextension") ||
+      n.includes("z-score")
+    ) {
+      return "value_extension";
+    }
+    return "market_context";
+  };
+
+  const domainGates: DomainGateSummary[] = useMemo(() => {
+    if (checkpointsData?.domain_gates && checkpointsData.domain_gates.length > 0) {
+      return checkpointsData.domain_gates;
+    }
+    const domainDef: { id: DomainGateId; name: string }[] = [
+      { id: "account_safety", name: "Account & Operational Safety" },
+      { id: "market_context", name: "Market Context & Volatility" },
+      { id: "trend_momentum", name: "Trend & Momentum" },
+      { id: "market_structure", name: "Market Structure" },
+      { id: "order_flow_liquidity", name: "Order Flow & Liquidity" },
+      { id: "value_extension", name: "Value Extension" },
+    ];
+    return domainDef.map((def) => {
+      const dConds = conditions.filter((c) => (c.domain || getDomainForCondition(c.name)) === def.id);
+      const passed = dConds.filter((c) => c.met).length;
+      const failed = dConds.filter((c) => !c.met);
+      const isPassed = dConds.length === 0 || failed.length === 0;
+      return {
+        id: def.id,
+        name: def.name,
+        met: isPassed,
+        status: isPassed ? "PASSED" : "BLOCKED",
+        weight: 0,
+        earnedWeight: 0,
+        summary: isPassed
+          ? `All ${dConds.length} conditions in domain satisfied`
+          : `Blocked: ${failed.map((c) => c.name).join(", ")}`,
+        blockingReasons: failed.map((c) => `${c.name}: ${c.current_value}`),
+        totalConditions: dConds.length,
+        passedConditions: passed,
+        conditions: dConds,
+      };
+    });
+  }, [checkpointsData?.domain_gates, conditions]);
+
+  const filteredConditions = useMemo(() => {
+    return conditions.filter((item) => {
+      const itemDomain = item.domain || getDomainForCondition(item.name);
+      if (selectedDomain !== "ALL" && itemDomain !== selectedDomain) {
+        return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (
+          item.name.toLowerCase().includes(q) ||
+          item.description.toLowerCase().includes(q) ||
+          String(item.current_value).toLowerCase().includes(q) ||
+          item.required.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [conditions, selectedDomain, searchQuery]);
+
+  const getDomainIcon = (id: DomainGateId) => {
+    switch (id) {
+      case "account_safety":
+        return <ShieldCheck className="w-5 h-5" />;
+      case "market_context":
+        return <Compass className="w-5 h-5" />;
+      case "trend_momentum":
+        return <TrendingUp className="w-5 h-5" />;
+      case "market_structure":
+        return <Layers className="w-5 h-5" />;
+      case "order_flow_liquidity":
+        return <Activity className="w-5 h-5" />;
+      case "value_extension":
+        return <Target className="w-5 h-5" />;
+    }
+  };
+
+  const getDomainBadge = (domainId: DomainGateId) => {
+    switch (domainId) {
+      case "account_safety":
+        return { label: "Account Safety", bg: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+      case "market_context":
+        return { label: "Market Context", bg: "bg-indigo-50 text-indigo-700 border-indigo-200" };
+      case "trend_momentum":
+        return { label: "Trend & Momentum", bg: "bg-blue-50 text-blue-700 border-blue-200" };
+      case "market_structure":
+        return { label: "Market Structure", bg: "bg-purple-50 text-purple-700 border-purple-200" };
+      case "order_flow_liquidity":
+        return { label: "Order Flow", bg: "bg-teal-50 text-teal-700 border-teal-200" };
+      case "value_extension":
+        return { label: "Value Extension", bg: "bg-amber-50 text-amber-700 border-amber-200" };
+    }
+  };
+
   const metCount = conditions.filter((c) => c.met).length;
   const blockedCount = conditions.length - metCount;
   const criticalBlockedCount = conditions.filter((c) => !c.met && c.priority === "CRITICAL").length;
@@ -502,6 +642,147 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
               )}
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* ================= 6 CONSOLIDATED DOMAIN GATES (PHASE 2 ARCHITECTURE) ================= */}
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm space-y-5" id="domain-gates-radar-section">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-100 pb-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="p-1.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-lg">
+                <Layers className="w-4 h-4" />
+              </div>
+              <h2 className="font-sans font-bold text-base text-slate-800 tracking-tight">
+                6 Consolidated Domain Gates
+              </h2>
+              <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
+                PHASE 2 ARCHITECTURE
+              </span>
+              {selectedDomain !== "ALL" && (
+                <button
+                  onClick={() => setSelectedDomain("ALL")}
+                  className="text-[10px] font-mono text-indigo-600 hover:text-indigo-800 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  Clear Domain Filter &times;
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-slate-500">
+              The 22 tactical checkpoints are distilled into 6 high-level domain gates to eliminate conflicting rules and analysis paralysis. Click any domain card to isolate its underlying conditions.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs shrink-0">
+            <span className="text-slate-400 font-medium">Domain Confluence:</span>
+            <span className={`px-2.5 py-1 rounded-lg font-mono font-bold text-xs ${
+              domainGates.every((d) => d.met)
+                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                : "bg-amber-50 text-amber-700 border border-amber-200"
+            }`}>
+              {domainGates.filter((d) => d.met).length} / 6 GATES CLEAR
+            </span>
+          </div>
+        </div>
+
+        {/* The 6 Domain Cards Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {domainGates.map((gate) => {
+            const isSelected = selectedDomain === gate.id;
+            return (
+              <div
+                key={gate.id}
+                onClick={() => setSelectedDomain(isSelected ? "ALL" : gate.id)}
+                className={`p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between gap-3 ${
+                  isSelected
+                    ? "ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/20 shadow-sm"
+                    : gate.status === "PASSED"
+                    ? "bg-white border-emerald-200/80 hover:border-emerald-300 hover:shadow-xs"
+                    : gate.status === "SOFTENED"
+                    ? "bg-white border-amber-200/80 hover:border-amber-300 hover:shadow-xs"
+                    : "bg-white border-rose-200/80 hover:border-rose-300 hover:shadow-xs"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className={`p-2 rounded-lg shrink-0 ${
+                        gate.status === "PASSED"
+                          ? "bg-emerald-50 text-emerald-600 border border-emerald-100"
+                          : gate.status === "SOFTENED"
+                          ? "bg-amber-50 text-amber-600 border border-amber-100"
+                          : "bg-rose-50 text-rose-600 border border-rose-100"
+                      }`}
+                    >
+                      {getDomainIcon(gate.id)}
+                    </div>
+                    <div>
+                      <h3 className="font-sans font-bold text-xs text-slate-800 tracking-tight leading-snug">
+                        {gate.name}
+                      </h3>
+                      <p className="text-[10px] font-mono text-slate-400">
+                        {gate.passedConditions} / {gate.totalConditions} Checks Passed
+                      </p>
+                    </div>
+                  </div>
+
+                  <span
+                    className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-full border shrink-0 ${
+                      gate.status === "PASSED"
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : gate.status === "SOFTENED"
+                        ? "bg-amber-50 text-amber-700 border-amber-200"
+                        : "bg-rose-50 text-rose-700 border-rose-200"
+                    }`}
+                  >
+                    {gate.status}
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {/* Progress Bar */}
+                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        gate.status === "PASSED"
+                          ? "bg-emerald-500"
+                          : gate.status === "SOFTENED"
+                          ? "bg-amber-500"
+                          : "bg-rose-500"
+                      }`}
+                      style={{
+                        width: `${gate.totalConditions > 0 ? (gate.passedConditions / gate.totalConditions) * 100 : 0}%`,
+                      }}
+                    />
+                  </div>
+
+                  {/* Live Diagnostic Summary */}
+                  <p className="text-[11px] text-slate-600 font-sans leading-relaxed line-clamp-2">
+                    {gate.summary}
+                  </p>
+
+                  {/* Primary Blocking Reason Warning Pill if Blocked */}
+                  {gate.blockingReasons && gate.blockingReasons.length > 0 && gate.status === "BLOCKED" && (
+                    <div className="pt-0.5">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-mono text-rose-700 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-md truncate max-w-full">
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{gate.blockingReasons[0]}</span>
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[10px]">
+                  <span className={`font-mono ${isSelected ? "text-indigo-600 font-bold" : "text-slate-400"}`}>
+                    {isSelected ? "Isolating Domain Checks" : "Click to view checks"}
+                  </span>
+                  <ChevronRight
+                    className={`w-3.5 h-3.5 transition-transform ${isSelected ? "rotate-90 text-indigo-600" : "text-slate-400"}`}
+                  />
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -1007,110 +1288,210 @@ export default function CheckpointsPage({ status, config, onRefresh, onTabChange
         </div>
       )}
 
-      {/* ================= ALL 10 CONDITIONS CHECKLIST GRID ================= */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-sans font-bold text-xs text-slate-400 uppercase tracking-wider font-mono">
-            Full {conditions.length}-Checklist Radar Dashboard
-          </h2>
-          <span className="text-[10px] font-mono text-slate-400">Updates live per tick</span>
+      {/* ================= ALL CONDITIONS CHECKLIST GRID WITH DOMAIN FILTERING ================= */}
+      <div className="space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="font-sans font-bold text-sm text-slate-800 tracking-tight">
+                Detailed Tactical Checkpoints
+              </h2>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
+                {filteredConditions.length} of {conditions.length} Showing
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">
+              Granular metrics feeding directly into the 6 domain gates. Filter by domain or search by metric name.
+            </p>
+          </div>
+
+          {/* Metric Search Input */}
+          <div className="relative w-full md:w-64">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search metrics (e.g. ADX, EMA, CVD)..."
+              className="w-full pl-9 pr-8 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-sans"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+              >
+                &times;
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {conditions.map((item, index) => (
-            <div
-              key={index}
-              className={`bg-white border rounded-2xl p-5 shadow-xs transition-all relative overflow-hidden ${
-                item.met
-                  ? "border-emerald-200 hover:border-emerald-300"
-                  : "border-slate-200/80 hover:border-slate-300"
-              }`}
+        {/* Domain Filter Pills */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none text-xs">
+          <button
+            onClick={() => setSelectedDomain("ALL")}
+            className={`px-3 py-1.5 rounded-lg font-mono font-bold whitespace-nowrap transition-all cursor-pointer ${
+              selectedDomain === "ALL"
+                ? "bg-slate-900 text-white shadow-xs"
+                : "bg-white text-slate-600 border border-slate-200/80 hover:bg-slate-50"
+            }`}
+          >
+            All Gates ({conditions.length})
+          </button>
+          {domainGates.map((dg) => {
+            const isSel = selectedDomain === dg.id;
+            return (
+              <button
+                key={dg.id}
+                onClick={() => setSelectedDomain(isSel ? "ALL" : dg.id)}
+                className={`px-3 py-1.5 rounded-lg font-mono font-medium whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                  isSel
+                    ? "bg-indigo-600 text-white font-bold shadow-xs"
+                    : "bg-white text-slate-600 border border-slate-200/80 hover:bg-slate-50"
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    dg.status === "PASSED"
+                      ? "bg-emerald-500"
+                      : dg.status === "SOFTENED"
+                      ? "bg-amber-500"
+                      : "bg-rose-500"
+                  }`}
+                />
+                <span>{dg.name.split(" & ")[0]}</span>
+                <span className={`text-[10px] ${isSel ? "text-indigo-200" : "text-slate-400"}`}>
+                  ({dg.totalConditions})
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {filteredConditions.length === 0 ? (
+          <div className="bg-white border border-slate-200/80 rounded-2xl p-10 text-center space-y-3">
+            <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400">
+              <Filter className="w-5 h-5" />
+            </div>
+            <h3 className="font-sans font-bold text-sm text-slate-800">No checkpoints match filter</h3>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+              No checkpoints found for "{searchQuery}" under the selected domain filter.
+            </p>
+            <button
+              onClick={() => {
+                setSelectedDomain("ALL");
+                setSearchQuery("");
+              }}
+              className="text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-lg cursor-pointer"
             >
-              {/* Top Accent Line */}
-              <div className={`absolute top-0 left-0 right-0 h-1 ${item.met ? "bg-emerald-500" : "bg-slate-200"}`} />
+              Reset All Filters
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredConditions.map((item, index) => {
+              const itemDomain = item.domain || getDomainForCondition(item.name);
+              const domainBadge = getDomainBadge(itemDomain);
 
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono text-slate-400 font-bold">C{index + 1}</span>
-                    <h3 className="font-sans font-bold text-sm text-slate-800 tracking-tight">{item.name}</h3>
-                  </div>
-                  <p className="text-xs text-slate-500 leading-relaxed">{item.description}</p>
-                </div>
+              return (
+                <div
+                  key={index}
+                  className={`bg-white border rounded-2xl p-5 shadow-xs transition-all relative overflow-hidden ${
+                    item.met
+                      ? "border-emerald-200 hover:border-emerald-300"
+                      : "border-slate-200/80 hover:border-slate-300"
+                  }`}
+                >
+                  {/* Top Accent Line */}
+                  <div className={`absolute top-0 left-0 right-0 h-1 ${item.met ? "bg-emerald-500" : "bg-slate-200"}`} />
 
-                <div className="shrink-0 pt-0.5">
-                  {item.met ? (
-                    <div className="flex items-center gap-1 text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-full px-2.5 py-1 text-[10px] font-bold font-mono">
-                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                      PASSED
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 text-slate-500 bg-slate-50 border border-slate-100 rounded-full px-2.5 py-1 text-[10px] font-bold font-mono">
-                      <XCircle className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-                      BLOCKED
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Parameters Breakdown */}
-              <div className="mt-4 grid grid-cols-2 gap-3 pt-3 border-t border-slate-100">
-                <div className="space-y-0.5">
-                  <span className="text-[9px] font-mono text-slate-400 uppercase">Current Live Metric</span>
-                  <p className={`text-xs font-mono font-bold ${item.met ? "text-emerald-700" : "text-rose-700 bg-rose-50/50 px-1.5 py-0.5 rounded-md inline-block"}`}>
-                    {item.current_value}
-                  </p>
-                </div>
-                <div className="space-y-0.5">
-                  <span className="text-[9px] font-mono text-slate-400 uppercase">Target Gate Requirement</span>
-                  <p className="text-xs font-mono font-medium text-slate-700">{item.required}</p>
-                </div>
-              </div>
-
-              {/* Priority badge & Weighted score contribution */}
-              <div className="mt-3 flex flex-wrap gap-2 items-center justify-between border-t border-slate-50 pt-2.5">
-                <div className="flex items-center gap-1 text-[10px]">
-                  <span className="text-slate-400">Risk Priority:</span>
-                  <span className={`font-bold font-mono px-1.5 py-0.5 rounded-md ${
-                    item.priority === "CRITICAL"
-                      ? "bg-rose-50 text-rose-700 border border-rose-100/50"
-                      : item.priority === "HIGH"
-                      ? "bg-amber-50 text-amber-700 border border-amber-100/30"
-                      : "bg-slate-50 text-slate-600 border border-slate-100"
-                  }`}>
-                    {item.priority}
-                  </span>
-                </div>
-
-                {(() => {
-                  const wInfo = getWeightForCondition(item.name);
-                  if (!wInfo) return null;
-                  return (
-                    <div className="flex items-center gap-1.5 text-[10px] font-mono">
-                      <span className="text-slate-400">Weight:</span>
-                      <span className="font-bold text-slate-700 flex flex-wrap items-center gap-1">
-                        {wInfo.discountApplied ? `${wInfo.earned} pts` : `${wInfo.active} pts`}
-                        {wInfo.modifier && (
-                          <span className={`text-[8px] font-bold px-1 rounded-sm ${wInfo.modifier.val > 0 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"}`}>
-                            {wInfo.modifier.val > 0 ? `+` : ``}{wInfo.modifier.val}
-                          </span>
-                        )}
-                        {wInfo.discountApplied && (
-                          <span className="text-[8px] font-bold px-1 rounded-sm bg-amber-50 text-amber-600 border border-amber-100/30">
-                            Softened Discount
-                          </span>
-                        )}
-                        <span className={`text-[9px] font-normal ${item.met ? (wInfo.discountApplied ? "text-amber-600" : "text-emerald-600") : "text-slate-400"}`}>
-                          ({item.met ? (wInfo.discountApplied ? `Contributed (Softened)` : "Contributed") : "Blocked"})
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-mono text-slate-400 font-bold">C{index + 1}</span>
+                        <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-md border ${domainBadge.bg}`}>
+                          {domainBadge.label}
                         </span>
+                        <h3 className="font-sans font-bold text-sm text-slate-800 tracking-tight">{item.name}</h3>
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">{item.description}</p>
+                    </div>
+
+                    <div className="shrink-0 pt-0.5">
+                      {item.met ? (
+                        <div className="flex items-center gap-1 text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-full px-2.5 py-1 text-[10px] font-bold font-mono">
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          PASSED
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 text-slate-500 bg-slate-50 border border-slate-100 rounded-full px-2.5 py-1 text-[10px] font-bold font-mono">
+                          <XCircle className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                          BLOCKED
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Parameters Breakdown */}
+                  <div className="mt-4 grid grid-cols-2 gap-3 pt-3 border-t border-slate-100">
+                    <div className="space-y-0.5">
+                      <span className="text-[9px] font-mono text-slate-400 uppercase">Current Live Metric</span>
+                      <p className={`text-xs font-mono font-bold ${item.met ? "text-emerald-700" : "text-rose-700 bg-rose-50/50 px-1.5 py-0.5 rounded-md inline-block"}`}>
+                        {item.current_value}
+                      </p>
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-[9px] font-mono text-slate-400 uppercase">Target Gate Requirement</span>
+                      <p className="text-xs font-mono font-medium text-slate-700">{item.required}</p>
+                    </div>
+                  </div>
+
+                  {/* Priority badge & Weighted score contribution */}
+                  <div className="mt-3 flex flex-wrap gap-2 items-center justify-between border-t border-slate-50 pt-2.5">
+                    <div className="flex items-center gap-1 text-[10px]">
+                      <span className="text-slate-400">Risk Priority:</span>
+                      <span className={`font-bold font-mono px-1.5 py-0.5 rounded-md ${
+                        item.priority === "CRITICAL"
+                          ? "bg-rose-50 text-rose-700 border border-rose-100/50"
+                          : item.priority === "HIGH"
+                          ? "bg-amber-50 text-amber-700 border border-amber-100/30"
+                          : "bg-slate-50 text-slate-600 border border-slate-100"
+                      }`}>
+                        {item.priority}
                       </span>
                     </div>
-                  );
-                })()}
-              </div>
-            </div>
-          ))}
-        </div>
+
+                    {(() => {
+                      const wInfo = getWeightForCondition(item.name);
+                      if (!wInfo) return null;
+                      return (
+                        <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                          <span className="text-slate-400">Weight:</span>
+                          <span className="font-bold text-slate-700 flex flex-wrap items-center gap-1">
+                            {wInfo.discountApplied ? `${wInfo.earned} pts` : `${wInfo.active} pts`}
+                            {wInfo.modifier && (
+                              <span className={`text-[8px] font-bold px-1 rounded-sm ${wInfo.modifier.val > 0 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"}`}>
+                                {wInfo.modifier.val > 0 ? `+` : ``}{wInfo.modifier.val}
+                              </span>
+                            )}
+                            {wInfo.discountApplied && (
+                              <span className="text-[8px] font-bold px-1 rounded-sm bg-amber-50 text-amber-600 border border-amber-100/30">
+                                Softened Discount
+                              </span>
+                            )}
+                            <span className={`text-[9px] font-normal ${item.met ? (wInfo.discountApplied ? "text-amber-600" : "text-emerald-600") : "text-slate-400"}`}>
+                              ({item.met ? (wInfo.discountApplied ? `Contributed (Softened)` : "Contributed") : "Blocked"})
+                            </span>
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

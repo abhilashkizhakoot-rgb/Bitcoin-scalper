@@ -20,6 +20,9 @@ import {
   ExitReason,
   StrategyConfig,
   MarketStructureConfig,
+  Checkpoint,
+  DomainGateId,
+  DomainGateSummary,
 } from "./types.js";
 import { FinBertSentimentModel } from "./finbert.js";
 import { CrossSourceSentimentAggregator } from "./sentimentEngine.js";
@@ -458,6 +461,180 @@ class TradingEngine {
     if (n.includes("structure")) return "structure";
     if (n.includes("choppy") || n.includes("whip-saw")) return "choppy";
     return n;
+  }
+
+  public getDomainForCondition(name: string): DomainGateId {
+    const n = name.toLowerCase();
+    if (
+      n.includes("account") ||
+      n.includes("equity") ||
+      n.includes("api connection") ||
+      n.includes("daily trade") ||
+      n.includes("loss streak") ||
+      n.includes("pre-flight") ||
+      n.includes("operational safety") ||
+      n.includes("anti-whipsaw") ||
+      n.includes("direction lock")
+    ) {
+      return "account_safety";
+    }
+    if (
+      n.includes("regime") ||
+      n.includes("session timing") ||
+      n.includes("timing window") ||
+      n.includes("squeeze") ||
+      n.includes("compression") ||
+      n.includes("atr volatility") ||
+      n.includes("whip-saw") ||
+      n.includes("transition cooldown")
+    ) {
+      return "market_context";
+    }
+    if (
+      n.includes("trend alignment") ||
+      n.includes("adx trend") ||
+      n.includes("catboost")
+    ) {
+      return "trend_momentum";
+    }
+    if (
+      n.includes("market structure") ||
+      n.includes("structure confirmation")
+    ) {
+      return "market_structure";
+    }
+    if (
+      n.includes("order flow") ||
+      n.includes("order book") ||
+      n.includes("relative volume") ||
+      n.includes("volume profiling") ||
+      n.includes("horizontal liquidity")
+    ) {
+      return "order_flow_liquidity";
+    }
+    if (
+      n.includes("value extension") ||
+      n.includes("overextension") ||
+      n.includes("z-score")
+    ) {
+      return "value_extension";
+    }
+    return "market_context";
+  }
+
+  private buildDomainGates(
+    conditions: Checkpoint[],
+    isWeightedEnabled: boolean,
+    tacticalGatesMap: { condName: string; weightKey: string }[],
+    activeWeights: Record<string, number>,
+    config: StrategyConfig,
+    structCheck?: any,
+    setup_triggered?: string,
+    signalDirection: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL",
+    probabilityLong = 0.5,
+    probabilityShort = 0.5,
+    adxValue = 25,
+    relVolume = 1.0,
+    fastEma = 20,
+    medEma = 50,
+    slowEma = 200
+  ): DomainGateSummary[] {
+    conditions.forEach((c) => {
+      if (!c.domain) {
+        c.domain = this.getDomainForCondition(c.name);
+      }
+    });
+
+    const domainDef: { id: DomainGateId; name: string }[] = [
+      { id: "account_safety", name: "Account & Operational Safety" },
+      { id: "market_context", name: "Market Context & Volatility" },
+      { id: "trend_momentum", name: "Trend & Momentum" },
+      { id: "market_structure", name: "Market Structure" },
+      { id: "order_flow_liquidity", name: "Order Flow & Liquidity" },
+      { id: "value_extension", name: "Value Extension" },
+    ];
+
+    return domainDef.map((def) => {
+      const domainConds = conditions.filter((c) => c.domain === def.id);
+      const total = domainConds.length;
+      const passed = domainConds.filter((c) => c.met).length;
+      const failed = domainConds.filter((c) => !c.met);
+      const blockingReasons = failed.map((c) => `${c.name}: ${c.current_value}`);
+
+      let domainWeight = 0;
+      let domainEarned = 0;
+      if (isWeightedEnabled && tacticalGatesMap) {
+        for (const gate of tacticalGatesMap) {
+          const c = domainConds.find((dc) => dc.name === gate.condName);
+          if (c && this.isGateActive(config, gate.condName)) {
+            const w = activeWeights[gate.weightKey] || 0;
+            domainWeight += w;
+            if (c.met) {
+              const disc = (config.gate_scoring?.enable_weight_discounting !== false && c.softened)
+                ? (config.gate_scoring?.softened_gate_discount_factor ?? 0.5)
+                : 1;
+              domainEarned += w * disc;
+            }
+          }
+        }
+      }
+
+      const hasSoftened = domainConds.some((c) => c.softened && c.met);
+      let status: "PASSED" | "BLOCKED" | "SOFTENED" = "PASSED";
+      if (total === 0) {
+        status = "PASSED";
+      } else if (failed.length > 0) {
+        if (def.id === "account_safety" || def.id === "market_structure") {
+          status = "BLOCKED";
+        } else {
+          const hasMandatoryFailed = failed.some((c) => this.isGateMandatory(config, c.name));
+          status = hasMandatoryFailed ? "BLOCKED" : (passed > 0 ? "PASSED" : "BLOCKED");
+        }
+      } else if (hasSoftened) {
+        status = "SOFTENED";
+      }
+
+      let summary = "";
+      if (def.id === "account_safety") {
+        summary = failed.length === 0
+          ? "All operational safety, equity limits, and API connections clear"
+          : `Blocked: ${failed.map(c => c.name).join(", ")}`;
+      } else if (def.id === "market_context") {
+        summary = failed.length === 0
+          ? `Regime: ${this.currentRegime} (conf: ${(this.regimeConfidence * 100).toFixed(0)}%) | ATR & Squeeze verified`
+          : `Context friction: ${failed.map(c => c.name).join(", ")}`;
+      } else if (def.id === "trend_momentum") {
+        summary = failed.length === 0
+          ? `EMAs aligned (${fastEma}/${medEma}/${slowEma}) | ADX ${adxValue.toFixed(1)} | P(${signalDirection}) ${((signalDirection === "LONG" ? probabilityLong : probabilityShort) * 100).toFixed(0)}%`
+          : `Momentum divergence: ${failed.map(c => c.name).join(", ")}`;
+      } else if (def.id === "market_structure") {
+        summary = structCheck?.confirmed
+          ? `Structure confirmed: ${setup_triggered || structCheck?.message || "Pattern Confirmed"}`
+          : `Awaiting structural trigger: ${structCheck?.message || "Scanning for valid price action pattern"}`;
+      } else if (def.id === "order_flow_liquidity") {
+        summary = failed.length === 0
+          ? `RVOL ${relVolume.toFixed(2)}x | CVD & Order Book depth confirm ${signalDirection}`
+          : `Liquidity/Flow gap: ${failed.map(c => c.name).join(", ")}`;
+      } else if (def.id === "value_extension") {
+        summary = failed.length === 0
+          ? "Price within safe statistical boundaries (< 2.5x ATR deviation)"
+          : `Overextended: ${failed.map(c => c.name).join(", ")}`;
+      }
+
+      return {
+        id: def.id,
+        name: def.name,
+        met: status === "PASSED" || status === "SOFTENED",
+        status,
+        weight: domainWeight,
+        earnedWeight: domainEarned,
+        summary,
+        blockingReasons,
+        totalConditions: total,
+        passedConditions: passed,
+        conditions: domainConds,
+      };
+    });
   }
 
   private getRegimeAdaptiveGateStatus(config: StrategyConfig, gateId: string): "MANDATORY" | "WEIGHTED" | "BYPASSED" | null {
@@ -1551,17 +1728,20 @@ class TradingEngine {
 
     // --- EARLY DIRECTION LOCK & SHORT-CIRCUIT PRE-FILTERING ---
     if (signalDirection === "NEUTRAL") {
+      const earlyConds: Checkpoint[] = [
+        {
+          name: "Early Direction Lock",
+          met: false,
+          current_value: "NEUTRAL",
+          required: "LONG or SHORT candidate setup detected",
+          description: "No direction candidate identified under current market structure or momentum.",
+          priority: "CRITICAL" as const,
+          domain: "account_safety",
+        },
+      ];
       return {
-        conditions: [
-          {
-            name: "Early Direction Lock",
-            met: false,
-            current_value: "NEUTRAL",
-            required: "LONG or SHORT candidate setup detected",
-            description: "No direction candidate identified under current market structure or momentum.",
-            priority: "CRITICAL" as const,
-          },
-        ],
+        conditions: earlyConds,
+        domain_gates: this.buildDomainGates(earlyConds, false, [], {}, config, undefined, undefined, "NEUTRAL", probabilityLong, probabilityShort, adxValue, relVolume),
         entry_score: 0,
         signal_direction: "NEUTRAL" as const,
         all_conditions_met: false,
@@ -1597,17 +1777,20 @@ class TradingEngine {
                         (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFailedAuctionSetup("SHORT").isValid || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive));
 
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY && !isSmcActive) {
+      const earlyConds: Checkpoint[] = [
+        {
+          name: "Market Regime Pre-Filter",
+          met: false,
+          current_value: "LOW_VOLATILITY",
+          required: "STRONG_UPTREND, STRONG_DOWNTREND, RANGE_BOUND, or HIGH_VOLATILITY",
+          description: "Low volatility regime prevents entries to avoid choppy sideways losses.",
+          priority: "CRITICAL" as const,
+          domain: "market_context",
+        },
+      ];
       return {
-        conditions: [
-          {
-            name: "Market Regime Pre-Filter",
-            met: false,
-            current_value: "LOW_VOLATILITY",
-            required: "STRONG_UPTREND, STRONG_DOWNTREND, RANGE_BOUND, or HIGH_VOLATILITY",
-            description: "Low volatility regime prevents entries to avoid choppy sideways losses.",
-            priority: "CRITICAL" as const,
-          },
-        ],
+        conditions: earlyConds,
+        domain_gates: this.buildDomainGates(earlyConds, false, [], {}, config, undefined, undefined, signalDirection, probabilityLong, probabilityShort, adxValue, relVolume),
         entry_score: 0,
         signal_direction: signalDirection,
         all_conditions_met: false,
@@ -1630,19 +1813,7 @@ class TradingEngine {
       };
     }
 
-    const conditions: {
-      name: string;
-      met: boolean;
-      current_value: any;
-      required: string;
-      description: string;
-      priority: "CRITICAL" | "HIGH" | "MEDIUM";
-      softened?: boolean;
-      ema_check_active?: boolean;
-      ema_pair_evaluated?: string;
-      ema_tested?: string;
-      sub_conditions?: MarketStructureSubCondition[];
-    }[] = [];
+    const conditions: Checkpoint[] = [];
 
     // C1: CatBoost AI Prediction
     const pbTrendStatus = this.detectPullbackTrendlineBreak();
@@ -1654,8 +1825,8 @@ class TradingEngine {
     const pLongMet = signalDirection === "LONG" ? (probabilityLong >= catboostThreshold) : false;
     const pShortMet = signalDirection === "SHORT" ? (probabilityShort >= catboostThreshold) : false;
     const opposingProb = signalDirection === "LONG" ? probabilityShort : probabilityLong;
-    const isModelOpposing = opposingProb >= 0.65;
-    const aiPenaltyPts = isModelOpposing ? Math.min(30, Math.round(15 + (opposingProb - 0.65) * 45)) : 0;
+    const isModelOpposing = opposingProb >= 0.70;
+    const aiPenaltyPts = isModelOpposing ? Math.min(10, Math.round((opposingProb - 0.70) * 33)) : 0;
     const aiPenaltyDesc = isModelOpposing ? ` (Opposing Model Confluence Penalty: -${aiPenaltyPts} pts)` : "";
 
     conditions.push({
@@ -1845,13 +2016,13 @@ class TradingEngine {
     });
 
     // C5: Context-Aware Relative Volume (RVOL) Confirmation Matrix
-    const earlyStructCheck = this.evaluateMarketStructureConfirmation(signalDirection, probabilityLong);
+    const structCheck = this.evaluateMarketStructureConfirmation(signalDirection, probabilityLong);
     const contextVolResult = this.evaluateContextAwareVolume(
       signalDirection,
       relVolume,
       hasExtremeRealtimePressure,
       this.currentRegime,
-      earlyStructCheck
+      structCheck
     );
 
     conditions.push({
@@ -2041,9 +2212,7 @@ class TradingEngine {
       softened: isValueExtensionSoftened,
     });
 
-    // C15: Market Structure & Entry Confirmation Check (Pullback, Retest, Reversal, High-Vol Confirmation)
-    const structCheck = this.evaluateMarketStructureConfirmation(signalDirection, probabilityLong);
-
+    // C15: Market Structure & Entry Confirmation Check (Single-pass evaluated and reused)
     conditions.push({
       name: "Market Structure Confirmation",
       met: structCheck.confirmed,
@@ -2447,12 +2616,11 @@ class TradingEngine {
         let calculatedScore = Math.round((earnedTacticalWeight / totalTacticalWeight) * 100);
 
         // Adaptive AI Alignment Penalty (Non-Blocking):
-        // If CatBoost model strongly predicts the OPPOSING direction (P(opposing) >= 65%),
-        // rather than hard-blocking the setup, deduct a dynamic confidence penalty.
-        // This ensures a trade can only execute against strong AI opposition if remaining tactical confluence is near-unanimous (>92%).
+        // If CatBoost model strongly predicts the OPPOSING direction (P(opposing) >= 70%),
+        // apply a modest confidence dampener (0-10 pts) so it doesn't double-penalize alongside gate weighting.
         const opposingProb = signalDirection === "LONG" ? probabilityShort : probabilityLong;
-        if (opposingProb >= 0.65) {
-          const aiPenalty = Math.min(30, Math.round(15 + (opposingProb - 0.65) * 45)); // 15 to 30 point penalty
+        if (opposingProb >= 0.70) {
+          const aiPenalty = Math.min(10, Math.round((opposingProb - 0.70) * 33));
           calculatedScore = Math.max(0, calculatedScore - aiPenalty);
         }
 
@@ -2527,8 +2695,27 @@ class TradingEngine {
       ) : undefined
     );
 
+    const domainGates = this.buildDomainGates(
+      conditions,
+      isWeightedEnabled,
+      tacticalGatesMap,
+      activeWeights,
+      config,
+      structCheck,
+      setup_triggered,
+      signalDirection,
+      probabilityLong,
+      probabilityShort,
+      adxValue,
+      relVolume,
+      fastEma,
+      medEma,
+      slowEma
+    );
+
     return {
       conditions,
+      domain_gates: domainGates,
       entry_score: entryScore,
       signal_direction: signalDirection,
       all_conditions_met: allConditionsMet,
@@ -8975,10 +9162,12 @@ class TradingEngine {
     if (isMomentumCandle && (hasStrongCsi || hasStrongClose) && isBullish) return { confirmed: !isIndecision, type: `Bullish Momentum (CSI ${(bullishCsi * 100).toFixed(0)}%)` };
     if (hasStrongClose && isBullish && confirmLowerWick > confirmUpperWick) return { confirmed: !isIndecision, type: "Strong Close Support Rejection" };
 
-    // If 2-candle confirmation is DISABLED, allow legacy immediate 1-candle entry (strictly requiring green close)
-    if (!requirePinBarConfirmation) {
-      if (isPinBar && hasStrongClose && isBullish) return { confirmed: !isIndecision, type: "Bullish Pin Bar (Legacy 1-Candle)" };
-      if (isMajorWickRejection && isBullish && hasStrongClose) return { confirmed: true, type: "65%+ Wick-to-Range Lower Rejection (Legacy 1-Candle)" };
+    // If 2-candle confirmation is DISABLED OR confirmed by volume/order flow delta, allow immediate 1-candle entry on close
+    const relVolumeLong = this.calculateAccurateRelativeVolume();
+    const hasVolumeOrFlowConfirmationLong = relVolumeLong >= 1.15 || (this.orderFlowStats && this.orderFlowStats.takerBuyRatio >= 0.55);
+    if (!requirePinBarConfirmation || hasVolumeOrFlowConfirmationLong) {
+      if (isPinBar && hasStrongClose && isBullish) return { confirmed: !isIndecision, type: `Bullish Pin Bar (${hasVolumeOrFlowConfirmationLong ? "Volume/Flow Confirmed" : "1-Candle"})` };
+      if (isMajorWickRejection && isBullish && hasStrongClose) return { confirmed: true, type: `65%+ Wick-to-Range Lower Rejection (${hasVolumeOrFlowConfirmationLong ? "Volume/Flow Confirmed" : "1-Candle"})` };
     }
 
     return { confirmed: false, type: "" };
@@ -9298,10 +9487,12 @@ class TradingEngine {
     if (isMomentumCandle && (hasStrongCsi || hasStrongClose) && isBearish) return { confirmed: !isIndecision, type: `Bearish Momentum (CSI ${(bearishCsi * 100).toFixed(0)}%)` };
     if (hasStrongClose && isBearish && confirmUpperWick > confirmLowerWick) return { confirmed: !isIndecision, type: "Strong Close Resistance Rejection" };
 
-    // If 2-candle confirmation is DISABLED, allow legacy immediate 1-candle entry (strictly requiring red close)
-    if (!requirePinBarConfirmation) {
-      if (isPinBar && hasStrongClose && isBearish) return { confirmed: !isIndecision, type: "Bearish Pin Bar (Legacy 1-Candle)" };
-      if (isMajorWickRejection && isBearish && hasStrongClose) return { confirmed: true, type: "65%+ Wick-to-Range Upper Rejection (Legacy 1-Candle)" };
+    // If 2-candle confirmation is DISABLED OR confirmed by volume/order flow delta, allow immediate 1-candle entry on close
+    const relVolumeShort = this.calculateAccurateRelativeVolume();
+    const hasVolumeOrFlowConfirmationShort = relVolumeShort >= 1.15 || (this.orderFlowStats && this.orderFlowStats.takerBuyRatio <= 0.45);
+    if (!requirePinBarConfirmation || hasVolumeOrFlowConfirmationShort) {
+      if (isPinBar && hasStrongClose && isBearish) return { confirmed: !isIndecision, type: `Bearish Pin Bar (${hasVolumeOrFlowConfirmationShort ? "Volume/Flow Confirmed" : "1-Candle"})` };
+      if (isMajorWickRejection && isBearish && hasStrongClose) return { confirmed: true, type: `65%+ Wick-to-Range Upper Rejection (${hasVolumeOrFlowConfirmationShort ? "Volume/Flow Confirmed" : "1-Candle"})` };
     }
 
     return { confirmed: false, type: "" };
@@ -10091,7 +10282,9 @@ class TradingEngine {
       return { poc: this.currentPrice, vah: this.currentPrice, val: this.currentPrice, hvns: [], lvns: [], bins: [] };
     }
     const last = candles[candles.length - 1];
-    const key = `${id}_${candles.length}_${last.time}_${last.close}_${numBins}`;
+    // Quantize last candle close to a $10 bucket to stabilize profile caching across sub-tick fluctuations
+    const priceBucket = Math.round(last.close / 10) * 10;
+    const key = `${id}_${candles.length}_${last.time}_${priceBucket}_${numBins}`;
     if (this.indicatorCache.volumeProfile.has(key)) {
       return this.indicatorCache.volumeProfile.get(key)!;
     }
@@ -10873,26 +11066,8 @@ class TradingEngine {
     const prevBbWidth = Math.max(1, bbPrev3.upper - bbPrev3.lower);
     const isBbExpanding = bbWidth > prevBbWidth * 1.05; // True volatility blowout
 
-    // Adaptive Micro-Retest Execution Price (Non-Blocking):
-    // If Bollinger Bands are static/converging and price is extended at the band extremes,
-    // market-buying the top tick or shorting the bottom tick suffers immediate retest stopouts.
-    // Instead of blocking the trade, execute at the micro-retest pullback limit fill level.
-    let executedEntryPrice = currentPrice;
-    if (!isBbExpanding) {
-      if (execDirection === "LONG" && bbDevPosition > 0.70) {
-        const retestBuffer = Math.min(0.25 * lastAtr, (bbDevPosition - 0.65) * bbWidth);
-        if (retestBuffer > 2.0) {
-          executedEntryPrice = Number((currentPrice - retestBuffer).toFixed(2));
-          this.log(`  [Bollinger Micro-Retest LONG] Bands static ($${bbWidth.toFixed(1)} vs prev $${prevBbWidth.toFixed(1)}, dev: ${(bbDevPosition * 100).toFixed(1)}%). Executing at micro-retest level: $${executedEntryPrice.toFixed(2)} (-$${retestBuffer.toFixed(2)})`);
-        }
-      } else if (execDirection === "SHORT" && bbDevPosition < 0.30) {
-        const retestBuffer = Math.min(0.25 * lastAtr, (0.35 - bbDevPosition) * bbWidth);
-        if (retestBuffer > 2.0) {
-          executedEntryPrice = Number((currentPrice + retestBuffer).toFixed(2));
-          this.log(`  [Bollinger Micro-Retest SHORT] Bands static ($${bbWidth.toFixed(1)} vs prev $${prevBbWidth.toFixed(1)}, dev: ${(bbDevPosition * 100).toFixed(1)}%). Executing at micro-retest level: $${executedEntryPrice.toFixed(2)} (+$${retestBuffer.toFixed(2)})`);
-        }
-      }
-    }
+    // Real-time market execution price
+    const executedEntryPrice = currentPrice;
 
     const ema9 = this.calculateEMA(closes, 9);
     const lastIdx = closes.length - 1;
@@ -10918,10 +11093,9 @@ class TradingEngine {
       return;
     }
 
-    const stProfile = this.getVolumeProfileCached(this.candles1m.slice(-90), "st_1m");
-    const mtProfile = this.getVolumeProfileCached(this.aggregateCandles(this.candles1m, 5).slice(-120), "mt_5m");
-
     // --- CONFLUENCE OF EXTREMES (EXHAUSTION + OVEREXTENSION) BLOCK ---
+    // Note: The primary value extension check is already strictly enforced by the Unified Value Extension Anchor gate.
+    // This safety net only guards against extreme blowout order flow climaxes outside 2.5x ATR.
     const rawImbalance = this.orderBookStats.imbalanceRatio;
     const takerRatio = this.orderFlowStats.takerBuyRatio;
 
@@ -10930,16 +11104,16 @@ class TradingEngine {
       ? (rawImbalance > 0.85 || takerRatio > 0.90)
       : (rawImbalance < -0.85 || takerRatio < 0.10);
 
-    // Condition B (Physical Overextension): Entry Price physically outside Bollinger Bands OR distance to EMA 9 > 1.5 * ATR_14
+    // Condition B (Physical Overextension): Entry Price physically outside Bollinger Bands AND distance to EMA 9 > 2.5 * ATR_14
     const isOutsideBB = execDirection === "LONG" ? (currentPrice > bb.upper) : (currentPrice < bb.lower);
     const distEma9 = Math.abs(currentPrice - ema9Val);
-    const isEmaOverextended = distEma9 > 1.5 * lastAtr;
-    const isConditionB = isOutsideBB || isEmaOverextended;
+    const isEmaOverextended = distEma9 > 2.5 * lastAtr;
+    const isConditionB = isOutsideBB && isEmaOverextended;
 
     // Extreme Confluence: Parabolic & mathematically exhausted -> BLOCK ENTRY
     if (isConditionA && isConditionB && !isFreshImpulse) {
       this.log(
-        `  [ENTRY BLOCKED - Confluence of Extremes] Late-stage exhaustion breakout detected! Order Flow Climax (Imbalance: ${(rawImbalance * 100).toFixed(1)}%, Taker: ${(takerRatio * 100).toFixed(1)}%) & Physical Overextension (Outside BB: ${isOutsideBB}, Dist to EMA9: $${distEma9.toFixed(2)} vs 1.5xATR $${(1.5 * lastAtr).toFixed(2)}). Trade entry aborted.`
+        `  [ENTRY BLOCKED - Confluence of Extremes] Late-stage exhaustion blowout detected! Order Flow Climax (Imbalance: ${(rawImbalance * 100).toFixed(1)}%, Taker: ${(takerRatio * 100).toFixed(1)}%) & Physical Overextension (Outside BB: ${isOutsideBB}, Dist to EMA9: $${distEma9.toFixed(2)} vs 2.5xATR $${(2.5 * lastAtr).toFixed(2)}). Trade entry aborted.`
       );
       return;
     }

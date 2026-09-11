@@ -498,3 +498,40 @@ export interface MarketStructureSubCondition {
   reason: string;
 }
 
+export type DomainGateId =
+  | "account_safety"
+  | "market_context"
+  | "trend_momentum"
+  | "market_structure"
+  | "order_flow_liquidity"
+  | "value_extension";
+
+export interface Checkpoint {
+  name: string;
+  met: boolean;
+  current_value: any;
+  required: string;
+  description: string;
+  priority: "CRITICAL" | "HIGH" | "MEDIUM";
+  domain?: DomainGateId;
+  softened?: boolean;
+  ema_check_active?: boolean;
+  ema_pair_evaluated?: string;
+  ema_tested?: string;
+  sub_conditions?: MarketStructureSubCondition[];
+}
+
+export interface DomainGateSummary {
+  id: DomainGateId;
+  name: string;
+  met: boolean;
+  status: "PASSED" | "BLOCKED" | "SOFTENED";
+  weight: number;
+  earnedWeight: number;
+  summary: string;
+  blockingReasons: string[];
+  totalConditions: number;
+  passedConditions: number;
+  conditions: Checkpoint[];
+}
+

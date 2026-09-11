@@ -222,7 +222,7 @@ export default function ConfigPage({
         cooldown_minutes: 30,
         relative_volume_threshold: 1.3,
         adx_threshold: 22.0,
-        order_book_min_depth: 4.0,
+        order_book_min_depth: 2.5,
         order_book_max_imbalance: 0.35,
         order_book_max_spoof_risk: 70,
         required_gates: [
@@ -258,6 +258,8 @@ export default function ConfigPage({
         daily_loss_limit_pct: 2.0,
         weekly_loss_limit_pct: 5.0,
         intra_trade_drawdown_limit_pct: 1.5,
+        max_allowed_z_dist: 2.50,
+        min_atr_for_trading_value: 12.0,
       },
       ml_settings: {
         entry_threshold_long: 0.8,

@@ -1950,44 +1950,54 @@ class TradingEngine {
     const atr14 = hasEnoughData ? this.calculateATR(this.candles1m, 14) : [50];
     const currentAtr = atr14[lastIdx] || 50;
 
+    // Scale normalizer: use robust ATR floor to prevent compressed volatility from artificially exploding Z-scores
+    const effectiveAtrForZ = Math.max(currentAtr, 35.0);
+
     // Component 1: VWAP Deviation Z-Score
-    const vwapStdDev = Math.max(Math.abs(vwapUpperVal - vwapVal), currentAtr);
+    const vwapStdDev = Math.max(Math.abs(vwapUpperVal - vwapVal), effectiveAtrForZ);
     const zVwap = (currentPrice - vwapVal) / vwapStdDev;
 
-    // Component 2: EMA 100 Distance Z-Score
-    const zEma = (currentPrice - ema100Val) / (1.5 * currentAtr);
+    // Component 2: EMA 100 Distance Z-Score (normalized against robust ATR floor)
+    const zEma = (currentPrice - ema100Val) / (1.5 * effectiveAtrForZ);
 
     // Component 3: 10-Bar Chasing Lookback Velocity Z-Score
     const shortLookback = 10;
     let zChase = 0;
     if (this.candles1m.length >= shortLookback) {
       const candle10Ago = this.candles1m[this.candles1m.length - shortLookback];
-      zChase = (currentPrice - candle10Ago.close) / (1.8 * currentAtr);
+      zChase = (currentPrice - candle10Ago.close) / (1.8 * effectiveAtrForZ);
     }
 
     // Normalized Composite Z-Score Distance (Z_dist)
     const zDist = 0.45 * zVwap + 0.35 * zEma + 0.20 * zChase;
 
+    // Detect momentum expansion/impulse where wider deviation is natural and profitable
+    const isMomentumImpulse = relVolume >= 1.20 || isTrending || hasExtremeRealtimePressure || (this.currentRegime === "STRONG_UPTREND" || this.currentRegime === "STRONG_DOWNTREND" || this.currentRegime === "HIGH_VOLATILITY");
+
     // Dynamic Z_dist Threshold based on Regime and Pressure capped by configured max_allowed_z_dist
-    const userMaxZCap = rm.max_allowed_z_dist !== undefined ? rm.max_allowed_z_dist : 2.20;
-    const baseZLimit = Math.min(isTrending ? 2.20 : 2.00, userMaxZCap);
-    const maxZLimit = Math.min(hasExtremeRealtimePressure ? 3.20 : baseZLimit, userMaxZCap);
+    const userMaxZCap = rm.max_allowed_z_dist !== undefined ? rm.max_allowed_z_dist : 2.50;
+    const baseZLimit = Math.min(isTrending ? 2.50 : 2.20, userMaxZCap);
+    const maxZLimit = Math.min(hasExtremeRealtimePressure || isMomentumImpulse ? 3.50 : baseZLimit, userMaxZCap);
 
     // Absolute Z-score and Single-Component Exhaustion Hard-Locks (MANDATORY SAFETY GATE)
-    // 1. |Z_dist| hard ceiling of 2.50 sigma
-    const hardZDistCeiling = 2.50;
+    // 1. |Z_dist| ceiling: 3.50 sigma in strong momentum/trend impulse, 2.80 in neutral/ranging
+    const hardZDistCeiling = isMomentumImpulse ? 3.50 : 2.80;
     const isZDistOverextended = Math.abs(zDist) > hardZDistCeiling;
 
-    // 2. Single-Component Exhaustion Ceiling: Anti-dilution guard against extreme individual deviations (> 3.00 sigma)
-    const singleComponentCeiling = 3.00;
+    // 2. Single-Component Exhaustion Ceiling: Anti-dilution guard against extreme individual deviations
+    // Widened to 6.00 sigma in confirmed momentum impulses, 3.50 in steady ranging
+    const singleComponentCeiling = isMomentumImpulse ? 6.00 : 3.50;
     const isSingleComponentExhausted = signalDirection === "LONG"
       ? (zEma > singleComponentCeiling || zVwap > singleComponentCeiling)
       : (zEma < -singleComponentCeiling || zVwap < -singleComponentCeiling);
 
-    // 3. Absolute RSI Exhaustion Boundaries: Prevent buying blow-off tops (>= 75.0) or selling capitulation bottoms (<= 25.0)
+    // 3. Absolute RSI Exhaustion Boundaries: Prevent buying blow-off tops or selling capitulation bottoms
+    // In strong momentum breakouts, RSI routinely runs between 75-85 (or 15-25) without immediate reversal
+    const maxRsiCeiling = isMomentumImpulse ? 85.0 : 78.0;
+    const minRsiFloor = isMomentumImpulse ? 15.0 : 22.0;
     const isRsiTerminalExhausted = signalDirection === "LONG"
-      ? currentRsi >= 75.0
-      : (signalDirection === "SHORT" ? currentRsi <= 25.0 : false);
+      ? currentRsi >= maxRsiCeiling
+      : (signalDirection === "SHORT" ? currentRsi <= minRsiFloor : false);
 
     let isValueExtensionMet = true;
     let isValueExtensionSoftened = false;
@@ -2013,7 +2023,7 @@ class TradingEngine {
     if (isValueExtensionMet) {
       valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, Chase: ${zChase.toFixed(2)}sigma, RSI: ${currentRsi.toFixed(1)}) | Status: PASSED${isValueExtensionSoftened ? " (SOFTENED BY MOMENTUM)" : ""}`;
     } else if (isRsiTerminalExhausted) {
-      valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, RSI: ${currentRsi.toFixed(1)}) | EXHAUSTION BLOCKED (RSI ${currentRsi.toFixed(1)} ${signalDirection === "SHORT" ? "<= 25.0 Capitulation Floor" : ">= 75.0 Blow-off Ceiling"})`;
+      valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, RSI: ${currentRsi.toFixed(1)}) | EXHAUSTION BLOCKED (RSI ${currentRsi.toFixed(1)} ${signalDirection === "SHORT" ? `<= ${minRsiFloor.toFixed(1)} Capitulation Floor` : `>= ${maxRsiCeiling.toFixed(1)} Blow-off Ceiling`})`;
     } else if (isSingleComponentExhausted) {
       const overextendedMetric = Math.abs(zEma) > singleComponentCeiling ? `EMA100: ${zEma.toFixed(2)}sigma` : `VWAP: ${zVwap.toFixed(2)}sigma`;
       valueExtensionValStr = `Z_dist: ${zDistFormatted} (VWAP: ${zVwap.toFixed(2)}sigma, EMA100: ${zEma.toFixed(2)}sigma, Chase: ${zChase.toFixed(2)}sigma) | EXHAUSTION BLOCKED (Single component overextended: ${overextendedMetric} > ${singleComponentCeiling.toFixed(2)}sigma limit)`;
@@ -2145,11 +2155,16 @@ class TradingEngine {
     let minAtrReq = minAtrEnabled ? `>= $${minAtrValue.toFixed(2)}` : "None (Disabled)";
 
     if (minAtrEnabled) {
-      minAtrMet = currentAtr_cp >= minAtrValue;
+      // Early breakout momentum or volume expansion (relVolume >= 1.20x, ADX >= 22 trending, or extreme pressure) overrides compression
+      const hasVolumeBreakoutOverride = relVolume >= 1.20 || hasExtremeRealtimePressure || (ms.allow_immediate_breakout && (isTrending || adxValue >= 22));
+      minAtrMet = currentAtr_cp >= minAtrValue || hasVolumeBreakoutOverride;
       if (!minAtrMet) {
         minAtrVal = `ATR COMPRESSION - BLOCKED (Current ATR $${currentAtr_cp.toFixed(2)} < Min ATR Threshold $${minAtrValue.toFixed(2)})`;
       } else {
-        minAtrVal = `ATR NORMAL - PASSED (Current ATR $${currentAtr_cp.toFixed(2)} >= Min ATR Threshold $${minAtrValue.toFixed(2)})`;
+        const isBypassed = currentAtr_cp < minAtrValue && hasVolumeBreakoutOverride;
+        minAtrVal = isBypassed
+          ? `ATR COMPRESSED ($${currentAtr_cp.toFixed(2)}) - PASSED VIA VOLUME/MOMENTUM OVERRIDE (${relVolume.toFixed(2)}x)`
+          : `ATR NORMAL - PASSED (Current ATR $${currentAtr_cp.toFixed(2)} >= Min ATR Threshold $${minAtrValue.toFixed(2)})`;
       }
     }
 
@@ -2164,7 +2179,7 @@ class TradingEngine {
 
     // C19: Order Book Imbalance & Liquidity Depth Gate
     let obMet = true;
-    const obMinDepth = config.general.order_book_min_depth !== undefined ? config.general.order_book_min_depth : 4.0;
+    const obMinDepth = config.general.order_book_min_depth !== undefined ? config.general.order_book_min_depth : 2.5;
     const obMaxImbalance = config.general.order_book_max_imbalance !== undefined ? config.general.order_book_max_imbalance : 0.35;
     const obMaxSpoofRisk = config.general.order_book_max_spoof_risk !== undefined ? config.general.order_book_max_spoof_risk : 70;
 
@@ -2176,15 +2191,22 @@ class TradingEngine {
     const obImbalancePct = evaluatedImbalance * 100;
     const rawImbalancePct = this.orderBookStats.imbalanceRatio * 100;
 
-    let obVal = `Bids: ${this.orderBookStats.bidDepthBTC.toFixed(1)} | Asks: ${this.orderBookStats.askDepthBTC.toFixed(1)} BTC | Imbalance: ${rawImbalancePct >= 0 ? "+" : ""}${rawImbalancePct.toFixed(1)}% (Adjusted: ${obImbalancePct >= 0 ? "+" : ""}${obImbalancePct.toFixed(1)}%, Stability: ${stability.stabilityIndex}%, Spoof Risk: ${stability.spoofRisk}%)`;
-    let obReq = `Top-10 book depth >= ${obMinDepth.toFixed(1)} BTC; Spoof Risk < ${obMaxSpoofRisk}%; Adjusted Imbalance >= -${(obMaxImbalance * 100).toFixed(0)}% for LONG, <= +${(obMaxImbalance * 100).toFixed(0)}% for SHORT`;
+    // Dynamic spoof tolerance: when aggressive taker pressure is aligned with the trade, soften the spoof risk ceiling
+    const isDirectionalTakerConviction = signalDirection === "LONG"
+      ? (this.orderFlowStats.takerBuyRatio >= 0.58 || relVolume >= 1.20)
+      : (this.orderFlowStats.takerBuyRatio <= 0.42 || relVolume >= 1.20);
+    const effectiveSpoofLimit = isDirectionalTakerConviction ? Math.max(obMaxSpoofRisk, 85) : obMaxSpoofRisk;
+    const effectiveMinDepth = isDirectionalTakerConviction ? Math.min(obMinDepth, 2.0) : obMinDepth;
 
-    if (obTotalDepth < obMinDepth) {
+    let obVal = `Bids: ${this.orderBookStats.bidDepthBTC.toFixed(1)} | Asks: ${this.orderBookStats.askDepthBTC.toFixed(1)} BTC | Imbalance: ${rawImbalancePct >= 0 ? "+" : ""}${rawImbalancePct.toFixed(1)}% (Adjusted: ${obImbalancePct >= 0 ? "+" : ""}${obImbalancePct.toFixed(1)}%, Stability: ${stability.stabilityIndex}%, Spoof Risk: ${stability.spoofRisk}%)`;
+    let obReq = `Top-10 book depth >= ${effectiveMinDepth.toFixed(1)} BTC; Spoof Risk < ${effectiveSpoofLimit}%; Adjusted Imbalance >= -${(obMaxImbalance * 100).toFixed(0)}% for LONG, <= +${(obMaxImbalance * 100).toFixed(0)}% for SHORT`;
+
+    if (obTotalDepth < effectiveMinDepth) {
       obMet = false;
-      obVal = `${obVal} - BLOCKED (Insufficient Book Liquidity: ${obTotalDepth.toFixed(1)} < ${obMinDepth.toFixed(1)} BTC)`;
-    } else if (stability.spoofRisk >= obMaxSpoofRisk) {
+      obVal = `${obVal} - BLOCKED (Insufficient Book Liquidity: ${obTotalDepth.toFixed(1)} < ${effectiveMinDepth.toFixed(1)} BTC)`;
+    } else if (stability.spoofRisk >= effectiveSpoofLimit) {
       obMet = false;
-      obVal = `${obVal} - BLOCKED (High Spoof Risk: ${stability.spoofRisk}% >= Limit ${obMaxSpoofRisk}%)`;
+      obVal = `${obVal} - BLOCKED (High Spoof Risk: ${stability.spoofRisk}% >= Limit ${effectiveSpoofLimit}%)`;
     } else if (signalDirection === "LONG") {
       // Dynamic tightening of threshold under high spoof risk
       const dynamicHurdle = -obMaxImbalance;
@@ -4436,10 +4458,12 @@ class TradingEngine {
       }
 
       // Chasing check: too many candles elapsed without entry (adaptive lookback based on trend strength)
-      let maxPostBreakoutCandles = 30;
+      let maxPostBreakoutCandles = 40;
       if (adxValue < 20) {
-        maxPostBreakoutCandles = 15;
-      } else if (adxValue >= 40) {
+        maxPostBreakoutCandles = 30;
+      } else if (adxValue >= 35) {
+        maxPostBreakoutCandles = 60;
+      } else if (adxValue >= 25) {
         maxPostBreakoutCandles = 45;
       }
       const isChasing = postBreakoutCandles.length > maxPostBreakoutCandles;
@@ -4664,7 +4688,11 @@ class TradingEngine {
           return getReturnObj(false, `Blocked: Chasing price after an extended upward move (more than ${maxPostBreakoutCandles} candles since HH breakout, ADX: ${adxValue.toFixed(1)} [${adxLabel}]) is forbidden.`);
         }
         if (breakoutIdx !== -1 && !boBodyRatioMet && !isEmaPushbackValid) {
-          return getReturnObj(false, `Blocked: Weak breakout candle body at $${breakoutLevel.toFixed(2)} (Body is only ${(boBodyRatio * 100).toFixed(0)}% of total range). Likely false breakout/wick sweep.`);
+          const isVolumeSurge = this.candles1m.length >= 5 && (this.candles1m[lastIdx]?.volume || 0) > 1.2 * (this.candles1m.slice(-15).reduce((s, c) => s + c.volume, 0) / 15);
+          const hasSustainedBreakout = currentPrice >= breakoutLevel + 0.6 * currentAtr || hasHighHFPressure || isVolumeSurge;
+          if (!hasSustainedBreakout) {
+            return getReturnObj(false, `Blocked: Weak breakout candle body at $${breakoutLevel.toFixed(2)} (Body is only ${(boBodyRatio * 100).toFixed(0)}% of total range). Likely false breakout/wick sweep.`);
+          }
         }
         const failureReason = `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to ${emaZoneLabel} pushback setup (Adaptive Expected Depth: ${classifiedDepth}, ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
         return getReturnObj(false, failureReason);
@@ -4792,10 +4820,12 @@ class TradingEngine {
       }
 
       // Chasing check: too many candles elapsed without entry (adaptive lookback based on trend strength)
-      let maxPostBreakoutCandles = 30;
+      let maxPostBreakoutCandles = 40;
       if (adxValue < 20) {
-        maxPostBreakoutCandles = 15;
-      } else if (adxValue >= 40) {
+        maxPostBreakoutCandles = 30;
+      } else if (adxValue >= 35) {
+        maxPostBreakoutCandles = 60;
+      } else if (adxValue >= 25) {
         maxPostBreakoutCandles = 45;
       }
       const isChasing = postBreakoutCandles.length > maxPostBreakoutCandles;
@@ -5017,7 +5047,11 @@ class TradingEngine {
           return getReturnObj(false, `Blocked: Chasing price after an extended downward move (more than ${maxPostBreakoutCandles} candles since LL breakout, ADX: ${adxValue.toFixed(1)} [${adxLabel}]) is forbidden.`);
         }
         if (breakoutIdx !== -1 && !boBodyRatioMet && !isEmaPushbackValid) {
-          return getReturnObj(false, `Blocked: Weak breakout candle body at $${breakoutLevel.toFixed(2)} (Body is only ${(boBodyRatio * 100).toFixed(0)}% of total range). Likely false breakout/wick sweep.`);
+          const isVolumeSurge = this.candles1m.length >= 5 && (this.candles1m[lastIdx]?.volume || 0) > 1.2 * (this.candles1m.slice(-15).reduce((s, c) => s + c.volume, 0) / 15);
+          const hasSustainedBreakdown = currentPrice <= breakoutLevel - 0.6 * currentAtr || hasHighHFPressure || isVolumeSurge;
+          if (!hasSustainedBreakdown) {
+            return getReturnObj(false, `Blocked: Weak breakout candle body at $${breakoutLevel.toFixed(2)} (Body is only ${(boBodyRatio * 100).toFixed(0)}% of total range). Likely false breakout/wick sweep.`);
+          }
         }
         const failureReason = `Waiting for either breakout -> pullback -> retest OR breakout -> retracement to ${emaZoneLabel} pushback setup (Adaptive Expected Depth: ${classifiedDepth}, ADX: ${adxValue.toFixed(1)} [${adxLabel}]).`;
         return getReturnObj(false, failureReason);
@@ -5399,12 +5433,26 @@ class TradingEngine {
     relVolume: number,
     recentCandles: Candlestick[]
   ): { isValid: boolean; reason: string } {
-    const candleRange = currentCandle.high - currentCandle.low;
+    let evalCandle = currentCandle;
+    let candleRange = evalCandle.high - evalCandle.low;
+
+    // Fix zero candle range bug: if current candle is newly opened (0-5 seconds old, range <= 0.5), fallback to last closed candle with range
+    if (candleRange <= 0.5 && recentCandles.length > 0) {
+      for (let i = recentCandles.length - 1; i >= Math.max(0, recentCandles.length - 3); i--) {
+        const r = recentCandles[i].high - recentCandles[i].low;
+        if (r > 0.5) {
+          evalCandle = recentCandles[i];
+          candleRange = r;
+          break;
+        }
+      }
+    }
+
     if (candleRange <= 0) {
       return { isValid: false, reason: "Zero candle range." };
     }
 
-    const bodySize = Math.abs(currentCandle.close - currentCandle.open);
+    const bodySize = Math.abs(evalCandle.close - evalCandle.open);
     const bodyRatio = bodySize / candleRange;
 
     // Calculate average candle range of the last 15 candles
@@ -5425,7 +5473,7 @@ class TradingEngine {
 
     if (direction === "LONG") {
       // 1. Must be a green candle
-      if (currentCandle.close <= currentCandle.open) {
+      if (evalCandle.close <= evalCandle.open) {
         return { isValid: false, reason: "Breakout candle is not bullish (red or doji)." };
       }
 
@@ -5434,28 +5482,30 @@ class TradingEngine {
         return { isValid: false, reason: `Insufficient relative volume (${relVolume.toFixed(2)}x < ${effectiveMinVol.toFixed(2)}x).` };
       }
 
-      // 3. Candle Body Ratio: At least 40% of the candle range should be body (35% on wide range expansion)
-      const minBodyRatio = candleRange > avgRange * 1.3 ? 0.35 : 0.40;
+      // 3. Candle Body Ratio: At least 35% of the candle range should be body (28% when order flow is dominant)
+      const minBodyRatio = (isOrderFlowDominant || relVolume >= 1.20) ? 0.28 : (candleRange > avgRange * 1.3 ? 0.35 : 0.40);
       if (bodyRatio < minBodyRatio) {
         return { isValid: false, reason: `Weak candle body structure (body ratio ${bodyRatio.toFixed(2)} < ${minBodyRatio.toFixed(2)}).` };
       }
 
-      // 4. Upper Wick Rejection: Upper wick should not exceed 35% of total candle range
-      const upperWick = currentCandle.high - currentCandle.close;
+      // 4. Upper Wick Rejection: Upper wick should not exceed 45% (order flow dominant) or 35% of total candle range
+      const upperWick = evalCandle.high - evalCandle.close;
       const upperWickRatio = upperWick / candleRange;
-      if (upperWickRatio > 0.35) {
-        return { isValid: false, reason: `Excessive upper wick rejection (${(upperWickRatio * 100).toFixed(1)}% > 35.0%) indicating a bull trap.` };
+      const maxUpperWick = (isOrderFlowDominant || relVolume >= 1.20) ? 0.45 : 0.35;
+      if (upperWickRatio > maxUpperWick) {
+        return { isValid: false, reason: `Excessive upper wick rejection (${(upperWickRatio * 100).toFixed(1)}% > ${(maxUpperWick * 100).toFixed(1)}%) indicating a bull trap.` };
       }
 
       // 5. Candle Size Check: Prevent micro-candles from drifting above range resistance
-      if (candleRange < avgRange * 0.65) {
-        return { isValid: false, reason: `Breakout candle size is too small (${candleRange.toFixed(2)} < 65% of average range ${avgRange.toFixed(2)}).` };
+      const minCandleSize = (isOrderFlowDominant || relVolume >= 1.20) ? avgRange * 0.40 : avgRange * 0.65;
+      if (candleRange < minCandleSize) {
+        return { isValid: false, reason: `Breakout candle size is too small (${candleRange.toFixed(2)} < ${(minCandleSize).toFixed(2)}).` };
       }
 
     } else {
       // SHORT breakdown
       // 1. Must be a red candle
-      if (currentCandle.close >= currentCandle.open) {
+      if (evalCandle.close >= evalCandle.open) {
         return { isValid: false, reason: "Breakdown candle is not bearish (green or doji)." };
       }
 
@@ -5465,21 +5515,23 @@ class TradingEngine {
       }
 
       // 3. Candle Body Ratio
-      const minBodyRatio = candleRange > avgRange * 1.3 ? 0.35 : 0.40;
+      const minBodyRatio = (isOrderFlowDominant || relVolume >= 1.20) ? 0.28 : (candleRange > avgRange * 1.3 ? 0.35 : 0.40);
       if (bodyRatio < minBodyRatio) {
         return { isValid: false, reason: `Weak candle body structure (body ratio ${bodyRatio.toFixed(2)} < ${minBodyRatio.toFixed(2)}).` };
       }
 
-      // 4. Lower Wick Rejection: Lower wick should not exceed 35% of total candle range
-      const lowerWick = currentCandle.close - currentCandle.low;
+      // 4. Lower Wick Rejection: Lower wick should not exceed 45% (order flow dominant) or 35% of total candle range
+      const lowerWick = evalCandle.close - evalCandle.low;
       const lowerWickRatio = lowerWick / candleRange;
-      if (lowerWickRatio > 0.35) {
-        return { isValid: false, reason: `Excessive lower wick rejection (${(lowerWickRatio * 100).toFixed(1)}% > 35.0%) indicating a bear trap.` };
+      const maxLowerWick = (isOrderFlowDominant || relVolume >= 1.20) ? 0.45 : 0.35;
+      if (lowerWickRatio > maxLowerWick) {
+        return { isValid: false, reason: `Excessive lower wick rejection (${(lowerWickRatio * 100).toFixed(1)}% > ${(maxLowerWick * 100).toFixed(1)}%) indicating a bear trap.` };
       }
 
       // 5. Candle Size Check
-      if (candleRange < avgRange * 0.65) {
-        return { isValid: false, reason: `Breakdown candle size is too small (${candleRange.toFixed(2)} < 65% of average range ${avgRange.toFixed(2)}).` };
+      const minCandleSize = (isOrderFlowDominant || relVolume >= 1.20) ? avgRange * 0.40 : avgRange * 0.65;
+      if (candleRange < minCandleSize) {
+        return { isValid: false, reason: `Breakdown candle size is too small (${candleRange.toFixed(2)} < ${(minCandleSize).toFixed(2)}).` };
       }
     }
 
@@ -10851,14 +10903,18 @@ class TradingEngine {
     const currentRsi = rsi14[lastIdx] !== undefined ? rsi14[lastIdx] : 50;
 
     // Hard-lock RSI boundaries (Absolute Exhaustion Ceiling / Floor)
-    // Prevents entering SHORT into terminal capitulation wicks (RSI <= 25.0)
-    // Prevents entering LONG into terminal blow-off tops (RSI >= 75.0)
-    if (execDirection === "SHORT" && currentRsi <= 25.0) {
-      this.log(`  [ENTRY BLOCKED - Absolute RSI Floor] Current RSI is ${currentRsi.toFixed(1)} <= 25.0 (Terminal Capitulation Floor). Selling into exhaustion bottom wicks is strictly blocked.`);
+    // In strong momentum breakouts and impulses, RSI often runs to 82-84 or down to 16-18 during sustained moves
+    const isFreshImpulse = this.evaluateFreshMomentumImpulseSetup(execDirection).isValid;
+    const isMomentumBreakout = isFreshImpulse || this.currentRegime === "STRONG_UPTREND" || this.currentRegime === "STRONG_DOWNTREND" || this.currentRegime === "HIGH_VOLATILITY";
+    const rsiCeiling = isMomentumBreakout ? 85.0 : 78.0;
+    const rsiFloor = isMomentumBreakout ? 15.0 : 22.0;
+
+    if (execDirection === "SHORT" && currentRsi <= rsiFloor) {
+      this.log(`  [ENTRY BLOCKED - Absolute RSI Floor] Current RSI is ${currentRsi.toFixed(1)} <= ${rsiFloor.toFixed(1)} (Terminal Capitulation Floor). Selling into exhaustion bottom wicks is strictly blocked.`);
       return;
     }
-    if (execDirection === "LONG" && currentRsi >= 75.0) {
-      this.log(`  [ENTRY BLOCKED - Absolute RSI Ceiling] Current RSI is ${currentRsi.toFixed(1)} >= 75.0 (Terminal Blow-Off Ceiling). Buying into exhaustion top wicks is strictly blocked.`);
+    if (execDirection === "LONG" && currentRsi >= rsiCeiling) {
+      this.log(`  [ENTRY BLOCKED - Absolute RSI Ceiling] Current RSI is ${currentRsi.toFixed(1)} >= ${rsiCeiling.toFixed(1)} (Terminal Blow-Off Ceiling). Buying into exhaustion top wicks is strictly blocked.`);
       return;
     }
 
@@ -10881,8 +10937,6 @@ class TradingEngine {
     const isConditionB = isOutsideBB || isEmaOverextended;
 
     // Extreme Confluence: Parabolic & mathematically exhausted -> BLOCK ENTRY
-    const isFreshImpulse = this.evaluateFreshMomentumImpulseSetup(execDirection).isValid;
-
     if (isConditionA && isConditionB && !isFreshImpulse) {
       this.log(
         `  [ENTRY BLOCKED - Confluence of Extremes] Late-stage exhaustion breakout detected! Order Flow Climax (Imbalance: ${(rawImbalance * 100).toFixed(1)}%, Taker: ${(takerRatio * 100).toFixed(1)}%) & Physical Overextension (Outside BB: ${isOutsideBB}, Dist to EMA9: $${distEma9.toFixed(2)} vs 1.5xATR $${(1.5 * lastAtr).toFixed(2)}). Trade entry aborted.`

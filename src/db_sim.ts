@@ -140,7 +140,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     enable_trade_logging: true,
     enable_orderflow_softening: true,
     orderflow_softening_percent: 10,
-    order_book_min_depth: 4.0,
+    order_book_min_depth: 2.5,
     order_book_max_imbalance: 0.35,
     order_book_max_spoof_risk: 70,
     regime_change_cooldown_minutes: 15,
@@ -247,7 +247,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     overextension_ema_ranging_threshold: 1.2,
     overextension_vwap_trending_multiplier: 1.5,
     overextension_vwap_ranging_multiplier: 1.0,
-    max_allowed_z_dist: 1.80,
+    max_allowed_z_dist: 2.50,
     enable_regime_adaptive_sl_tp: true,
     min_rr_ratio_floor: 1.25,
     sl_atr_multiplier_trending: 1.55,
@@ -1085,8 +1085,8 @@ class DatabaseManager {
         this.cache.config.general.orderflow_softening_percent = 10;
         changed = true;
       }
-      if (this.cache.config.general.order_book_min_depth === undefined) {
-        this.cache.config.general.order_book_min_depth = 4.0;
+      if (this.cache.config.general.order_book_min_depth === undefined || this.cache.config.general.order_book_min_depth > 3.0) {
+        this.cache.config.general.order_book_min_depth = 2.5;
         changed = true;
       }
       if (this.cache.config.general.order_book_max_imbalance === undefined) {
@@ -1279,8 +1279,12 @@ class DatabaseManager {
         this.cache.config.risk_management.overextension_vwap_ranging_multiplier = 1.0;
         changed = true;
       }
-      if (this.cache.config.risk_management.max_allowed_z_dist === undefined) {
-        this.cache.config.risk_management.max_allowed_z_dist = 2.20;
+      if (this.cache.config.risk_management.max_allowed_z_dist === undefined || this.cache.config.risk_management.max_allowed_z_dist < 2.20) {
+        this.cache.config.risk_management.max_allowed_z_dist = 2.50;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.min_atr_for_trading_value === undefined || this.cache.config.risk_management.min_atr_for_trading_value > 16.0) {
+        this.cache.config.risk_management.min_atr_for_trading_value = 12.0;
         changed = true;
       }
     }

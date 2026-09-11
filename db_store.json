@@ -9053,7 +9053,8 @@
     "general": {
       "is_trading_active": true,
       "cooldown_minutes": 30,
-      "max_trades_per_day": 8
+      "max_trades_per_day": 8,
+      "order_book_min_depth": 2.5
     },
     "ml_settings": {
       "entry_threshold_long": 0.8,
@@ -9120,7 +9121,8 @@
       "intra_trade_drawdown_limit_pct": 1.5,
       "smart_stall_exit_enabled": true,
       "stall_evaluation_minutes": 25,
-      "max_trade_duration_minutes": 60
+      "max_trade_duration_minutes": 60,
+      "max_allowed_z_dist": 2.5
     }
   },
   "config_profiles": {

@@ -498,6 +498,33 @@ export interface MarketStructureSubCondition {
   reason: string;
 }
 
+export type SetupId =
+  | "setup_1_pullback_retest"
+  | "setup_2_dynamic_ema_pushback"
+  | "setup_3_liquidity_sweep"
+  | "setup_4_fvg_retest"
+  | "setup_9_range_failed_auction"
+  | "setup_10_vwap_band_rejection"
+  | "setup_11_eqh_eql_double_touch"
+  | "setup_12_cvd_absorption"
+  | "setup_13_oi_flush_cascade"
+  | "setup_14_fresh_momentum_impulse";
+
+export interface TradingSetupResult {
+  setupId: SetupId;
+  setupName: string;
+  isValid: boolean;
+  direction: "LONG" | "SHORT" | "NEUTRAL";
+  confidenceScore?: number;
+  entryPrice?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  riskReward?: number;
+  description: string;
+  sub_conditions?: MarketStructureSubCondition[];
+  metrics?: Record<string, any>;
+}
+
 export type DomainGateId =
   | "account_safety"
   | "market_context"
@@ -519,6 +546,7 @@ export interface Checkpoint {
   ema_pair_evaluated?: string;
   ema_tested?: string;
   sub_conditions?: MarketStructureSubCondition[];
+  active_setup?: TradingSetupResult;
 }
 
 export interface DomainGateSummary {

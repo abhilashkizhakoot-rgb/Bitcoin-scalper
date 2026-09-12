@@ -23,17 +23,16 @@ import {
   Checkpoint,
   DomainGateId,
   DomainGateSummary,
+  MarketStructureSubCondition,
+  SetupId,
+  TradingSetupResult,
 } from "./types.js";
 import { FinBertSentimentModel } from "./finbert.js";
 import { CrossSourceSentimentAggregator } from "./sentimentEngine.js";
 import { fetchLiveRSSHeadlines } from "./rss.js";
 import { placeDeltaMarketOrder, getDeltaWalletBalance } from "./delta_client.js";
 
-export interface MarketStructureSubCondition {
-  name: string;
-  status: "PASS" | "FAIL" | "SKIP";
-  reason: string;
-}
+export type { MarketStructureSubCondition, SetupId, TradingSetupResult };
 
 export interface MarketStructureConfirmationResult {
   confirmed: boolean;
@@ -41,6 +40,7 @@ export interface MarketStructureConfirmationResult {
   swingHigh: number;
   swingLow: number;
   setup_triggered?: string;
+  active_setup?: TradingSetupResult;
   ema_check_active?: boolean;
   ema_pair_evaluated?: string;
   ema_tested?: string;
@@ -51,6 +51,7 @@ export interface TrendBreakoutSetupResult {
   confirmed: boolean;
   message: string;
   setup_triggered?: string;
+  active_setup?: TradingSetupResult;
   ema_check_active?: boolean;
   ema_pair_evaluated?: string;
   ema_tested?: string;
@@ -2224,6 +2225,7 @@ class TradingEngine {
       ema_pair_evaluated: structCheck.ema_pair_evaluated,
       ema_tested: structCheck.ema_tested,
       sub_conditions: structCheck.sub_conditions,
+      active_setup: structCheck.active_setup,
     });
 
 
@@ -2435,53 +2437,6 @@ class TradingEngine {
       description: "Applies a transition lock to entry signals whenever the dominant market regime shifts (e.g. from Strong Uptrend to Range Bound), protecting against high-frequency slippage and trend-reversal fakeouts during structural transitions.",
       priority: "CRITICAL",
       softened: isCooldownBypassed,
-    });
-
-    // Choppy Market & Whip-Saw Avoidance Gate
-    const choppyFilterEnabled = config.general.enable_choppy_market_filter !== false;
-    const maxChopAllowed = config.general.max_allowed_chop_index !== undefined ? config.general.max_allowed_chop_index : 58.0;
-    const minKerAllowed = config.general.min_allowed_efficiency_ratio !== undefined ? config.general.min_allowed_efficiency_ratio : 0.22;
-    const maxWickRatioAllowed = config.general.max_allowed_wick_ratio !== undefined ? config.general.max_allowed_wick_ratio : 0.60;
-
-    const chopIndex = this.calculateChoppinessIndex(this.candles1m, 14);
-    const kerValue = this.calculateEfficiencyRatio(this.candles1m, 10);
-    const avgWickRatio = this.calculateAverageWickRatio(this.candles1m, 10);
-
-    const isChopExceeded = chopIndex > maxChopAllowed;
-    const isKerDeficient = kerValue < minKerAllowed;
-    const isWickExcessive = avgWickRatio > maxWickRatioAllowed;
-
-    const isBreakoutExpansion = (relVolume >= 1.20 || flowRes.score >= 58 || this.detectOrderFlowAbsorption(signalDirection).isAbsorption);
-
-    let choppyGateMet = true;
-    let choppyValStr = `CHOP: ${chopIndex.toFixed(1)} | Efficiency (KER): ${kerValue.toFixed(2)} | Wick Ratio: ${(avgWickRatio * 100).toFixed(0)}%`;
-    let choppyReqStr = `CHOP <= ${maxChopAllowed.toFixed(1)}, KER >= ${minKerAllowed.toFixed(2)}, Wick Ratio <= ${(maxWickRatioAllowed * 100).toFixed(0)}%`;
-
-    if (choppyFilterEnabled) {
-      if (isChopExceeded || isKerDeficient || isWickExcessive) {
-        if (isBreakoutExpansion) {
-          choppyGateMet = true;
-          choppyValStr = `PASSING EXPANSION (Bypassed via High Breakout Volume ${relVolume.toFixed(2)}x / Flow Score ${flowRes.score})`;
-        } else {
-          choppyGateMet = false;
-          const reasons: string[] = [];
-          if (isChopExceeded) reasons.push(`High CHOP (${chopIndex.toFixed(1)} > ${maxChopAllowed.toFixed(1)})`);
-          if (isKerDeficient) reasons.push(`Low Efficiency KER (${kerValue.toFixed(2)} < ${minKerAllowed.toFixed(2)})`);
-          if (isWickExcessive) reasons.push(`Excessive Wicks (${(avgWickRatio * 100).toFixed(0)}% > ${(maxWickRatioAllowed * 100).toFixed(0)}%)`);
-          choppyValStr = `CHOPPY / WHIP-SAW MARKET DETECTED - BLOCKED (${reasons.join(", ")})`;
-        }
-      } else {
-        choppyValStr = `PASSING CLEAR TREND / CONVICTION (${choppyValStr})`;
-      }
-    }
-
-    conditions.push({
-      name: "Choppy Market Whip-Saw Filter",
-      met: choppyGateMet,
-      current_value: choppyValStr,
-      required: choppyReqStr,
-      description: "Blocks trade entry signals if price action is in a choppy consolidation zone (high Choppiness Index), exhibits low net directional displacement (low Kaufman Efficiency Ratio), or is dominated by wicks.",
-      priority: "CRITICAL",
     });
 
     // Anti-Whipsaw Directional Lockout Gate (Mandatory Safety Gate)
@@ -4191,7 +4146,13 @@ class TradingEngine {
       "Fresh Momentum Impulse (Setup 14)": { status: "SKIP", reason: "No active fresh momentum impulse setup" },
     };
 
-    const getReturnObj = (confirmed: boolean, message: string, triggeredSetup?: string) => {
+    const getReturnObj = (
+      confirmed: boolean,
+      message: string,
+      triggeredSetup?: string,
+      activeSetup?: TradingSetupResult,
+      customSubConditions?: MarketStructureSubCondition[]
+    ): TrendBreakoutSetupResult => {
       let specificEmaTested = "";
       if (firstEmaVal > 0 && secondEmaVal > 0) {
         let testedPeriod = firstEmaPeriod;
@@ -4218,7 +4179,7 @@ class TradingEngine {
         specificEmaTested = `Dynamic ${emaZoneLabel} Band`;
       }
 
-      const sub_conditions = Object.entries(condDict).map(([name, val]) => ({
+      const sub_conditions = customSubConditions || Object.entries(condDict).map(([name, val]) => ({
         name,
         status: val.status,
         reason: val.reason,
@@ -4227,7 +4188,8 @@ class TradingEngine {
       return {
         confirmed,
         message,
-        setup_triggered: confirmed ? triggeredSetup : undefined,
+        setup_triggered: confirmed ? (triggeredSetup || activeSetup?.setupName) : undefined,
+        active_setup: activeSetup,
         ema_check_active: true,
         ema_pair_evaluated: emaZoneLabel,
         ema_tested: specificEmaTested,
@@ -4372,150 +4334,210 @@ class TradingEngine {
     // --- PRIORITY DISPATCH FOR SMC / SPECIALIZED SETUPS ---
     // Priority 0: Fresh Momentum Impulse (Early aggressive breakout expansion - Bypasses lagging MTF & deep pullbacks)
     if (freshMomentumResult.isValid) {
-      const fmDesc = `[Setup 14 - Fresh Momentum Impulse Confirmed]: ${freshMomentumResult.description}`;
-      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Fresh Momentum Impulse Displacement Setup" };
-      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Fresh momentum impulse confirmed at $${freshMomentumResult.impulsePrice.toFixed(2)}` };
-      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: `Displacement body confirmed (${(freshMomentumResult.bodyRatio * 100).toFixed(0)}%)` };
-      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Fresh momentum early expansion entry" };
-      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `Impulse origin intact (SL: $${freshMomentumResult.stopLoss.toFixed(2)}, TP: $${freshMomentumResult.takeProfit.toFixed(2)})` };
-      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Fresh impulse initiation (early momentum phase)" };
-      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: `Volume surge confirmed (${freshMomentumResult.volumeMult.toFixed(2)}x)` };
-      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Fresh Momentum Impulse Setup (Setup 14)" };
-      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Fresh Momentum Impulse Setup (Setup 14)" };
-      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
-        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Fresh momentum impulse bypasses lagging MTF" };
-      }
+      const setupResult: TradingSetupResult = {
+        setupId: "setup_14_fresh_momentum_impulse",
+        setupName: "Setup 14: Fresh Momentum Impulse",
+        isValid: true,
+        direction,
+        entryPrice: freshMomentumResult.impulsePrice || currentPrice,
+        stopLoss: freshMomentumResult.stopLoss,
+        takeProfit: freshMomentumResult.takeProfit,
+        riskReward: freshMomentumResult.riskReward,
+        description: `[Setup 14 - Fresh Momentum Impulse Confirmed]: ${freshMomentumResult.description}`,
+        sub_conditions: [
+          { name: "5m MTF Alignment", status: isMtfAligned ? "PASS" : "SKIP", reason: isMtfAligned ? "5m trend aligned" : "Fresh momentum impulse bypasses lagging MTF" },
+          { name: "Breakout Displacement Body", status: "PASS", reason: `Displacement body confirmed (${(freshMomentumResult.bodyRatio * 100).toFixed(0)}%)` },
+          { name: "Early Expansion Entry", status: "PASS", reason: `Fresh momentum impulse confirmed at $${freshMomentumResult.impulsePrice.toFixed(2)}` },
+          { name: "Impulse Surge Volume", status: "PASS", reason: `Volume surge confirmed (${freshMomentumResult.volumeMult.toFixed(2)}x)` },
+          { name: "Dynamic Invalidation Structure", status: "PASS", reason: `Impulse origin intact (SL: $${freshMomentumResult.stopLoss.toFixed(2)}, TP: $${freshMomentumResult.takeProfit.toFixed(2)})` },
+        ],
+        metrics: {
+          impulsePrice: freshMomentumResult.impulsePrice,
+          bodyRatio: freshMomentumResult.bodyRatio,
+          volumeMult: freshMomentumResult.volumeMult,
+        }
+      };
 
-      return getReturnObj(true, fmDesc, "Setup 14: Fresh Momentum Impulse");
+      return getReturnObj(true, setupResult.description, setupResult.setupName, setupResult, setupResult.sub_conditions);
     }
 
     if (sweepResult.isSweep) {
-      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Liquidity Sweep Reversal Setup" };
-      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Liquidity sweep confirmed at level $${sweepResult.sweptLevel.toFixed(2)}` };
-      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: `Reclaimed with ${sweepResult.wickRatio.toFixed(0)}% wick` };
-      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Sweep reversal entry" };
-      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `Reclamation intact (SL: $${sweepResult.stopLoss.toFixed(2)}, TP: $${sweepResult.takeProfit.toFixed(2)})` };
-      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Sweep reversal candle" };
-      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: `Confirmed volume expansion (${sweepResult.volumeMult.toFixed(1)}x)` };
-      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Liquidity Sweep Setup (Setup 3)" };
-      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Liquidity Sweep Setup (Setup 3)" };
-      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
-        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Liquidity sweep reversal entry" };
-      }
+      const setupResult: TradingSetupResult = {
+        setupId: "setup_3_liquidity_sweep",
+        setupName: "Setup 3: Liquidity Sweep Reversal",
+        isValid: true,
+        direction,
+        entryPrice: currentPrice,
+        stopLoss: sweepResult.stopLoss,
+        takeProfit: sweepResult.takeProfit,
+        description: `[Setup 3 - Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`,
+        sub_conditions: [
+          { name: "Liquidity Sweep Level Breach", status: "PASS", reason: `Liquidity sweep confirmed at level $${sweepResult.sweptLevel.toFixed(2)}` },
+          { name: "Reclaim Wick Reversal", status: "PASS", reason: `Reclaimed with ${sweepResult.wickRatio.toFixed(0)}% rejection wick` },
+          { name: "Sweep Volume Expansion", status: "PASS", reason: `Confirmed volume expansion (${sweepResult.volumeMult.toFixed(1)}x)` },
+          { name: "Dynamic Invalidation Boundary", status: "PASS", reason: `Reclamation intact (SL: $${sweepResult.stopLoss.toFixed(2)}, TP: $${sweepResult.takeProfit.toFixed(2)})` },
+        ],
+        metrics: {
+          sweptLevel: sweepResult.sweptLevel,
+          wickRatio: sweepResult.wickRatio,
+          volumeMult: sweepResult.volumeMult,
+        }
+      };
 
-      return getReturnObj(
-        true,
-        `[Setup 3 - Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`,
-        "Setup 3: Liquidity Sweep Reversal"
-      );
+      return getReturnObj(true, setupResult.description, setupResult.setupName, setupResult, setupResult.sub_conditions);
     }
 
     if (fvgResult.isValid) {
-      const fvgDesc = `[Setup 4 - Fair Value Gap (FVG) Retest Confirmed]: ${fvgResult.description}`;
-      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Institutional FVG Retest Setup" };
-      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `FVG mitigation zone at $${fvgResult.fvgMitigationPrice.toFixed(2)}` };
-      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: `Rejection reaction confirmed (${fvgResult.rejectionType})` };
-      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Institutional FVG retest mitigation entry" };
-      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `SL at $${fvgResult.stopLoss.toFixed(2)}` };
-      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "FVG zone retest inflection" };
-      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "FVG mitigation retrace on healthy volume" };
-      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Fair Value Gap Setup (Setup 4)" };
-      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Fair Value Gap Setup (Setup 4)" };
-      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
-        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "FVG imbalance mitigation" };
-      }
+      const fvgRiskReward = Math.abs(fvgResult.takeProfit - currentPrice) / Math.max(1, Math.abs(currentPrice - fvgResult.stopLoss));
+      const setupResult: TradingSetupResult = {
+        setupId: "setup_4_fvg_retest",
+        setupName: "Setup 4: Fair Value Gap Retest",
+        isValid: true,
+        direction,
+        entryPrice: currentPrice,
+        stopLoss: fvgResult.stopLoss,
+        takeProfit: fvgResult.takeProfit,
+        riskReward: fvgRiskReward,
+        description: `[Setup 4 - Fair Value Gap (FVG) Retest Confirmed]: ${fvgResult.description}`,
+        sub_conditions: [
+          { name: "FVG Mitigation Level", status: "PASS", reason: `FVG mitigation zone at $${fvgResult.fvgMitigationPrice.toFixed(2)}` },
+          { name: "Mitigation Rejection Reaction", status: "PASS", reason: `Rejection reaction confirmed (${fvgResult.rejectionType})` },
+          { name: "Mitigation Retrace Volume", status: "PASS", reason: "FVG mitigation retrace on healthy volume" },
+          { name: "Dynamic Invalidation Floor/Ceiling", status: "PASS", reason: `SL at $${fvgResult.stopLoss.toFixed(2)} | TP at $${fvgResult.takeProfit.toFixed(2)}` },
+        ],
+        metrics: {
+          fvgMitigationPrice: fvgResult.fvgMitigationPrice,
+          rejectionType: fvgResult.rejectionType,
+          riskReward: fvgRiskReward,
+        }
+      };
 
-      return getReturnObj(true, fvgDesc, "Setup 4: Fair Value Gap Retest");
+      return getReturnObj(true, setupResult.description, setupResult.setupName, setupResult, setupResult.sub_conditions);
     }
 
     if (failedAuctionResult.isValid) {
-      const faDesc = `[Setup 9 - Range Failed Auction Reclaim Confirmed]: ${failedAuctionResult.description}`;
-      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for Range Failed Auction Mean Reversion" };
-      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Range boundary $${failedAuctionResult.rangeBoundary.toFixed(2)} reclaimed` };
-      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Reclamation candle confirmed" };
-      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "SFP Reclaim entry" };
-      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `SL at $${failedAuctionResult.stopLoss.toFixed(2)}` };
-      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Inflection point reclaim" };
-      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Delta absorption validated" };
-      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for Range Failed Auction Setup (Setup 9)" };
-      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for Range Failed Auction Setup (Setup 9)" };
-      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
-        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Range false breakout mean-reversion" };
-      }
+      const setupResult: TradingSetupResult = {
+        setupId: "setup_9_range_failed_auction",
+        setupName: "Setup 9: Range Failed Auction Reclaim",
+        isValid: true,
+        direction,
+        entryPrice: currentPrice,
+        stopLoss: failedAuctionResult.stopLoss,
+        takeProfit: failedAuctionResult.takeProfit,
+        description: `[Setup 9 - Range Failed Auction Reclaim Confirmed]: ${failedAuctionResult.description}`,
+        sub_conditions: [
+          { name: "Range Boundary SFP Breach", status: "PASS", reason: `Range boundary $${failedAuctionResult.rangeBoundary.toFixed(2)} reclaimed` },
+          { name: "Reclamation Candle Confirmation", status: "PASS", reason: "Reclamation candle confirmed inside boundary" },
+          { name: "Delta Absorption Volume", status: "PASS", reason: "Delta absorption validated at range edge" },
+          { name: "Dynamic Invalidation Floor/Ceiling", status: "PASS", reason: `SL at $${failedAuctionResult.stopLoss.toFixed(2)} | TP at $${failedAuctionResult.takeProfit.toFixed(2)}` },
+        ],
+        metrics: {
+          rangeBoundary: failedAuctionResult.rangeBoundary,
+        }
+      };
 
-      return getReturnObj(true, faDesc, "Setup 9: Range Failed Auction Reclaim");
+      return getReturnObj(true, setupResult.description, setupResult.setupName, setupResult, setupResult.sub_conditions);
     }
 
     if (vwapBandResult.isValid) {
-      const vwapDesc = `[Setup 10 - VWAP Band Rejection Confirmed]: ${vwapBandResult.description}`;
-      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for VWAP Band Reversal Setup" };
-      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `VWAP Outer Band rejection at $${vwapBandResult.bandPrice.toFixed(2)}` };
-      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Reversal rejection candle confirmed" };
-      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Mean-reversion entry to VWAP basis" };
-      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `SL at $${vwapBandResult.stopLoss.toFixed(2)}` };
-      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Outer band touch inflection" };
-      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Band rejection volume valid" };
-      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for VWAP Band Rejection Setup (Setup 10)" };
-      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for VWAP Band Rejection Setup (Setup 10)" };
-      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
-        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "VWAP outer band mean-reversion" };
-      }
+      const setupResult: TradingSetupResult = {
+        setupId: "setup_10_vwap_band_rejection",
+        setupName: "Setup 10: VWAP Band Rejection",
+        isValid: true,
+        direction,
+        entryPrice: currentPrice,
+        stopLoss: vwapBandResult.stopLoss,
+        takeProfit: vwapBandResult.takeProfit,
+        description: `[Setup 10 - VWAP Band Rejection Confirmed]: ${vwapBandResult.description}`,
+        sub_conditions: [
+          { name: "VWAP Outer Band Extension", status: "PASS", reason: `VWAP Outer Band rejection at $${vwapBandResult.bandPrice.toFixed(2)}` },
+          { name: "Reversal Rejection Candlestick", status: "PASS", reason: "Reversal rejection candle confirmed off band" },
+          { name: "Band Rejection Volume", status: "PASS", reason: "Band rejection volume valid" },
+          { name: "Dynamic Invalidation to Basis", status: "PASS", reason: `SL at $${vwapBandResult.stopLoss.toFixed(2)} | TP at $${vwapBandResult.takeProfit.toFixed(2)}` },
+        ],
+        metrics: {
+          bandPrice: vwapBandResult.bandPrice,
+        }
+      };
 
-      return getReturnObj(true, vwapDesc, "Setup 10: VWAP Band Rejection");
+      return getReturnObj(true, setupResult.description, setupResult.setupName, setupResult, setupResult.sub_conditions);
     }
 
     if (eqhEqlResult.isValid) {
-      const eqDesc = `[Setup 11 - EQH/EQL Double Touch Rejection Confirmed]: ${eqhEqlResult.description}`;
-      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for EQH/EQL Boundary Rejection Setup" };
-      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Equal ${direction === "LONG" ? "Lows (EQL)" : "Highs (EQH)"} level at $${eqhEqlResult.levelPrice.toFixed(2)}` };
-      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "2nd touch rejection wick confirmed" };
-      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Double boundary rejection entry" };
-      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `SL at $${eqhEqlResult.stopLoss.toFixed(2)}` };
-      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Double touch inflection" };
-      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Volume decay & divergence valid" };
-      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for EQH/EQL Double Touch Setup (Setup 11)" };
-      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for EQH/EQL Double Touch Setup (Setup 11)" };
-      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
-        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Double touch boundary mean-reversion" };
-      }
+      const setupResult: TradingSetupResult = {
+        setupId: "setup_11_eqh_eql_double_touch",
+        setupName: "Setup 11: EQH/EQL Double Touch Rejection",
+        isValid: true,
+        direction,
+        entryPrice: currentPrice,
+        stopLoss: eqhEqlResult.stopLoss,
+        takeProfit: eqhEqlResult.takeProfit,
+        description: `[Setup 11 - EQH/EQL Double Touch Rejection Confirmed]: ${eqhEqlResult.description}`,
+        sub_conditions: [
+          { name: "Equal Highs/Lows Level Proximity", status: "PASS", reason: `Equal ${direction === "LONG" ? "Lows (EQL)" : "Highs (EQH)"} level at $${eqhEqlResult.levelPrice.toFixed(2)}` },
+          { name: "2nd Touch Rejection Wick", status: "PASS", reason: "2nd touch rejection wick confirmed" },
+          { name: "Volume Decay & Divergence", status: "PASS", reason: "Volume decay & divergence valid" },
+          { name: "Dynamic Invalidation Floor/Ceiling", status: "PASS", reason: `SL at $${eqhEqlResult.stopLoss.toFixed(2)} | TP at $${eqhEqlResult.takeProfit.toFixed(2)}` },
+        ],
+        metrics: {
+          levelPrice: eqhEqlResult.levelPrice,
+        }
+      };
 
-      return getReturnObj(true, eqDesc, "Setup 11: EQH/EQL Double Touch Rejection");
+      return getReturnObj(true, setupResult.description, setupResult.setupName, setupResult, setupResult.sub_conditions);
     }
 
     if (cvdAbsorptionResult.isValid) {
-      const cvdDesc = `[Setup 12 - CVD Absorption & Delta Divergence Confirmed]: ${cvdAbsorptionResult.description}`;
-      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for CVD Absorption Institutional Reversal Setup" };
-      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Structural extreme absorption at $${cvdAbsorptionResult.extremePrice.toFixed(2)}` };
-      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: `Absorption rejection wick confirmed (${cvdAbsorptionResult.rejectionWickPct.toFixed(0)}%)` };
-      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Institutional iceberg absorption rotation entry" };
-      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `SL at $${cvdAbsorptionResult.stopLoss.toFixed(2)}` };
-      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Structural extreme rotation inflection" };
-      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: "Delta imbalance & absorption validated" };
-      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for CVD Absorption Setup (Setup 12)" };
-      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for CVD Absorption Setup (Setup 12)" };
-      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
-        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Structural extreme absorption rotation" };
-      }
+      const setupResult: TradingSetupResult = {
+        setupId: "setup_12_cvd_absorption",
+        setupName: "Setup 12: CVD Absorption & Delta Divergence",
+        isValid: true,
+        direction,
+        entryPrice: currentPrice,
+        stopLoss: cvdAbsorptionResult.stopLoss,
+        takeProfit: cvdAbsorptionResult.takeProfit,
+        description: `[Setup 12 - CVD Absorption & Delta Divergence Confirmed]: ${cvdAbsorptionResult.description}`,
+        sub_conditions: [
+          { name: "Structural Extreme Location", status: "PASS", reason: `Structural extreme absorption at $${cvdAbsorptionResult.extremePrice.toFixed(2)}` },
+          { name: "Absorption Rejection Wick", status: "PASS", reason: `Absorption rejection wick confirmed (${cvdAbsorptionResult.rejectionWickPct.toFixed(0)}%)` },
+          { name: "Order Flow Delta Absorption", status: "PASS", reason: `Delta imbalance & absorption validated (Taker Buy Ratio: ${(cvdAbsorptionResult.takerBuyRatio * 100).toFixed(1)}%)` },
+          { name: "Dynamic Invalidation Floor/Ceiling", status: "PASS", reason: `SL at $${cvdAbsorptionResult.stopLoss.toFixed(2)} | TP at $${cvdAbsorptionResult.takeProfit.toFixed(2)}` },
+        ],
+        metrics: {
+          extremePrice: cvdAbsorptionResult.extremePrice,
+          rejectionWickPct: cvdAbsorptionResult.rejectionWickPct,
+          takerBuyRatio: cvdAbsorptionResult.takerBuyRatio,
+        }
+      };
 
-      return getReturnObj(true, cvdDesc, "Setup 12: CVD Absorption & Delta Divergence");
+      return getReturnObj(true, setupResult.description, setupResult.setupName, setupResult, setupResult.sub_conditions);
     }
 
     if (oiFlushResult.isValid) {
-      const oiDesc = `[Setup 13 - OI Flush & Cascade Fade Confirmed]: ${oiFlushResult.description}`;
-      condDict["EMA Structure Alignment"] = { status: "PASS", reason: "Bypassed for OI Liquidation Cascade Fade Setup" };
-      condDict["Breakout Level Confirmation"] = { status: "PASS", reason: `Liquidation cascade extreme at $${oiFlushResult.flushExtreme.toFixed(2)}` };
-      condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: `Exhaustion wick confirmed (${oiFlushResult.reversalWickPct.toFixed(0)}%)` };
-      condDict["Immediate Breakout Entry Allowance"] = { status: "PASS", reason: "Liquidation air pocket cascade fade entry" };
-      condDict["Dynamic Invalidation Floor/Ceiling"] = { status: "PASS", reason: `Strict SL at $${oiFlushResult.stopLoss.toFixed(2)}` };
-      condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Cascade exhaustion inflection" };
-      condDict["Volume-Validated Pullback"] = { status: "PASS", reason: `Volume surge (${oiFlushResult.volumeMult.toFixed(1)}x) & OI drop (${oiFlushResult.oiContractionPct.toFixed(1)}%) validated` };
-      condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: "Bypassed for OI Flush Cascade Fade Setup (Setup 13)" };
-      condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: "Bypassed for OI Flush Cascade Fade Setup (Setup 13)" };
-      if (condDict["Multi-Timeframe Trend Alignment"].status !== "FAIL") {
-        condDict["Multi-Timeframe Trend Alignment"] = { status: "PASS", reason: "Forced liquidation cascade mean-reversion" };
-      }
+      const setupResult: TradingSetupResult = {
+        setupId: "setup_13_oi_flush_cascade",
+        setupName: "Setup 13: OI Flush & Cascade Fade",
+        isValid: true,
+        direction,
+        entryPrice: currentPrice,
+        stopLoss: oiFlushResult.stopLoss,
+        takeProfit: oiFlushResult.takeProfit,
+        description: `[Setup 13 - OI Flush & Cascade Fade Confirmed]: ${oiFlushResult.description}`,
+        sub_conditions: [
+          { name: "Liquidation Cascade Extreme", status: "PASS", reason: `Liquidation cascade extreme at $${oiFlushResult.flushExtreme.toFixed(2)}` },
+          { name: "Exhaustion Reversal Wick", status: "PASS", reason: `Exhaustion wick confirmed (${oiFlushResult.reversalWickPct.toFixed(0)}%)` },
+          { name: "Volume Surge & OI Contraction", status: "PASS", reason: `Volume surge (${oiFlushResult.volumeMult.toFixed(1)}x) & OI drop (${oiFlushResult.oiContractionPct.toFixed(1)}%) validated` },
+          { name: "Strict Dynamic Invalidation", status: "PASS", reason: `Strict SL at $${oiFlushResult.stopLoss.toFixed(2)} | TP at $${oiFlushResult.takeProfit.toFixed(2)}` },
+        ],
+        metrics: {
+          flushExtreme: oiFlushResult.flushExtreme,
+          reversalWickPct: oiFlushResult.reversalWickPct,
+          volumeMult: oiFlushResult.volumeMult,
+          oiContractionPct: oiFlushResult.oiContractionPct,
+        }
+      };
 
-      return getReturnObj(true, oiDesc, "Setup 13: OI Flush & Cascade Fade");
+      return getReturnObj(true, setupResult.description, setupResult.setupName, setupResult, setupResult.sub_conditions);
     }
 
     // Block standard trend setups if MTF trend alignment fails
@@ -4861,12 +4883,58 @@ class TradingEngine {
 
       // Final Setup-Specific Branching for LONG
       if (isPullbackRetestValid && !pullbackRetestMessage.startsWith("Blocked")) {
-        return getReturnObj(true, pullbackRetestMessage, "Setup 1: Pullback & Retest");
+        const setupResult: TradingSetupResult = {
+          setupId: "setup_1_pullback_retest",
+          setupName: "Setup 1: Pullback & Retest",
+          isValid: true,
+          direction: "LONG",
+          entryPrice: currentPrice,
+          stopLoss: reclaimThreshold,
+          takeProfit: currentPrice + 2.0 * currentAtr,
+          riskReward: 2.0,
+          description: pullbackRetestMessage,
+          sub_conditions: [
+            { name: "5m MTF Alignment", status: "PASS", reason: "5m trend aligned" },
+            { name: "Breakout Level Confirmation", status: "PASS", reason: `Breakout of $${breakoutLevel.toFixed(2)} confirmed` },
+            { name: "Breakout Candle Body Ratio", status: "PASS", reason: `Body ratio ${(boBodyRatio * 100).toFixed(0)}% meets threshold` },
+            { name: "Pullback Retest Zone Touch", status: "PASS", reason: isShallowConsolidationHolding ? "Shallow high-ADX consolidation held" : "Pullback touched retest zone" },
+            { name: "Reversal Candlestick Rejection", status: "PASS", reason: `Rejection pattern: ${longRejectionType}` },
+            { name: "Pullback Volume Health", status: "PASS", reason: pullbackVolDetails },
+            { name: "Dynamic Invalidation Floor", status: "PASS", reason: `Price stayed above retest floor $${reclaimThreshold.toFixed(2)}` },
+            { name: "Chasing Lookback Limit", status: "PASS", reason: `Elapsed ${postBreakoutCandles.length} candles <= limit ${maxPostBreakoutCandles}` },
+          ],
+          metrics: {
+            breakoutLevel,
+            reclaimThreshold,
+            boBodyRatio,
+            postBreakoutCandlesCount: postBreakoutCandles.length,
+          }
+        };
+        return getReturnObj(true, pullbackRetestMessage, setupResult.setupName, setupResult, setupResult.sub_conditions);
       } else if (isEmaPushbackValid && !emaPushbackMessage.startsWith("Blocked")) {
-        condDict["Breakout Level Confirmation"] = { status: "PASS", reason: "Satisfied via EMA Pushback Setup (Setup 2)" };
-        condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Satisfied via EMA Pushback Setup (Setup 2)" };
-        condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Satisfied via EMA Pushback Setup (Setup 2)" };
-        return getReturnObj(true, emaPushbackMessage, "Setup 2: Dynamic EMA Pushback");
+        const setupResult: TradingSetupResult = {
+          setupId: "setup_2_dynamic_ema_pushback",
+          setupName: "Setup 2: Dynamic EMA Pushback",
+          isValid: true,
+          direction: "LONG",
+          entryPrice: currentPrice,
+          stopLoss: emaInvalidationFloor,
+          takeProfit: currentPrice + 2.0 * currentAtr,
+          riskReward: 2.0,
+          description: emaPushbackMessage,
+          sub_conditions: [
+            { name: "5m MTF Alignment", status: "PASS", reason: "5m trend aligned" },
+            { name: `${emaZoneLabel} Dynamic Zone Touch`, status: "PASS", reason: `Tested dynamic EMA support at $${matchedEmaVal.toFixed(2)}` },
+            { name: "Reversal Candlestick Rejection", status: "PASS", reason: `Rejection pattern: ${longRejectionType}` },
+            { name: "Pullback Volume Health", status: "PASS", reason: pullbackVolDetails },
+            { name: "Dynamic EMA Invalidation Floor", status: "PASS", reason: `Price stayed above floor $${emaInvalidationFloor.toFixed(2)}` },
+          ],
+          metrics: {
+            matchedEmaVal,
+            emaInvalidationFloor,
+          }
+        };
+        return getReturnObj(true, emaPushbackMessage, setupResult.setupName, setupResult, setupResult.sub_conditions);
       } else {
         if (!isVolumeHealthyForPullback) {
           return getReturnObj(false, "Pullback volume is abnormally high (distribution risk); waiting for volume to dry up before confirming a safe entry.");
@@ -5220,12 +5288,58 @@ class TradingEngine {
 
       // Final Setup-Specific Branching for SHORT
       if (isPullbackRetestValid && !pullbackRetestMessage.startsWith("Blocked")) {
-        return getReturnObj(true, pullbackRetestMessage, "Setup 1: Pullback & Retest");
+        const setupResult: TradingSetupResult = {
+          setupId: "setup_1_pullback_retest",
+          setupName: "Setup 1: Pullback & Retest",
+          isValid: true,
+          direction: "SHORT",
+          entryPrice: currentPrice,
+          stopLoss: reclaimThreshold,
+          takeProfit: currentPrice - 2.0 * currentAtr,
+          riskReward: 2.0,
+          description: pullbackRetestMessage,
+          sub_conditions: [
+            { name: "5m MTF Alignment", status: "PASS", reason: "5m trend aligned" },
+            { name: "Breakout Level Confirmation", status: "PASS", reason: `Breakdown of $${breakoutLevel.toFixed(2)} confirmed` },
+            { name: "Breakout Candle Body Ratio", status: "PASS", reason: `Body ratio ${(boBodyRatio * 100).toFixed(0)}% meets threshold` },
+            { name: "Pullback Retest Zone Touch", status: "PASS", reason: isShallowConsolidationHolding ? "Shallow high-ADX consolidation held" : "Pullback touched retest zone" },
+            { name: "Reversal Candlestick Rejection", status: "PASS", reason: `Rejection pattern: ${shortRejectionType}` },
+            { name: "Pullback Volume Health", status: "PASS", reason: pullbackVolDetails },
+            { name: "Dynamic Invalidation Ceiling", status: "PASS", reason: `Price stayed below retest ceiling $${reclaimThreshold.toFixed(2)}` },
+            { name: "Chasing Lookback Limit", status: "PASS", reason: `Elapsed ${postBreakoutCandles.length} candles <= limit ${maxPostBreakoutCandles}` },
+          ],
+          metrics: {
+            breakoutLevel,
+            reclaimThreshold,
+            boBodyRatio,
+            postBreakoutCandlesCount: postBreakoutCandles.length,
+          }
+        };
+        return getReturnObj(true, pullbackRetestMessage, setupResult.setupName, setupResult, setupResult.sub_conditions);
       } else if (isEmaPushbackValid && !emaPushbackMessage.startsWith("Blocked")) {
-        condDict["Breakout Level Confirmation"] = { status: "PASS", reason: "Satisfied via EMA Pushback Setup (Setup 2)" };
-        condDict["Breakout Candle Body Ratio"] = { status: "PASS", reason: "Satisfied via EMA Pushback Setup (Setup 2)" };
-        condDict["Chasing Lookback limit"] = { status: "PASS", reason: "Satisfied via EMA Pushback Setup (Setup 2)" };
-        return getReturnObj(true, emaPushbackMessage, "Setup 2: Dynamic EMA Pushback");
+        const setupResult: TradingSetupResult = {
+          setupId: "setup_2_dynamic_ema_pushback",
+          setupName: "Setup 2: Dynamic EMA Pushback",
+          isValid: true,
+          direction: "SHORT",
+          entryPrice: currentPrice,
+          stopLoss: emaInvalidationCeiling,
+          takeProfit: currentPrice - 2.0 * currentAtr,
+          riskReward: 2.0,
+          description: emaPushbackMessage,
+          sub_conditions: [
+            { name: "5m MTF Alignment", status: "PASS", reason: "5m trend aligned" },
+            { name: `${emaZoneLabel} Dynamic Zone Touch`, status: "PASS", reason: `Tested dynamic EMA resistance at $${matchedEmaVal.toFixed(2)}` },
+            { name: "Reversal Candlestick Rejection", status: "PASS", reason: `Rejection pattern: ${shortRejectionType}` },
+            { name: "Pullback Volume Health", status: "PASS", reason: pullbackVolDetails },
+            { name: "Dynamic EMA Invalidation Ceiling", status: "PASS", reason: `Price stayed below ceiling $${emaInvalidationCeiling.toFixed(2)}` },
+          ],
+          metrics: {
+            matchedEmaVal,
+            emaInvalidationCeiling,
+          }
+        };
+        return getReturnObj(true, emaPushbackMessage, setupResult.setupName, setupResult, setupResult.sub_conditions);
       } else {
         if (!isVolumeHealthyForPullback) {
           return getReturnObj(false, "Pullback volume is abnormally high (accumulation risk); waiting for volume to dry up before confirming a safe entry.");
@@ -6267,6 +6381,8 @@ class TradingEngine {
     shortReason: string;
     rangeLow: number;
     rangeHigh: number;
+    longSetupResult?: TradingSetupResult;
+    shortSetupResult?: TradingSetupResult;
   } {
     const config = dbManager.getConfig();
     const ms = config.market_structure || ({} as MarketStructureConfig);
@@ -6472,13 +6588,65 @@ class TradingEngine {
       }
     }
     
+    let longSetupResult: TradingSetupResult | undefined = undefined;
+    if (isLongReversal) {
+      longSetupResult = {
+        setupId: "setup_9_range_failed_auction",
+        setupName: "Setup 9: Range Support Reversal",
+        isValid: true,
+        direction: "LONG",
+        entryPrice: currentPrice,
+        stopLoss: rangeLow - 0.5 * currentAtr,
+        takeProfit: rangeHigh,
+        riskReward: (rangeHigh - currentPrice) / Math.max(1, currentPrice - (rangeLow - 0.5 * currentAtr)),
+        description: `Ranging Bullish Reversal Confirmed: ${longReason}. Price ($${currentPrice.toFixed(2)}) is bouncing off major range support ($${rangeLow.toFixed(2)}).`,
+        sub_conditions: [
+          { name: "Range Boundary Proximity", status: "PASS", reason: `Price ($${currentPrice.toFixed(2)}) tested range support ($${rangeLow.toFixed(2)})` },
+          { name: "Reversal Signal Confirmation", status: "PASS", reason: longReason },
+          { name: "Dynamic Invalidation Floor", status: "PASS", reason: `SL at $${(rangeLow - 0.5 * currentAtr).toFixed(2)} | TP at $${rangeHigh.toFixed(2)}` },
+        ],
+        metrics: {
+          rangeLow,
+          rangeHigh,
+          rangeWidth,
+        }
+      };
+    }
+
+    let shortSetupResult: TradingSetupResult | undefined = undefined;
+    if (isShortReversal) {
+      shortSetupResult = {
+        setupId: "setup_9_range_failed_auction",
+        setupName: "Setup 9: Range Resistance Rejection",
+        isValid: true,
+        direction: "SHORT",
+        entryPrice: currentPrice,
+        stopLoss: rangeHigh + 0.5 * currentAtr,
+        takeProfit: rangeLow,
+        riskReward: (currentPrice - rangeLow) / Math.max(1, (rangeHigh + 0.5 * currentAtr) - currentPrice),
+        description: `Ranging Bearish Reversal Confirmed: ${shortReason}. Price ($${currentPrice.toFixed(2)}) is rejecting major range resistance ($${rangeHigh.toFixed(2)}).`,
+        sub_conditions: [
+          { name: "Range Boundary Proximity", status: "PASS", reason: `Price ($${currentPrice.toFixed(2)}) tested range resistance ($${rangeHigh.toFixed(2)})` },
+          { name: "Reversal Signal Confirmation", status: "PASS", reason: shortReason },
+          { name: "Dynamic Invalidation Ceiling", status: "PASS", reason: `SL at $${(rangeHigh + 0.5 * currentAtr).toFixed(2)} | TP at $${rangeLow.toFixed(2)}` },
+        ],
+        metrics: {
+          rangeLow,
+          rangeHigh,
+          rangeWidth,
+        }
+      };
+    }
+
     return {
       isLongReversal,
       isShortReversal,
       longReason,
       shortReason,
       rangeLow,
-      rangeHigh
+      rangeHigh,
+      longSetupResult,
+      shortSetupResult
     };
   }
 
@@ -9864,12 +10032,36 @@ class TradingEngine {
               swingLow: rangeLow
             };
           }
+          const active_setup: TradingSetupResult = {
+            setupId: "setup_9_range_failed_auction",
+            setupName: "Setup 9: Range Support Reversal",
+            isValid: true,
+            direction: "LONG",
+            entryPrice: currentPrice,
+            stopLoss: rangeLow - 0.5 * currentAtrForPullback,
+            takeProfit: rangeHigh,
+            riskReward: (rangeHigh - currentPrice) / Math.max(1, currentPrice - (rangeLow - 0.5 * currentAtrForPullback)),
+            description: `Ranging Bullish Reversal Confirmed: ${revSignals.longReason}. Price ($${currentPrice.toFixed(2)}) is bouncing off major range support ($${rangeLow.toFixed(2)}). ${microTrendDetails}`,
+            sub_conditions: [
+              { name: "Range Boundary Proximity", status: "PASS", reason: `Price ($${currentPrice.toFixed(2)}) tested range support ($${rangeLow.toFixed(2)})` },
+              { name: "Reversal Signal Confirmation", status: "PASS", reason: revSignals.longReason },
+              { name: "Micro-Trend Alignment", status: "PASS", reason: microTrendDetails },
+              { name: "Dynamic Invalidation Floor", status: "PASS", reason: `SL at $${(rangeLow - 0.5 * currentAtrForPullback).toFixed(2)} | TP at $${rangeHigh.toFixed(2)}` },
+            ],
+            metrics: {
+              rangeLow,
+              rangeHigh,
+              rangeWidth,
+            }
+          };
           return {
             confirmed: true,
-            message: `Ranging Bullish Reversal Confirmed: ${revSignals.longReason}. Price ($${currentPrice.toFixed(2)}) is bouncing off major range support ($${rangeLow.toFixed(2)}). ${microTrendDetails}`,
-            setup_triggered: "Setup 9: Range Support Reversal",
+            message: active_setup.description,
+            setup_triggered: active_setup.setupName,
+            active_setup,
             swingHigh: rangeHigh,
-            swingLow: rangeLow
+            swingLow: rangeLow,
+            sub_conditions: active_setup.sub_conditions,
           };
         } else if (isRangeLongBreakout) {
           const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.58;
@@ -9891,12 +10083,36 @@ class TradingEngine {
               swingLow: rangeLow
             };
           }
+          const active_setup: TradingSetupResult = {
+            setupId: "setup_14_fresh_momentum_impulse",
+            setupName: "Setup 14: Fresh Momentum Impulse",
+            isValid: true,
+            direction: "LONG",
+            entryPrice: currentPrice,
+            stopLoss: rangeHigh - 0.5 * currentAtrForPullback,
+            takeProfit: currentPrice + 2.0 * currentAtrForPullback,
+            riskReward: 2.0,
+            description: `Ranging Bullish Breakout Confirmed. Price ($${currentPrice.toFixed(2)}) broke above major range resistance ($${rangeHigh.toFixed(2)}) on relative volume (${relVolume.toFixed(2)}x) with P(LONG) = ${(probabilityLong * 100).toFixed(1)}%. ${microTrendDetails}`,
+            sub_conditions: [
+              { name: "Range Boundary Breakout", status: "PASS", reason: `Price ($${currentPrice.toFixed(2)}) broke above range resistance ($${rangeHigh.toFixed(2)})` },
+              { name: "Relative Volume Surge", status: "PASS", reason: `Relative volume: ${relVolume.toFixed(2)}x` },
+              { name: "Machine Learning Probability", status: "PASS", reason: `P(LONG) = ${(probabilityLong * 100).toFixed(1)}%` },
+              { name: "Micro-Trend Alignment", status: "PASS", reason: microTrendDetails },
+            ],
+            metrics: {
+              rangeHigh,
+              relVolume,
+              probabilityLong,
+            }
+          };
           return {
             confirmed: true,
-            message: `Ranging Bullish Breakout Confirmed. Price ($${currentPrice.toFixed(2)}) broke above major range resistance ($${rangeHigh.toFixed(2)}) on relative volume (${relVolume.toFixed(2)}x) with P(LONG) = ${(probabilityLong * 100).toFixed(1)}%. ${microTrendDetails}`,
-            setup_triggered: "Setup 14: Fresh Momentum Impulse",
+            message: active_setup.description,
+            setup_triggered: active_setup.setupName,
+            active_setup,
             swingHigh: rangeHigh,
-            swingLow: rangeLow
+            swingLow: rangeLow,
+            sub_conditions: active_setup.sub_conditions,
           };
         } else if (isRangeLongPullback) {
           if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
@@ -9907,12 +10123,35 @@ class TradingEngine {
               swingLow: rangeLow
             };
           }
+          const active_setup: TradingSetupResult = {
+            setupId: "setup_1_pullback_retest",
+            setupName: "Setup 1: Pullback & Retest",
+            isValid: true,
+            direction: "LONG",
+            entryPrice: currentPrice,
+            stopLoss: boRangeHigh - 0.5 * currentAtrForPullback,
+            takeProfit: currentPrice + 2.0 * currentAtrForPullback,
+            riskReward: 2.0,
+            description: `${rangeLongPullbackDetails} ${microTrendDetails}`,
+            sub_conditions: [
+              { name: "Prior Range Breakout", status: "PASS", reason: `Breakout above $${boRangeHigh.toFixed(2)} at index ${rangeLongBreakoutIdx}` },
+              { name: "Retest Zone Touch", status: "PASS", reason: "Price pulled back to retest broken resistance as support" },
+              { name: "Reversal Candlestick Rejection", status: "PASS", reason: "Confirmed bullish rejection" },
+              { name: "Micro-Trend Alignment", status: "PASS", reason: microTrendDetails },
+            ],
+            metrics: {
+              boRangeHigh,
+              rangeLongBreakoutIdx,
+            }
+          };
           return {
             confirmed: true,
-            message: `${rangeLongPullbackDetails} ${microTrendDetails}`,
-            setup_triggered: "Setup 1: Pullback & Retest",
+            message: active_setup.description,
+            setup_triggered: active_setup.setupName,
+            active_setup,
             swingHigh: rangeHigh,
-            swingLow: rangeLow
+            swingLow: rangeLow,
+            sub_conditions: active_setup.sub_conditions,
           };
         } else if (currentPrice > rangeHigh) {
           return {
@@ -9939,12 +10178,36 @@ class TradingEngine {
               swingLow: rangeLow
             };
           }
+          const active_setup: TradingSetupResult = {
+            setupId: "setup_9_range_failed_auction",
+            setupName: "Setup 9: Range Resistance Rejection",
+            isValid: true,
+            direction: "SHORT",
+            entryPrice: currentPrice,
+            stopLoss: rangeHigh + 0.5 * currentAtrForPullback,
+            takeProfit: rangeLow,
+            riskReward: (currentPrice - rangeLow) / Math.max(1, (rangeHigh + 0.5 * currentAtrForPullback) - currentPrice),
+            description: `Ranging Bearish Reversal Confirmed: ${revSignals.shortReason}. Price ($${currentPrice.toFixed(2)}) is rejecting major range resistance ($${rangeHigh.toFixed(2)}). ${microTrendDetails}`,
+            sub_conditions: [
+              { name: "Range Boundary Proximity", status: "PASS", reason: `Price ($${currentPrice.toFixed(2)}) tested range resistance ($${rangeHigh.toFixed(2)})` },
+              { name: "Reversal Signal Confirmation", status: "PASS", reason: revSignals.shortReason },
+              { name: "Micro-Trend Alignment", status: "PASS", reason: microTrendDetails },
+              { name: "Dynamic Invalidation Ceiling", status: "PASS", reason: `SL at $${(rangeHigh + 0.5 * currentAtrForPullback).toFixed(2)} | TP at $${rangeLow.toFixed(2)}` },
+            ],
+            metrics: {
+              rangeLow,
+              rangeHigh,
+              rangeWidth,
+            }
+          };
           return {
             confirmed: true,
-            message: `Ranging Bearish Reversal Confirmed: ${revSignals.shortReason}. Price ($${currentPrice.toFixed(2)}) is rejecting major range resistance ($${rangeHigh.toFixed(2)}). ${microTrendDetails}`,
-            setup_triggered: "Setup 9: Range Resistance Rejection",
+            message: active_setup.description,
+            setup_triggered: active_setup.setupName,
+            active_setup,
             swingHigh: rangeHigh,
-            swingLow: rangeLow
+            swingLow: rangeLow,
+            sub_conditions: active_setup.sub_conditions,
           };
         } else if (isRangeShortBreakdown) {
           const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.58;
@@ -9967,12 +10230,36 @@ class TradingEngine {
               swingLow: rangeLow
             };
           }
+          const active_setup: TradingSetupResult = {
+            setupId: "setup_14_fresh_momentum_impulse",
+            setupName: "Setup 14: Fresh Momentum Impulse",
+            isValid: true,
+            direction: "SHORT",
+            entryPrice: currentPrice,
+            stopLoss: rangeLow + 0.5 * currentAtrForPullback,
+            takeProfit: currentPrice - 2.0 * currentAtrForPullback,
+            riskReward: 2.0,
+            description: `Ranging Bearish Breakdown Confirmed. Price ($${currentPrice.toFixed(2)}) broke below major range support ($${rangeLow.toFixed(2)}) on relative volume (${relVolume.toFixed(2)}x) with P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%. ${microTrendDetails}`,
+            sub_conditions: [
+              { name: "Range Boundary Breakdown", status: "PASS", reason: `Price ($${currentPrice.toFixed(2)}) broke below range support ($${rangeLow.toFixed(2)})` },
+              { name: "Relative Volume Surge", status: "PASS", reason: `Relative volume: ${relVolume.toFixed(2)}x` },
+              { name: "Machine Learning Probability", status: "PASS", reason: `P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%` },
+              { name: "Micro-Trend Alignment", status: "PASS", reason: microTrendDetails },
+            ],
+            metrics: {
+              rangeLow,
+              relVolume,
+              probabilityShort,
+            }
+          };
           return {
             confirmed: true,
-            message: `Ranging Bearish Breakdown Confirmed. Price ($${currentPrice.toFixed(2)}) broke below major range support ($${rangeLow.toFixed(2)}) on relative volume (${relVolume.toFixed(2)}x) with P(SHORT) = ${(probabilityShort * 100).toFixed(1)}%. ${microTrendDetails}`,
-            setup_triggered: "Setup 14: Fresh Momentum Impulse",
+            message: active_setup.description,
+            setup_triggered: active_setup.setupName,
+            active_setup,
             swingHigh: rangeHigh,
-            swingLow: rangeLow
+            swingLow: rangeLow,
+            sub_conditions: active_setup.sub_conditions,
           };
         } else if (isRangeShortPullback) {
           if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
@@ -9983,12 +10270,35 @@ class TradingEngine {
               swingLow: rangeLow
             };
           }
+          const active_setup: TradingSetupResult = {
+            setupId: "setup_1_pullback_retest",
+            setupName: "Setup 1: Pullback & Retest",
+            isValid: true,
+            direction: "SHORT",
+            entryPrice: currentPrice,
+            stopLoss: boRangeLow + 0.5 * currentAtrForPullback,
+            takeProfit: currentPrice - 2.0 * currentAtrForPullback,
+            riskReward: 2.0,
+            description: `${rangeShortPullbackDetails} ${microTrendDetails}`,
+            sub_conditions: [
+              { name: "Prior Range Breakdown", status: "PASS", reason: `Breakdown below $${boRangeLow.toFixed(2)} at index ${rangeShortBreakoutIdx}` },
+              { name: "Retest Zone Touch", status: "PASS", reason: "Price pulled back to retest broken support as resistance" },
+              { name: "Reversal Candlestick Rejection", status: "PASS", reason: "Confirmed bearish rejection" },
+              { name: "Micro-Trend Alignment", status: "PASS", reason: microTrendDetails },
+            ],
+            metrics: {
+              boRangeLow,
+              rangeShortBreakoutIdx,
+            }
+          };
           return {
             confirmed: true,
-            message: `${rangeShortPullbackDetails} ${microTrendDetails}`,
-            setup_triggered: "Setup 1: Pullback & Retest",
+            message: active_setup.description,
+            setup_triggered: active_setup.setupName,
+            active_setup,
             swingHigh: rangeHigh,
-            swingLow: rangeLow
+            swingLow: rangeLow,
+            sub_conditions: active_setup.sub_conditions,
           };
         } else if (currentPrice < rangeLow) {
           return {
@@ -10046,6 +10356,7 @@ class TradingEngine {
       confirmed,
       message,
       setup_triggered: trendResult ? trendResult.setup_triggered : undefined,
+      active_setup: trendResult ? trendResult.active_setup : undefined,
       swingHigh: struct.swingHigh,
       swingLow: struct.swingLow,
       ema_check_active: trendResult ? trendResult.ema_check_active : undefined,

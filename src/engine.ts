@@ -33,7 +33,10 @@ import { fetchLiveRSSHeadlines } from "./rss.js";
 import { placeDeltaMarketOrder, getDeltaWalletBalance } from "./delta_client.js";
 import { indicators, IndicatorCalculator } from "./engine/indicators.js";
 import { structureEngine, TrendMarketStructure } from "./engine/structure.js";
-import { detectOrderFlowAbsorption as detectOrderFlowAbsorptionFn } from "./engine/orderflow.js";
+import {
+  detectOrderFlowAbsorption as detectOrderFlowAbsorptionFn,
+  calculateOrderFlowImbalance as calculateOrderFlowImbalanceFn,
+} from "./engine/orderflow.js";
 import { isMultiCandleLongRejection as isMultiCandleLongRejectionFn, isMultiCandleShortRejection as isMultiCandleShortRejectionFn } from "./engine/candlestick.js";
 import {
   SetupContext,
@@ -131,6 +134,9 @@ class TradingEngine {
     takerSellVolume: 0,
     takerBuyRatio: 0.5,
     netCVD: 0,
+    ofiScore: 0,
+    ofiMomentum: 0,
+    ofiLeadSignal: "NEUTRAL" as "BULLISH_LEAD" | "BEARISH_LEAD" | "ABSORPTION_BULL" | "ABSORPTION_BEAR" | "NEUTRAL",
     lastUpdateSecs: 0,
   };
   private orderBookStats = {
@@ -487,6 +493,7 @@ class TradingEngine {
     if (n.includes("squeeze")) return "squeeze";
     if (n.includes("imbalance") || n.includes("orderbook")) return "orderbook";
     if (n.includes("atr")) return "atr";
+    if (n.includes("friction hurdle") || n.includes("net expectancy") || n.includes("friction_hurdle")) return "friction_hurdle";
     if (n.includes("volume profiling") || n.includes("volume_profile")) return "volume_profile";
     if (n.includes("structure")) return "structure";
     if (n.includes("choppy") || n.includes("whip-saw")) return "choppy";
@@ -504,7 +511,9 @@ class TradingEngine {
       n.includes("pre-flight") ||
       n.includes("operational safety") ||
       n.includes("anti-whipsaw") ||
-      n.includes("direction lock")
+      n.includes("direction lock") ||
+      n.includes("friction") ||
+      n.includes("expectancy")
     ) {
       return "account_safety";
     }
@@ -701,6 +710,10 @@ class TradingEngine {
     if (gateId === "value_extension") return true;
     // 2. Anti-Whipsaw Directional Lockout: Prevents instant reverse-trading into market maker liquidity sweeps
     if (gateId === "whipsaw") return true;
+    // 3. Microstructure Friction & Net Expectancy Hurdle: Enforces positive mathematical edge
+    if (gateId === "friction_hurdle") {
+      return config.risk_management?.friction_hurdle_gate_enabled !== false;
+    }
 
     const adaptiveStatus = this.getRegimeAdaptiveGateStatus(config, gateId);
     if (adaptiveStatus === "MANDATORY") return true;
@@ -715,6 +728,9 @@ class TradingEngine {
   private isGateActive(config: StrategyConfig, name: string): boolean {
     const gateId = this.getGateIdByName(name);
     if (gateId === "value_extension" || gateId === "whipsaw") return true;
+    if (gateId === "friction_hurdle") {
+      return config.risk_management?.friction_hurdle_gate_enabled !== false;
+    }
 
     const adaptiveStatus = this.getRegimeAdaptiveGateStatus(config, gateId);
     if (adaptiveStatus === "MANDATORY" || adaptiveStatus === "WEIGHTED") return true;
@@ -786,6 +802,7 @@ class TradingEngine {
         (name.toLowerCase().includes("order flow") && g.toLowerCase().includes("orderflow")) ||
         (name.toLowerCase().includes("squeeze") && g.toLowerCase().includes("squeeze")) ||
         (name.toLowerCase().includes("imbalance") && g.toLowerCase().includes("orderbook")) ||
+        (name.toLowerCase().includes("atr") && g.toLowerCase().includes("atr")) ||
         ((name.toLowerCase().includes("ema 100") || name.toLowerCase().includes("ema")) && g.toLowerCase().includes("ema100"))
     );
     return !isSkipped;
@@ -833,8 +850,14 @@ class TradingEngine {
       obAlignment = Math.max(0, Math.min(100, (((-imbalanceRatio) - (-0.30)) / 0.60) * 100));
     }
 
-    // Blend: 70% active market taker volume (aggressive flow), 30% passive order book depth (limit order flow)
-    let score = Math.round(ofAlignment * 0.70 + obAlignment * 0.30);
+    // Calculate OFI alignment score: maps institutional OFI score [-1.0, 1.0] to [0, 100]
+    const ofi = this.orderFlowStats.ofiScore || 0;
+    const ofiAlignment = direction === "LONG"
+      ? Math.max(0, Math.min(100, ((ofi - (-0.4)) / 0.8) * 100))
+      : Math.max(0, Math.min(100, (((-ofi) - (-0.4)) / 0.8) * 100));
+
+    // Blend: 55% aggressive taker volume, 25% passive order book depth, 20% institutional OFI displacement
+    let score = Math.round(ofAlignment * 0.55 + obAlignment * 0.25 + ofiAlignment * 0.20);
     score = Math.max(0, Math.min(100, score));
 
     let label = "Neutral";
@@ -2348,24 +2371,22 @@ class TradingEngine {
     });
 
     // Volatility ATR Floor Filter (Minimum ATR Filter)
-    const minAtrEnabled = config.risk_management?.min_atr_for_trading_enabled !== false;
+    const isAtrGateActive = this.isGateActive(config, "Minimum ATR Volatility Filter");
+    const minAtrEnabled = isAtrGateActive && config.risk_management?.min_atr_for_trading_enabled !== false;
     const minAtrValue = config.risk_management?.min_atr_for_trading_value !== undefined ? config.risk_management.min_atr_for_trading_value : 12;
     let minAtrMet = true;
     let minAtrVal = `ATR (14): $${currentAtr_cp.toFixed(2)}`;
-    let minAtrReq = minAtrEnabled ? `>= $${minAtrValue.toFixed(2)}` : "None (Disabled)";
+    let minAtrReq = minAtrEnabled ? `>= $${minAtrValue.toFixed(2)}` : "None (Disabled/Bypassed)";
 
     if (minAtrEnabled) {
-      // Early breakout momentum or volume expansion (relVolume >= 1.20x, ADX >= 22 trending, or extreme pressure) overrides compression
-      const hasVolumeBreakoutOverride = relVolume >= 1.20 || hasExtremeRealtimePressure || (ms.allow_immediate_breakout && (isTrending || adxValue >= 22));
-      minAtrMet = currentAtr_cp >= minAtrValue || hasVolumeBreakoutOverride;
+      minAtrMet = currentAtr_cp >= minAtrValue;
       if (!minAtrMet) {
         minAtrVal = `ATR COMPRESSION - BLOCKED (Current ATR $${currentAtr_cp.toFixed(2)} < Min ATR Threshold $${minAtrValue.toFixed(2)})`;
       } else {
-        const isBypassed = currentAtr_cp < minAtrValue && hasVolumeBreakoutOverride;
-        minAtrVal = isBypassed
-          ? `ATR COMPRESSED ($${currentAtr_cp.toFixed(2)}) - PASSED VIA VOLUME/MOMENTUM OVERRIDE (${relVolume.toFixed(2)}x)`
-          : `ATR NORMAL - PASSED (Current ATR $${currentAtr_cp.toFixed(2)} >= Min ATR Threshold $${minAtrValue.toFixed(2)})`;
+        minAtrVal = `ATR NORMAL - PASSED (Current ATR $${currentAtr_cp.toFixed(2)} >= Min ATR Threshold $${minAtrValue.toFixed(2)})`;
       }
+    } else {
+      minAtrVal = `ATR (14): $${currentAtr_cp.toFixed(2)} (${!isAtrGateActive ? "Bypassed in Gate Matrix" : "Disabled in Risk Settings"})`;
     }
 
     conditions.push({
@@ -2480,6 +2501,41 @@ class TradingEngine {
         : "PASSING (No immediate opposing stop-loss exit within 180s)",
       required: "Wait >= 180s before flipping to opposite direction after stop-loss exit",
       description: "Strictly blocks entering trades in the opposing direction within 180 seconds after a stop-out, preventing market maker liquidity sweeps and consecutive whipsaw losses.",
+      priority: "CRITICAL",
+    });
+
+    // Research-Backed Microstructure Friction & Net Expectancy Hurdle Gate
+    // Ref: "The Mathematical Supremacy of Market Friction"
+    // On 1-minute timeframe, gross profit targets range from 0.10% to 0.30%.
+    // Transaction costs (Maker/Taker fees + slippage + GST) dominate expectancy.
+    // If gross target cannot clear at least min_net_edge_ratio * round-trip friction,
+    // trading produces negative net mathematical expectancy and is blocked.
+    const defaultExec = config.risk_management?.default_order_execution || "TAKER";
+    const isMaker = defaultExec === "MAKER";
+    const entryFeeRate = isMaker ? 0.0002 : 0.0005;
+    const exitFeeRate = config.risk_management?.delta_scalper_offer_enabled !== false ? 0.0000 : 0.0005;
+    const gstMultiplier = config.risk_management?.delta_india_gst_enabled !== false ? 1.18 : 1.0;
+    const effectiveFeeRate = (entryFeeRate + exitFeeRate) * gstMultiplier;
+    const slippagePct = (config.risk_management?.estimated_slippage_pct ?? 0.02) / 100;
+    const roundTripFrictionPct = (effectiveFeeRate + (isMaker ? 0 : slippagePct * 1.5)) * 100;
+
+    const effectiveTpMultiplier = (config.risk_management?.enable_adx_target_compression && adxValue < (config.risk_management?.adx_quick_scalp_threshold || 18.0))
+      ? (config.risk_management?.adx_quick_scalp_tp_atr || 1.05)
+      : (config.risk_management?.take_profit_atr_multiplier || 1.65);
+    const projectedProfitUSD = Math.max(currentAtr_cp * effectiveTpMultiplier, currentPrice * (config.risk_management?.min_stop_loss_distance_pct || 0.045) / 100);
+    const projectedProfitPct = (projectedProfitUSD / currentPrice) * 100;
+    const minNetEdgeRatio = config.risk_management?.min_net_edge_ratio ?? 2.2;
+    const actualEdgeRatio = roundTripFrictionPct > 0 ? (projectedProfitPct / roundTripFrictionPct) : 99;
+    const isFrictionHurdlePassed = !config.risk_management?.friction_hurdle_gate_enabled || actualEdgeRatio >= minNetEdgeRatio;
+
+    conditions.push({
+      name: "Microstructure Friction & Net Expectancy Hurdle",
+      met: isFrictionHurdlePassed,
+      current_value: isFrictionHurdlePassed
+        ? `PASSED: Target +${projectedProfitPct.toFixed(3)}% provides ${actualEdgeRatio.toFixed(2)}x net edge over ${roundTripFrictionPct.toFixed(3)}% round-trip friction [Exec: ${defaultExec}]`
+        : `BLOCKED: Target +${projectedProfitPct.toFixed(3)}% provides only ${actualEdgeRatio.toFixed(2)}x edge (< ${minNetEdgeRatio.toFixed(1)}x hurdle) against ${roundTripFrictionPct.toFixed(3)}% friction [Exec: ${defaultExec}]`,
+      required: `Projected Gross Profit % >= ${minNetEdgeRatio.toFixed(1)}x Round-Trip Friction % (Friction: ${roundTripFrictionPct.toFixed(3)}%)`,
+      description: "Applies empirical market microstructure physics: enforces that expected 1-minute gross scalp profit exceeds the round-trip transaction friction (brokerage fees + GST + slippage) by at least the required edge multiplier, eliminating negative-expectancy churn.",
       priority: "CRITICAL",
     });
 
@@ -2948,12 +3004,26 @@ class TradingEngine {
           const ratio = totalVol > 0 ? buyVol / totalVol : 0.5;
           const cvd = buyVol - sellVol;
 
-          this.orderFlowStats = {
+          const updatedFlow = {
             takerBuyVolume: buyVol,
             takerSellVolume: sellVol,
             takerBuyRatio: ratio,
             netCVD: cvd,
             lastUpdateSecs: Math.floor(Date.now() / 1000),
+          };
+
+          const ofiResult = calculateOrderFlowImbalanceFn(
+            updatedFlow,
+            this.orderBookStats,
+            this.candles1m,
+            this.orderFlowStats.ofiScore || 0
+          );
+
+          this.orderFlowStats = {
+            ...updatedFlow,
+            ofiScore: ofiResult.ofiScore,
+            ofiMomentum: ofiResult.ofiMomentum,
+            ofiLeadSignal: ofiResult.leadSignal,
           };
         }
       } else {
@@ -2977,12 +3047,16 @@ class TradingEngine {
       const simulatedVol = 15 + Math.random() * 30;
       const buyVol = simulatedVol * newRatio;
       const sellVol = simulatedVol * (1 - newRatio);
+      const cvd = buyVol - sellVol;
       
       this.orderFlowStats = {
         takerBuyVolume: buyVol,
         takerSellVolume: sellVol,
         takerBuyRatio: newRatio,
-        netCVD: buyVol - sellVol,
+        netCVD: cvd,
+        ofiScore: Number(((newRatio - 0.5) * 2).toFixed(3)),
+        ofiMomentum: 0,
+        ofiLeadSignal: newRatio > 0.55 ? "BULLISH_LEAD" : (newRatio < 0.45 ? "BEARISH_LEAD" : "NEUTRAL"),
         lastUpdateSecs: Math.floor(Date.now() / 1000),
       };
     }
@@ -7491,8 +7565,17 @@ class TradingEngine {
     const prevBbWidth = Math.max(1, bbPrev3.upper - bbPrev3.lower);
     const isBbExpanding = bbWidth > prevBbWidth * 1.05; // True volatility blowout
 
-    // Real-time market execution price
-    const executedEntryPrice = currentPrice;
+    // Real-time market execution price with research-backed Microstructure Slippage Modeling
+    // MAKER: Passive limit post-only order placed at the inside micro-touch (0.00% slippage, 0.02% fee)
+    // TAKER: Aggressive market order crossing spread and depth (estimated slippage, 0.05% fee)
+    const defaultExec = config.risk_management?.default_order_execution || "TAKER";
+    const isMaker = defaultExec === "MAKER";
+    const estSlippagePct = (config.risk_management?.estimated_slippage_pct ?? 0.02) / 100;
+    const slippageRate = isMaker ? 0.0 : estSlippagePct;
+    const slippageUsdPerBtc = currentPrice * slippageRate;
+    const executedEntryPrice = execDirection === "LONG"
+      ? Number((currentPrice + slippageUsdPerBtc).toFixed(2))
+      : Number((currentPrice - slippageUsdPerBtc).toFixed(2));
 
     const ema9 = this.calculateEMA(closes, 9);
     const lastIdx = closes.length - 1;
@@ -7657,6 +7740,7 @@ class TradingEngine {
     const baseQty = config.risk_management.default_quantity_btc || 0.001;
     const slRiskScaling = structuralSlDistance > stopLossDistance ? Math.max(0.4, stopLossDistance / structuralSlDistance) : 1.0;
     const positionQtyBtc = Number((baseQty * sizeMultiplier * slRiskScaling).toFixed(5));
+    const totalSlippageUsdt = Number((slippageUsdPerBtc * positionQtyBtc).toFixed(4));
     const leverage = config.risk_management.leverage || 20;
 
     // Fee-Aware Take Profit Target Floor:
@@ -7773,6 +7857,8 @@ class TradingEngine {
       hold_duration_seconds: 0,
       is_win: null,
       setup_triggered: triggeredSetup || "Setup 1: Pullback & Retest",
+      order_execution: defaultExec,
+      slippage_usdt: totalSlippageUsdt,
       feature_snapshot: {
         last_price: executedEntryPrice,
         atr_14: lastAtr,
@@ -7784,6 +7870,10 @@ class TradingEngine {
         adx_quick_scalp: isQuickScalpActive,
         structural_sl_applied: structuralSlDistance > stopLossDistance,
         setup_triggered: triggeredSetup || "Setup 1: Pullback & Retest",
+        order_execution: defaultExec,
+        slippage_usdt: totalSlippageUsdt,
+        ofi_score: this.orderFlowStats.ofiScore,
+        ofi_signal: this.orderFlowStats.ofiLeadSignal,
       },
     });
 

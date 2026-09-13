@@ -256,6 +256,11 @@ const DEFAULT_CONFIG: StrategyConfig = {
     tp_atr_multiplier_trending: 1.70,
     tp_atr_multiplier_ranging: 1.40,
     tp_atr_multiplier_volatile: 2.00,
+    friction_hurdle_gate_enabled: true,
+    min_net_edge_ratio: 2.2,
+    estimated_slippage_pct: 0.02,
+    maker_post_only_enabled: false,
+    hybrid_regime_switching_enabled: true,
   },
   market_structure: {
     min_breakout_body_ratio: 0.22,
@@ -799,6 +804,9 @@ class DatabaseManager {
               updated = true;
             }
           }
+          if (updated) {
+            this.save();
+          }
         }
         if (this.cache && this.cache.trades) {
           let tradesUpdated = false;
@@ -1049,13 +1057,13 @@ class DatabaseManager {
         this.cache.config.general.required_gates = allGates.filter(g => !skipped.includes(g));
         changed = true;
       }
-      if (!this.cache.config.general.mandatory_gates || !this.cache.config.general.mandatory_gates.includes("orderflow")) {
+      if (!this.cache.config.general.mandatory_gates) {
         this.cache.config.general.mandatory_gates = [
           "limit", "equity", "credentials", "cooldown", "timing", "structure", "atr", "regime_cooldown", "choppy", "orderflow", "volume_profile"
         ];
         changed = true;
       }
-      if (!this.cache.config.general.weighted_gates || this.cache.config.general.weighted_gates.includes("orderflow")) {
+      if (!this.cache.config.general.weighted_gates) {
         this.cache.config.general.weighted_gates = [
           "catboost", "regime", "trend", "volume", "vwap", "wedge", "squeeze", "orderbook", "adx", "ema100"
         ];
@@ -1283,8 +1291,32 @@ class DatabaseManager {
         this.cache.config.risk_management.max_allowed_z_dist = 2.50;
         changed = true;
       }
-      if (this.cache.config.risk_management.min_atr_for_trading_value === undefined || this.cache.config.risk_management.min_atr_for_trading_value > 16.0) {
+      if (this.cache.config.risk_management.min_atr_for_trading_value === undefined || isNaN(this.cache.config.risk_management.min_atr_for_trading_value)) {
         this.cache.config.risk_management.min_atr_for_trading_value = 12.0;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.min_atr_for_trading_enabled === undefined) {
+        this.cache.config.risk_management.min_atr_for_trading_enabled = true;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.friction_hurdle_gate_enabled === undefined) {
+        this.cache.config.risk_management.friction_hurdle_gate_enabled = true;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.min_net_edge_ratio === undefined) {
+        this.cache.config.risk_management.min_net_edge_ratio = 2.2;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.estimated_slippage_pct === undefined) {
+        this.cache.config.risk_management.estimated_slippage_pct = 0.02;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.maker_post_only_enabled === undefined) {
+        this.cache.config.risk_management.maker_post_only_enabled = false;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.hybrid_regime_switching_enabled === undefined) {
+        this.cache.config.risk_management.hybrid_regime_switching_enabled = true;
         changed = true;
       }
     }

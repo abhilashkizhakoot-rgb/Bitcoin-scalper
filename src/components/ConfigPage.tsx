@@ -42,6 +42,7 @@ const AVAILABLE_GATES = [
   { id: "volume_profile", label: "Multi-Timeframe Volume Profiling (Horizontal Liquidity)", supportsWeight: true },
   { id: "atr", label: "Minimum ATR Volatility Filter", supportsWeight: false },
   { id: "regime_cooldown", label: "Regime Transition Cooldown", supportsWeight: false },
+  { id: "friction_hurdle", label: "Microstructure Friction & Net Expectancy Hurdle", supportsWeight: true },
 ];
 
 interface ConfigPageProps {
@@ -390,6 +391,47 @@ export default function ConfigPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sanitizedData),
       });
+
+      // If committing general, also sync risk_management.min_atr_for_trading_enabled
+      if (category === "general") {
+        const isAtrMandatory = (sanitizedData.mandatory_gates || []).includes("atr");
+        if ((riskConfig.min_atr_for_trading_enabled !== false) !== isAtrMandatory) {
+          const syncedRisk = { ...riskConfig, min_atr_for_trading_enabled: isAtrMandatory };
+          await apiFetch(`/api/config/risk_management`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(sanitizeCategoryData("risk_management", syncedRisk)),
+          });
+        }
+      }
+
+      // If committing risk_management, also sync general gates
+      if (category === "risk_management") {
+        const isEnabled = sanitizedData.min_atr_for_trading_enabled !== false;
+        const allAvailableIds = AVAILABLE_GATES.map((g) => g.id);
+        let mandatory = generalConfig.mandatory_gates ? [...generalConfig.mandatory_gates] : [];
+        if (isEnabled) {
+          if (!mandatory.includes("atr")) mandatory.push("atr");
+        } else {
+          mandatory = mandatory.filter((id) => id !== "atr");
+        }
+        const weighted = (generalConfig.weighted_gates || []).filter((id) => id !== "atr");
+        const required = [...mandatory, ...weighted];
+        const skipped = allAvailableIds.filter((id) => !required.includes(id));
+        const syncedGeneral = {
+          ...generalConfig,
+          mandatory_gates: mandatory,
+          weighted_gates: weighted,
+          required_gates: required,
+          skipped_gates: skipped,
+        };
+        await apiFetch(`/api/config/general`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sanitizeCategoryData("general", syncedGeneral)),
+        });
+      }
+
       if (res.ok) {
         const updatedConfig = await res.json();
         if (updatedConfig) {
@@ -411,7 +453,26 @@ export default function ConfigPage({
 
   const handleSaveRiskAndGeneral = async () => {
     try {
-      const sanitizedGeneral = sanitizeCategoryData("general", generalConfig);
+      const isAtrEnabled = riskConfig.min_atr_for_trading_enabled !== false;
+      const allAvailableIds = AVAILABLE_GATES.map((g) => g.id);
+      let mandatory = generalConfig.mandatory_gates ? [...generalConfig.mandatory_gates] : [];
+      if (isAtrEnabled) {
+        if (!mandatory.includes("atr")) mandatory.push("atr");
+      } else {
+        mandatory = mandatory.filter((id) => id !== "atr");
+      }
+      const weighted = (generalConfig.weighted_gates || []).filter((id) => id !== "atr");
+      const required = [...mandatory, ...weighted];
+      const skipped = allAvailableIds.filter((id) => !required.includes(id));
+      const syncedGeneralConfig = {
+        ...generalConfig,
+        mandatory_gates: mandatory,
+        weighted_gates: weighted,
+        required_gates: required,
+        skipped_gates: skipped,
+      };
+
+      const sanitizedGeneral = sanitizeCategoryData("general", syncedGeneralConfig);
       const sanitizedRisk = sanitizeCategoryData("risk_management", riskConfig);
       const resGeneral = await apiFetch(`/api/config/general`, {
         method: "PUT",
@@ -513,6 +574,13 @@ export default function ConfigPage({
       required_gates: updatedRequired,
       skipped_gates: updatedSkipped,
     });
+
+    if (gateId === "atr") {
+      setRiskConfig((prev: any) => ({
+        ...prev,
+        min_atr_for_trading_enabled: mode === "MANDATORY",
+      }));
+    }
   };
 
   const handleSaveProfile = async () => {
@@ -2262,7 +2330,29 @@ export default function ConfigPage({
                     <input
                       type="checkbox"
                       checked={riskConfig.min_atr_for_trading_enabled !== false}
-                      onChange={(e) => setRiskConfig({ ...riskConfig, min_atr_for_trading_enabled: e.target.checked })}
+                      onChange={(e) => {
+                        const enabled = e.target.checked;
+                        setRiskConfig({ ...riskConfig, min_atr_for_trading_enabled: enabled });
+                        const allAvailableIds = AVAILABLE_GATES.map((g) => g.id);
+                        let currentMandatory = generalConfig.mandatory_gates ? [...generalConfig.mandatory_gates] : [
+                          "preflight", "timing", "structure", "atr", "regime_cooldown", "choppy", "orderflow", "volume_profile"
+                        ];
+                        if (enabled) {
+                          if (!currentMandatory.includes("atr")) currentMandatory.push("atr");
+                        } else {
+                          currentMandatory = currentMandatory.filter((id) => id !== "atr");
+                        }
+                        const currentWeighted = (generalConfig.weighted_gates || []).filter((id) => id !== "atr");
+                        const updatedRequired = [...currentMandatory, ...currentWeighted];
+                        const updatedSkipped = allAvailableIds.filter((id) => !updatedRequired.includes(id));
+                        setGeneralConfig({
+                          ...generalConfig,
+                          mandatory_gates: currentMandatory,
+                          weighted_gates: currentWeighted,
+                          required_gates: updatedRequired,
+                          skipped_gates: updatedSkipped,
+                        });
+                      }}
                       className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
                     />
                     Enable Minimum ATR Volatility Floor (Skip Low ATR)
@@ -2277,7 +2367,8 @@ export default function ConfigPage({
                     <label className="text-xs font-mono text-slate-400 uppercase">Minimum ATR Threshold Floor</label>
                     <input
                       type="number"
-                      step="1"
+                      step="any"
+                      min="0"
                       value={riskConfig.min_atr_for_trading_value !== undefined ? riskConfig.min_atr_for_trading_value : 12}
                       onChange={(e) => {
                         const parsed = parseInputNumber(e.target.value, true);
@@ -2541,6 +2632,103 @@ export default function ConfigPage({
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            </div>
+
+            {/* Section: Microstructure Friction & Net Expectancy Controls (Quantitative 1m Research) */}
+            <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm">
+              <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans flex items-center gap-2">
+                    <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+                    Microstructure Friction &amp; Expectancy Engine
+                  </h4>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    Empirical mathematical friction models for 1-minute Bitcoin scalping. Prevents capital degradation from maker/taker fee drag and bid-ask slippage.
+                  </p>
+                </div>
+                <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  Microstructure Alpha
+                </span>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                    <input
+                      type="checkbox"
+                      checked={riskConfig.friction_hurdle_gate_enabled !== false}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, friction_hurdle_gate_enabled: e.target.checked })}
+                      className="rounded border-slate-300 bg-white text-emerald-600 focus:ring-emerald-400 h-4 w-4 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-slate-800">Enforce Net Expectancy Hurdle Gate</span>
+                  </label>
+                  <p className="text-[10px] text-slate-600 leading-relaxed pl-6.5">
+                    Calculates total round-trip friction (brokerage commission + exchange GST + execution slippage). If the projected scalp target profit distance cannot clear at least <span className="font-semibold text-slate-800 font-mono">{riskConfig.min_net_edge_ratio ?? 2.2}x</span> of the friction hurdle, entry is blocked to preserve positive mathematical expectancy.
+                  </p>
+
+                  {riskConfig.friction_hurdle_gate_enabled !== false && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 pl-6.5">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-mono text-slate-500 uppercase">Min Net Edge Hurdle Ratio</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="1.2"
+                          max="5.0"
+                          value={riskConfig.min_net_edge_ratio ?? 2.2}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, min_net_edge_ratio: parseInputNumber(e.target.value) })}
+                          className="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
+                        />
+                        <p className="text-[9px] text-slate-400">Ratio of Expected Gross Profit % to Round-Trip Friction % (Recommended: 2.0x - 2.5x).</p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-mono text-slate-500 uppercase">Estimated One-Way Slippage (%)</label>
+                        <input
+                          type="number"
+                          step="0.005"
+                          min="0.000"
+                          max="0.200"
+                          value={riskConfig.estimated_slippage_pct ?? 0.02}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, estimated_slippage_pct: parseInputNumber(e.target.value) })}
+                          className="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
+                        />
+                        <p className="text-[9px] text-slate-400">Estimated execution slippage crossing spread and thin liquidity depth (default 0.02% = ~$13-$17 on BTC).</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2 p-3 bg-indigo-50/50 rounded-lg border border-indigo-100">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                    <input
+                      type="checkbox"
+                      checked={riskConfig.hybrid_regime_switching_enabled !== false}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, hybrid_regime_switching_enabled: e.target.checked })}
+                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-indigo-900">Hybrid Regime-Switching Framework (Momentum vs Reversion)</span>
+                  </label>
+                  <p className="text-[10px] text-slate-600 leading-relaxed pl-6.5">
+                    Separates logic into two distinct modes: <span className="font-semibold text-indigo-800">Momentum Mode</span> during strong trends (only trend pullbacks, FVGs, and impulse continuation) and <span className="font-semibold text-indigo-800">Mean-Reversion Mode</span> during ranges/chop (VWAP bands &plusmn;2&sigma;, liquidity sweeps, CVD absorption). Blocks trend-following breakout chasing during range chop.
+                  </p>
+                </div>
+
+                <div className="space-y-2 p-3 bg-amber-50/40 rounded-lg border border-amber-200/60">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                    <input
+                      type="checkbox"
+                      checked={riskConfig.maker_post_only_enabled === true}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, maker_post_only_enabled: e.target.checked })}
+                      className="rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 h-4 w-4 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-amber-900">Maker Post-Only Order Routing</span>
+                  </label>
+                  <p className="text-[10px] text-slate-600 leading-relaxed pl-6.5">
+                    When default execution is set to MAKER, strictly routes orders as post-only limit orders inside the bid-ask spread to capture the 0.02% maker rate and eliminate market order crossing slippage.
+                  </p>
                 </div>
               </div>
             </div>

@@ -12,6 +12,9 @@ export interface OrderFlowStats {
   takerBuyRatio: number;
   netCVD: number;
   lastUpdateSecs: number;
+  ofiScore?: number;
+  ofiMomentum?: number;
+  ofiLeadSignal?: string;
 }
 
 export interface OrderBookStats {
@@ -19,6 +22,80 @@ export interface OrderBookStats {
   askDepthBTC: number;
   imbalanceRatio: number;
   lastUpdateSecs: number;
+}
+
+export interface OrderFlowImbalanceResult {
+  ofiScore: number; // -1.0 to +1.0
+  ofiMomentum: number; // rate of change
+  volumeDeltaRatio: number;
+  depthDeltaRatio: number;
+  leadSignal: "BULLISH_LEAD" | "BEARISH_LEAD" | "ABSORPTION_BULL" | "ABSORPTION_BEAR" | "NEUTRAL";
+  description: string;
+}
+
+/**
+ * Calculates continuous Order Flow Imbalance (OFI)
+ * Synthesizes aggressive taker volume delta and passive limit depth imbalance
+ * to detect early institutional order flow displacement ahead of lagging price action.
+ */
+export function calculateOrderFlowImbalance(
+  orderFlowStats: OrderFlowStats,
+  orderBookStats: OrderBookStats,
+  candles1m: Candlestick[],
+  prevOfiScore = 0
+): OrderFlowImbalanceResult {
+  const totalVol = orderFlowStats.takerBuyVolume + orderFlowStats.takerSellVolume;
+  const volDelta = totalVol > 0
+    ? (orderFlowStats.takerBuyVolume - orderFlowStats.takerSellVolume) / totalVol
+    : (orderFlowStats.takerBuyRatio - 0.5) * 2;
+
+  const totalDepth = orderBookStats.bidDepthBTC + orderBookStats.askDepthBTC;
+  const depthDelta = totalDepth > 0
+    ? (orderBookStats.bidDepthBTC - orderBookStats.askDepthBTC) / totalDepth
+    : orderBookStats.imbalanceRatio;
+
+  // Blended OFI: 65% Aggressive Taker Volume Delta + 35% Passive Order Book Depth Delta
+  const ofiScore = Number((0.65 * volDelta + 0.35 * depthDelta).toFixed(4));
+  const ofiMomentum = Number((ofiScore - prevOfiScore).toFixed(4));
+
+  let leadSignal: "BULLISH_LEAD" | "BEARISH_LEAD" | "ABSORPTION_BULL" | "ABSORPTION_BEAR" | "NEUTRAL" = "NEUTRAL";
+  let description = "Order Flow Imbalance is neutral";
+
+  // Check price divergence if candle data is available
+  const lastCandle = candles1m.length > 0 ? candles1m[candles1m.length - 1] : null;
+  const prevCandle = candles1m.length > 1 ? candles1m[candles1m.length - 2] : null;
+  const priceChangePct = lastCandle && prevCandle && prevCandle.close > 0
+    ? ((lastCandle.close - prevCandle.close) / prevCandle.close) * 100
+    : 0;
+
+  if (ofiScore >= 0.28) {
+    if (priceChangePct < -0.04) {
+      leadSignal = "ABSORPTION_BULL";
+      description = `OFI Bullish Absorption: Price dipped (${priceChangePct.toFixed(2)}%) but OFI is strongly positive (+${(ofiScore * 100).toFixed(1)}%) - institutional limit absorption at lows`;
+    } else {
+      leadSignal = "BULLISH_LEAD";
+      description = `OFI Bullish Lead (+${(ofiScore * 100).toFixed(1)}%, Momentum: ${ofiMomentum >= 0 ? "+" : ""}${(ofiMomentum * 100).toFixed(1)}%): Strong aggressive buyer dominance front-running price movement`;
+    }
+  } else if (ofiScore <= -0.28) {
+    if (priceChangePct > 0.04) {
+      leadSignal = "ABSORPTION_BEAR";
+      description = `OFI Bearish Absorption: Price pushed up (+${priceChangePct.toFixed(2)}%) but OFI is strongly negative (${(ofiScore * 100).toFixed(1)}%) - institutional distribution at highs`;
+    } else {
+      leadSignal = "BEARISH_LEAD";
+      description = `OFI Bearish Lead (${(ofiScore * 100).toFixed(1)}%, Momentum: ${ofiMomentum >= 0 ? "+" : ""}${(ofiMomentum * 100).toFixed(1)}%): Heavy taker sell liquidation front-running downward price displacement`;
+    }
+  } else {
+    description = `OFI Balanced (${(ofiScore * 100).toFixed(1)}%): Order flow equilibrium across taker volume and book depth`;
+  }
+
+  return {
+    ofiScore,
+    ofiMomentum,
+    volumeDeltaRatio: Number(volDelta.toFixed(4)),
+    depthDeltaRatio: Number(depthDelta.toFixed(4)),
+    leadSignal,
+    description,
+  };
 }
 
 export interface OpenInterestStats {

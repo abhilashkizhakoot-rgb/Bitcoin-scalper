@@ -750,9 +750,21 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                                    <span className="font-semibold text-slate-700">{Math.floor(t.hold_duration_seconds / 60)}m {t.hold_duration_seconds % 60}s</span>
                                  </div>
                                  <div className="flex justify-between border-b border-slate-200/50 pb-1">
+                                   <span className="text-slate-400">Execution Mode:</span>
+                                   <span className={`font-mono text-xs font-semibold px-1.5 py-0.5 rounded ${t.order_execution === "MAKER" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-blue-50 text-blue-700 border border-blue-200"}`}>
+                                     {t.order_execution || "TAKER"}
+                                   </span>
+                                 </div>
+                                 <div className="flex justify-between border-b border-slate-200/50 pb-1">
                                    <span className="text-slate-400">Commissions Paid:</span>
                                    <span className="font-mono text-slate-700">${t.fees_paid_usdt.toFixed(4)}</span>
                                  </div>
+                                 {t.slippage_usdt !== undefined && (
+                                   <div className="flex justify-between border-b border-slate-200/50 pb-1">
+                                     <span className="text-slate-400">Est. Slippage:</span>
+                                     <span className="font-mono text-slate-700">${t.slippage_usdt.toFixed(4)}</span>
+                                   </div>
+                                 )}
                                  <div className="flex justify-between border-b border-slate-200/50 pb-1">
                                    <span className="text-slate-400">Target Stop Loss:</span>
                                    <span className="font-mono text-rose-600 font-semibold">

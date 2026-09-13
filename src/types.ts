@@ -90,6 +90,9 @@ export interface Trade {
   hold_duration_seconds: number;
   is_win: boolean | null;
   setup_triggered?: string;
+  order_execution?: "MAKER" | "TAKER";
+  slippage_usdt?: number;
+  friction_hurdle_ratio?: number;
   feature_snapshot: Record<string, any>;
   created_at: string;
 }
@@ -302,6 +305,12 @@ export interface StrategyConfig {
     tp_atr_multiplier_trending?: number; // Take Profit ATR multiplier in trending markets (e.g. 1.50x)
     tp_atr_multiplier_ranging?: number; // Take Profit ATR multiplier in range-bound markets (e.g. 1.15x)
     tp_atr_multiplier_volatile?: number; // Take Profit ATR multiplier in high volatility markets (e.g. 1.75x)
+    // Research-backed Microstructure Friction & Expectancy Controls:
+    friction_hurdle_gate_enabled?: boolean; // Blocks trades whose expected profit target fails to clear the round-trip friction hurdle
+    min_net_edge_ratio?: number; // Minimum ratio of Gross Profit Target to Round-Trip Friction (default: 2.2x)
+    estimated_slippage_pct?: number; // Estimated one-way slippage percentage (default: 0.02%)
+    maker_post_only_enabled?: boolean; // In MAKER mode, strictly place passive post-only limit orders inside spread
+    hybrid_regime_switching_enabled?: boolean; // Enforce strict regime separation: Momentum mode in trends vs Reversion mode in chop/ranges
   };
   market_structure: {
     min_breakout_body_ratio: number; // e.g. 0.22 (22% body ratio)
@@ -476,6 +485,13 @@ export interface Candlestick {
   vwap?: number;
   vwap_upper?: number;
   vwap_lower?: number;
+  vwap_std_dev?: number;
+  vwap_band1_upper?: number;
+  vwap_band1_lower?: number;
+  vwap_band2_upper?: number;
+  vwap_band2_lower?: number;
+  vwap_band3_upper?: number;
+  vwap_band3_lower?: number;
 }
 
 export interface ApiCallLog {

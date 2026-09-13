@@ -271,26 +271,33 @@ export class IndicatorCalculator {
   public calculateVWAP(candles: Candlestick[], multiplier = 1.5): void {
     if (candles.length === 0) return;
     let cumPV = 0;
+    let cumPV2 = 0;
     let cumVol = 0;
 
     for (let i = 0; i < candles.length; i++) {
       const c = candles[i];
       const tp = (c.high + c.low + c.close) / 3;
       cumPV += tp * c.volume;
+      cumPV2 += tp * tp * c.volume;
       cumVol += c.volume;
 
       const currentVwap = cumVol > 0 ? cumPV / cumVol : tp;
       c.vwap = currentVwap;
 
-      let weightedVarianceSum = 0;
-      for (let j = 0; j <= i; j++) {
-        const c_j = candles[j];
-        const tp_j = (c_j.high + c_j.low + c_j.close) / 3;
-        weightedVarianceSum += c_j.volume * Math.pow(tp_j - currentVwap, 2);
-      }
-      const stdDev = cumVol > 0 ? Math.sqrt(weightedVarianceSum / cumVol) : 0;
+      // O(N) running variance computation: Var(X) = E[X^2] - (E[X])^2
+      const meanX2 = cumVol > 0 ? cumPV2 / cumVol : tp * tp;
+      const variance = Math.max(0, meanX2 - currentVwap * currentVwap);
+      const stdDev = Math.sqrt(variance);
+
+      c.vwap_std_dev = stdDev;
       c.vwap_upper = currentVwap + multiplier * stdDev;
       c.vwap_lower = currentVwap - multiplier * stdDev;
+      c.vwap_band1_upper = currentVwap + 1.0 * stdDev;
+      c.vwap_band1_lower = currentVwap - 1.0 * stdDev;
+      c.vwap_band2_upper = currentVwap + 2.0 * stdDev;
+      c.vwap_band2_lower = currentVwap - 2.0 * stdDev;
+      c.vwap_band3_upper = currentVwap + 3.0 * stdDev;
+      c.vwap_band3_lower = currentVwap - 3.0 * stdDev;
     }
   }
 

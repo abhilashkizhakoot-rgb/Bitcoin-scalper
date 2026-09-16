@@ -2593,6 +2593,21 @@ export default function ConfigPage({
                   </p>
                 </div>
 
+                <div className="space-y-2 p-3 bg-amber-50/50 rounded-lg border border-amber-200">
+                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                    <input
+                      type="checkbox"
+                      checked={riskConfig.hard_time_limit_29m_enabled !== false}
+                      onChange={(e) => setRiskConfig({ ...riskConfig, hard_time_limit_29m_enabled: e.target.checked })}
+                      className="rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 h-4 w-4 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-amber-950">29-Minute Hard Time-Limit Exit</span>
+                  </label>
+                  <p className="text-[10px] text-slate-600 leading-relaxed pl-6.5">
+                    Enforces an automatic time-based exit before 30 minutes. When toggled <span className="font-semibold text-rose-700">OFF</span>, trades will never be prematurely closed due to duration alone and will run indefinitely until hitting Stop Loss or Take Profit.
+                  </p>
+                </div>
+
                 <div className="space-y-2 p-3 bg-indigo-50/50 rounded-lg border border-indigo-100">
                   <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
                     <input

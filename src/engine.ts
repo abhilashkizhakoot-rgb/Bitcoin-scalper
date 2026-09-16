@@ -8271,6 +8271,7 @@ class TradingEngine {
     // 2. If trade is UNDERWATER / STAGNANT at 25+ minutes:
     //    Exit before minute 30 (at 28m) to lock in the 0% exit fee waiver, avoid roll-over into full SL,
     //    and free margin for the next high-conviction setup.
+    const hardTimeLimitEnabled = config.risk_management?.hard_time_limit_29m_enabled !== false;
     const smartStallEnabled = config.risk_management?.smart_stall_exit_enabled !== false;
     const stallEvalSec = (config.risk_management?.stall_evaluation_minutes || 25) * 60;
     const maxRunnerSec = (config.risk_management?.max_trade_duration_minutes || 60) * 60;
@@ -8298,7 +8299,7 @@ class TradingEngine {
           }
 
           // B. Absolute duration ceiling for profitable runners (default: 60 mins) to prevent indefinite capital lock
-          if (durationSec >= maxRunnerSec) {
+          if (hardTimeLimitEnabled && durationSec >= maxRunnerSec) {
             shouldExit = true;
             reason = ExitReason.TIME_LIMIT_29MIN;
             this.log(`  [SMART RUNNER CEILING] Trade ${this.activeTrade.id} reached maximum runner holding time of ${(durationSec / 60).toFixed(0)}m in profit (+$${currentPnL.toFixed(2)} USD). Securing profit at market.`);
@@ -8306,15 +8307,15 @@ class TradingEngine {
         } else {
           // UNDERWATER / STAGNANT TRADE:
           // Exit before 30-minute fee deadline (at 28 minutes) to capture 0% Delta exit fee waiver and prevent deep SL rollover
-          if (durationSec >= 28 * 60) {
+          if (hardTimeLimitEnabled && durationSec >= 28 * 60) {
             shouldExit = true;
             reason = ExitReason.STALL_DECAY;
             this.log(`  [SMART STALL EXIT] Trade ${this.activeTrade.id} underwater/stagnating ($${currentPnL.toFixed(2)} USDT, ${priceReturnPct.toFixed(2)}%) after ${(durationSec / 60).toFixed(1)}m. Executing Smart Stall Exit before 30m fee deadline to secure 0% Delta fee waiver and free margin.`);
           }
         }
       }
-    } else {
-      // Legacy fallback: Hard cutoff at 29 minutes regardless of PnL
+    } else if (hardTimeLimitEnabled) {
+      // Legacy fallback: Hard cutoff at 29 minutes regardless of PnL (only if hard time limit is enabled)
       if (durationSec >= 29 * 60) {
         shouldExit = true;
         reason = ExitReason.TIME_LIMIT_29MIN;

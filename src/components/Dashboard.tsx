@@ -516,15 +516,22 @@ export default function Dashboard({
                   </div>
 
                   {/* hold progress bar out of 29 minutes */}
-                  <div className="space-y-1 mt-2">
-                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200">
-                      <div
-                        className="bg-indigo-600 h-full transition-all duration-1000 rounded-full"
-                        style={{ width: `${Math.min(100, (activeTrade.hold_duration_seconds / (29 * 60)) * 100)}%` }}
-                      ></div>
+                  {status?.config?.risk_management?.hard_time_limit_29m_enabled !== false ? (
+                    <div className="space-y-1 mt-2">
+                      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200">
+                        <div
+                          className="bg-indigo-600 h-full transition-all duration-1000 rounded-full"
+                          style={{ width: `${Math.min(100, (activeTrade.hold_duration_seconds / (29 * 60)) * 100)}%` }}
+                        ></div>
+                      </div>
+                      <p className="text-[10px] font-mono text-slate-400 text-right">Hard deadline in 29 min</p>
                     </div>
-                    <p className="text-[10px] font-mono text-slate-400 text-right">Hard deadline in 29 min</p>
-                  </div>
+                  ) : (
+                    <div className="mt-2 pt-1 flex items-center justify-between border-t border-slate-100 text-[10px] font-mono text-slate-400">
+                      <span>29m Hard Cutoff:</span>
+                      <span className="font-semibold text-emerald-600 uppercase">Disabled (Unlimited Runner Mode)</span>
+                    </div>
+                  )}
                 </motion.div>
               ) : (
                 <motion.div

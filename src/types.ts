@@ -278,6 +278,7 @@ export interface StrategyConfig {
     delta_india_gst_enabled?: boolean; // Whether to apply 18% GST to trading fees
     delta_scalper_offer_enabled?: boolean; // Pay zero closing fee if trade is closed within 30 minutes
     smart_stall_exit_enabled?: boolean; // Enable Smart Stall Exit: let profitable trades run past 29m while cutting stagnant/underwater trades before 30m fee deadline
+    hard_time_limit_29m_enabled?: boolean; // Enable or disable 29-minute hard cutoff exit (default: true)
     stall_evaluation_minutes?: number; // Minute mark to begin smart stall evaluation (default: 25)
     max_trade_duration_minutes?: number; // Max holding time ceiling for profitable runners (default: 60)
     default_order_execution?: "MAKER" | "TAKER"; // Default order execution type

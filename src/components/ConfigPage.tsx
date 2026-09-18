@@ -23,8 +23,19 @@ import {
   Download,
   Upload,
   CheckCircle,
+  Check,
+  X,
+  Zap,
+  RefreshCw,
+  Filter,
+  Compass,
+  AlertTriangle,
+  Play,
+  ToggleLeft,
+  ToggleRight,
+  Info,
 } from "lucide-react";
-import { StrategyConfig, ConfigHistoryEntry, NewsSource } from "../types.js";
+import { StrategyConfig, ConfigHistoryEntry, NewsSource, MarketRegime } from "../types.js";
 
 const AVAILABLE_GATES = [
   { id: "catboost", label: "CatBoost AI Prediction Threshold", supportsWeight: true },
@@ -50,6 +61,8 @@ interface ConfigPageProps {
   profiles: Record<string, StrategyConfig>;
   history: ConfigHistoryEntry[];
   onRefresh: () => void;
+  currentRegime?: MarketRegime;
+  dynamicSetupsStatus?: any[];
 }
 
 const parseInputNumber = (val: string, isFloat = false) => {
@@ -65,6 +78,8 @@ export default function ConfigPage({
   profiles,
   history,
   onRefresh,
+  currentRegime,
+  dynamicSetupsStatus,
 }: ConfigPageProps) {
   const [activeTab, setActiveTab] = useState<"general" | "ml" | "sentiment" | "risk" | "profiles" | "history" | "market_structure">("general");
   const [newProfileName, setNewProfileName] = useState("");
@@ -199,6 +214,7 @@ export default function ConfigPage({
     crossover_only_adx_threshold: 25,
     crossover_only_lookback_candles: 5,
     timeframe_minutes: 5,
+    liquidity_sweep_enabled: true,
   });
 
   const configJson = useMemo(() => (config ? JSON.stringify(config) : ""), [config]);
@@ -301,6 +317,11 @@ export default function ConfigPage({
         crossover_only_adx_threshold: 25,
         crossover_only_lookback_candles: 5,
         timeframe_minutes: 5,
+        liquidity_sweep_enabled: true,
+        dynamic_mean_reversion_max_adx: 32,
+        dynamic_trend_min_adx: 20,
+        dynamic_trend_max_chop_index: 58,
+        dynamic_breakout_min_atr: 15,
       }
     };
 
@@ -3281,11 +3302,629 @@ export default function ConfigPage({
         {/* ================= MARKET STRUCTURE SETUP TAB ================= */}
         {activeTab === "market_structure" && (
           <div className="space-y-6">
-            <div>
-              <h3 className="font-sans font-bold text-sm text-slate-800">Market Structure Setup</h3>
-              <p className="text-xs text-slate-400 font-sans mt-1">
-                Configure breakout confirmation metrics, immediate entry triggers, order flow softener bypass levels, and dynamic long-term EMA filters.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-sans font-bold text-sm text-slate-800">Market Structure Setup</h3>
+                <p className="text-xs text-slate-400 font-sans mt-1">
+                  Configure breakout confirmation metrics, immediate entry triggers, order flow softener bypass levels, and dynamic long-term EMA filters.
+                </p>
+              </div>
+              <button
+                onClick={() => handleSaveCategory("market_structure", msConfig)}
+                className="self-start sm:self-auto bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-sans font-semibold px-4 py-2 rounded-lg transition-colors duration-150 cursor-pointer shadow-sm"
+              >
+                SAVE PARAMETERS
+              </button>
+            </div>
+
+            {/* ================= TACTICAL STRATEGY SETUPS MASTER ACTIVATION HUB ================= */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm text-white" id="strategy-setups-master-hub">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800 gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-indigo-400" />
+                    <h4 className="text-xs font-sans font-bold tracking-wide uppercase text-indigo-400">
+                      Tactical Strategy Setups Activation (10 Setups)
+                    </h4>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Master hardware-level switches for all 10 tactical setups. Disabling a setup here blocks it across all market conditions.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                    Active: {[
+                      msConfig.pullback_retest_enabled !== false,
+                      msConfig.ema_pushback_enabled !== false,
+                      msConfig.liquidity_sweep_enabled !== false,
+                      msConfig.fvg_strategy_enabled !== false,
+                      msConfig.failed_auction_strategy_enabled !== false,
+                      msConfig.vwap_band_reversal_enabled !== false,
+                      msConfig.eqh_eql_strategy_enabled !== false,
+                      msConfig.cvd_divergence_strategy_enabled !== false,
+                      msConfig.oi_flush_strategy_enabled !== false,
+                      msConfig.fresh_momentum_strategy_enabled !== false,
+                    ].filter(Boolean).length} / 10
+                  </span>
+                </div>
+              </div>
+
+              {/* 10 Tactical Setup Master Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-4">
+                {[
+                  {
+                    id: "setup_1_pullback_retest",
+                    key: "pullback_retest_enabled",
+                    num: "1",
+                    name: "Pullback & Retest",
+                    category: "Trend Continuation",
+                    color: "emerald",
+                    desc: "HH/LL breakout retest & continuation with candlestick confirmation",
+                    enabled: msConfig.pullback_retest_enabled !== false,
+                  },
+                  {
+                    id: "setup_2_dynamic_ema_pushback",
+                    key: "ema_pushback_enabled",
+                    num: "2",
+                    name: "EMA Pushback",
+                    category: "Trend Pullback",
+                    color: "emerald",
+                    desc: "Adaptive fast/medium EMA zone bounce with reversal confirmation",
+                    enabled: msConfig.ema_pushback_enabled !== false,
+                  },
+                  {
+                    id: "setup_3_liquidity_sweep",
+                    key: "liquidity_sweep_enabled",
+                    num: "3",
+                    name: "Liquidity Sweep",
+                    category: "Mean Reversion",
+                    color: "purple",
+                    desc: "SMC key level stop hunt, pin bar/engulfing rejection reversal",
+                    enabled: msConfig.liquidity_sweep_enabled !== false,
+                  },
+                  {
+                    id: "setup_4_fvg_retest",
+                    key: "fvg_strategy_enabled",
+                    num: "4",
+                    name: "Fair Value Gap",
+                    category: "SMC Imbalance",
+                    color: "indigo",
+                    desc: "3-candle imbalance fill & rejection with directional volume",
+                    enabled: msConfig.fvg_strategy_enabled !== false,
+                  },
+                  {
+                    id: "setup_9_range_failed_auction",
+                    key: "failed_auction_strategy_enabled",
+                    num: "9",
+                    name: "Failed Auction",
+                    category: "Mean Reversion",
+                    color: "amber",
+                    desc: "Range boundary swing failure pattern (SFP) outside value area",
+                    enabled: msConfig.failed_auction_strategy_enabled !== false,
+                  },
+                  {
+                    id: "setup_10_vwap_band_rejection",
+                    key: "vwap_band_reversal_enabled",
+                    num: "10",
+                    name: "VWAP Band Reversal",
+                    category: "Mean Reversion",
+                    color: "amber",
+                    desc: "2.0-2.5 std-dev band exhaustion with momentum deceleration",
+                    enabled: msConfig.vwap_band_reversal_enabled !== false,
+                  },
+                  {
+                    id: "setup_11_eqh_eql_double_touch",
+                    key: "eqh_eql_strategy_enabled",
+                    num: "11",
+                    name: "EQH / EQL Sweep",
+                    category: "Liquidity Sweep",
+                    color: "purple",
+                    desc: "Equal highs/lows liquidity pool run followed by swift rejection",
+                    enabled: msConfig.eqh_eql_strategy_enabled !== false,
+                  },
+                  {
+                    id: "setup_12_cvd_absorption",
+                    key: "cvd_divergence_strategy_enabled",
+                    num: "12",
+                    name: "CVD Absorption",
+                    category: "Order Flow",
+                    color: "cyan",
+                    desc: "Aggressive taker volume absorbed by passive limit orders",
+                    enabled: msConfig.cvd_divergence_strategy_enabled !== false,
+                  },
+                  {
+                    id: "setup_13_oi_flush_cascade",
+                    key: "oi_flush_strategy_enabled",
+                    num: "13",
+                    name: "OI Flush Fade",
+                    category: "Order Flow",
+                    color: "cyan",
+                    desc: "Derivatives cascade liquidation exhaustion and sharp snapback",
+                    enabled: msConfig.oi_flush_strategy_enabled !== false,
+                  },
+                  {
+                    id: "setup_14_fresh_momentum_impulse",
+                    key: "fresh_momentum_strategy_enabled",
+                    num: "14",
+                    name: "Fresh Momentum",
+                    category: "Breakout",
+                    color: "rose",
+                    desc: "Instant high-velocity volume expansion and structural breakout",
+                    enabled: msConfig.fresh_momentum_strategy_enabled !== false,
+                  },
+                ].map((s) => (
+                  <div
+                    key={s.id}
+                    id={`setup-card-${s.id}`}
+                    className={`p-3 rounded-lg border transition-all flex flex-col justify-between ${
+                      s.enabled
+                        ? "bg-slate-800/80 border-indigo-500/50 shadow-sm"
+                        : "bg-slate-800/30 border-slate-700/40 opacity-60"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] font-mono font-bold text-slate-300">
+                          SETUP {s.num}
+                        </span>
+                        <button
+                          id={`toggle_${s.id}`}
+                          type="button"
+                          onClick={async () => {
+                            const nextVal = !s.enabled;
+                            setMsConfig({ ...msConfig, [s.key]: nextVal });
+                            try {
+                              await apiFetch("/api/strategy/toggle-setup", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ setupId: s.id, enabled: nextVal }),
+                              });
+                            } catch (e) {
+                              console.error("Failed to toggle setup:", e);
+                            }
+                          }}
+                          className={`relative inline-flex h-4 w-8 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                            s.enabled ? "bg-indigo-500" : "bg-slate-700"
+                          }`}
+                          title={s.enabled ? `Click to disable ${s.name}` : `Click to enable ${s.name}`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                              s.enabled ? "translate-x-4" : "translate-x-0"
+                            }`}
+                          />
+                        </button>
+                      </div>
+                      <p className="text-xs font-sans font-semibold text-white truncate" title={s.name}>
+                        {s.name}
+                      </p>
+                      <span className={`inline-block text-[9px] font-mono px-1.5 py-0.2 rounded mt-1 ${
+                        s.category === "Trend Continuation" || s.category === "Trend Pullback"
+                          ? "bg-emerald-950 text-emerald-400 border border-emerald-800"
+                          : s.category === "Mean Reversion"
+                          ? "bg-amber-950 text-amber-400 border border-amber-800"
+                          : s.category === "Liquidity Sweep" || s.category === "SMC Imbalance"
+                          ? "bg-purple-950 text-purple-400 border border-purple-800"
+                          : s.category === "Order Flow"
+                          ? "bg-cyan-950 text-cyan-400 border border-cyan-800"
+                          : "bg-rose-950 text-rose-400 border border-rose-800"
+                      }`}>
+                        {s.category}
+                      </span>
+                      <p className="text-[10px] text-slate-400 mt-1.5 line-clamp-2 leading-tight">
+                        {s.desc}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ================= DYNAMIC MARKET REGIME GATING MATRIX ================= */}
+            <div className="bg-white border border-slate-200/80 rounded-xl p-5 space-y-4 shadow-sm" id="dynamic-regime-gating-matrix">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-3 border-b border-slate-100 gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Compass className="w-4 h-4 text-indigo-600" />
+                    <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-sans">
+                      Dynamic Market Regime Gating Matrix
+                    </h4>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">
+                      Regime-Aware Scalper
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Automatically permits or blocks setups based on the current classified market regime. When price transitions into a Strong Trend, mean-reversion setups are dynamically blocked to avoid counter-trend steamrolling.
+                  </p>
+                </div>
+
+                {/* Master Switch for Matrix Gating */}
+                <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/70 px-3 py-2 rounded-lg shrink-0">
+                  <div className="text-right">
+                    <p className="text-[11px] font-semibold text-slate-800">Enforce Regime Matrix</p>
+                    <p className="text-[9px] font-mono text-slate-400">
+                      {msConfig.dynamic_regime_setup_matrix_enabled !== false ? "STRICT GATING ACTIVE" : "BYPASSED (ALL REGIMES)"}
+                    </p>
+                  </div>
+                  <button
+                    id="toggle-dynamic-regime-matrix"
+                    type="button"
+                    onClick={async () => {
+                      const next = msConfig.dynamic_regime_setup_matrix_enabled === false ? true : false;
+                      setMsConfig({ ...msConfig, dynamic_regime_setup_matrix_enabled: next });
+                      try {
+                        await apiFetch("/api/strategy/dynamic-conditions/update", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ dynamic_regime_setup_matrix_enabled: next }),
+                        });
+                      } catch (e) {
+                        console.error("Failed to toggle matrix master:", e);
+                      }
+                    }}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.dynamic_regime_setup_matrix_enabled !== false ? "bg-indigo-600" : "bg-slate-300"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.dynamic_regime_setup_matrix_enabled !== false ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* Current Active Regime Live Status Banner */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">Current Active Regime:</span>
+                  <span className={`px-2.5 py-0.5 rounded font-mono font-bold text-xs uppercase tracking-wide border ${
+                    currentRegime === MarketRegime.STRONG_UPTREND
+                      ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                      : currentRegime === MarketRegime.STRONG_DOWNTREND
+                      ? "bg-rose-100 text-rose-800 border-rose-300"
+                      : currentRegime === MarketRegime.HIGH_VOLATILITY
+                      ? "bg-purple-100 text-purple-800 border-purple-300"
+                      : currentRegime === MarketRegime.LOW_VOLATILITY
+                      ? "bg-sky-100 text-sky-800 border-sky-300"
+                      : "bg-amber-100 text-amber-800 border-amber-300"
+                  }`}>
+                    {currentRegime || "RANGE_BOUND"}
+                  </span>
+                  <span className="text-[11px] text-slate-500 hidden sm:inline">
+                    — The highlighted column below is currently evaluated by the live scalper engine.
+                  </span>
+                </div>
+
+                {/* Presets Bar */}
+                <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase font-bold mr-1">Presets:</span>
+                  {[
+                    { id: "QUANT_OPTIMAL", label: "Quant Optimal", title: "Recommended: Optimal trend vs range allocation" },
+                    { id: "STRICT_TREND", label: "Strict Trend", title: "Only trend and breakout setups during trends" },
+                    { id: "STRICT_RANGE", label: "Strict Range", title: "Only range and mean-reversion setups" },
+                    { id: "ALL_PERMISSIVE", label: "All Regimes", title: "Allow every setup across all 5 regimes" },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      title={p.title}
+                      onClick={async () => {
+                        try {
+                          const res = await apiFetch("/api/strategy/regime-matrix/preset", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ preset: p.id }),
+                          });
+                          if (res.ok) {
+                            const data = await res.json();
+                            if (data.setup_regime_matrix) {
+                              setMsConfig({ ...msConfig, setup_regime_matrix: data.setup_regime_matrix });
+                            }
+                          }
+                        } catch (e) {
+                          console.error("Failed to apply preset:", e);
+                        }
+                      }}
+                      className="px-2 py-1 text-[10px] font-mono font-medium rounded border border-slate-200 bg-white hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-300 text-slate-600 transition-colors cursor-pointer"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Matrix Table */}
+              <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-100/80 border-b border-slate-200 text-[10px] font-mono uppercase text-slate-500">
+                      <th className="py-2.5 px-3 font-semibold">Tactical Setup</th>
+                      <th className="py-2.5 px-2 font-semibold">Category</th>
+                      {[
+                        { id: MarketRegime.STRONG_UPTREND, label: "Strong Uptrend", icon: "📈", color: "emerald" },
+                        { id: MarketRegime.STRONG_DOWNTREND, label: "Strong Downtrend", icon: "📉", color: "rose" },
+                        { id: MarketRegime.RANGE_BOUND, label: "Range Bound", icon: "⚖️", color: "amber" },
+                        { id: MarketRegime.HIGH_VOLATILITY, label: "High Volatility", icon: "⚡", color: "purple" },
+                        { id: MarketRegime.LOW_VOLATILITY, label: "Low Volatility", icon: "💤", color: "sky" },
+                      ].map((reg) => {
+                        const isLiveCurrent = currentRegime === reg.id || (!currentRegime && reg.id === MarketRegime.RANGE_BOUND);
+                        return (
+                          <th
+                            key={reg.id}
+                            className={`py-2.5 px-3 font-semibold text-center ${
+                              isLiveCurrent ? "bg-indigo-100/70 text-indigo-900 border-x-2 border-indigo-400 font-bold" : ""
+                            }`}
+                          >
+                            <div className="flex items-center justify-center gap-1">
+                              <span>{reg.icon}</span>
+                              <span>{reg.label}</span>
+                            </div>
+                            {isLiveCurrent && (
+                              <span className="block text-[8px] font-bold text-indigo-600 tracking-wider">LIVE</span>
+                            )}
+                          </th>
+                        );
+                      })}
+                      <th className="py-2.5 px-3 font-semibold text-center">Live Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-sans">
+                    {(() => {
+                      const defaultMatrix: Record<string, MarketRegime[]> = {
+                        setup_1_pullback_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+                        setup_2_dynamic_ema_pushback: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+                        setup_3_liquidity_sweep: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+                        setup_4_fvg_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
+                        setup_9_range_failed_auction: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+                        setup_10_vwap_band_rejection: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+                        setup_11_eqh_eql_double_touch: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+                        setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
+                        setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
+                        setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+                      };
+                      const activeMatrix = msConfig.setup_regime_matrix || defaultMatrix;
+
+                      const setupsList = [
+                        { id: "setup_1_pullback_retest", num: "1", name: "Pullback & Retest", key: "pullback_retest_enabled", category: "Trend Continuation" },
+                        { id: "setup_2_dynamic_ema_pushback", num: "2", name: "EMA Pushback", key: "ema_pushback_enabled", category: "Trend Pullback" },
+                        { id: "setup_3_liquidity_sweep", num: "3", name: "Liquidity Sweep", key: "liquidity_sweep_enabled", category: "Mean Reversion" },
+                        { id: "setup_4_fvg_retest", num: "4", name: "Fair Value Gap", key: "fvg_strategy_enabled", category: "SMC Imbalance" },
+                        { id: "setup_9_range_failed_auction", num: "9", name: "Failed Auction", key: "failed_auction_strategy_enabled", category: "Mean Reversion" },
+                        { id: "setup_10_vwap_band_rejection", num: "10", name: "VWAP Band Rejection", key: "vwap_band_reversal_enabled", category: "Mean Reversion" },
+                        { id: "setup_11_eqh_eql_double_touch", num: "11", name: "EQH / EQL Double Touch", key: "eqh_eql_strategy_enabled", category: "Liquidity Sweep" },
+                        { id: "setup_12_cvd_absorption", num: "12", name: "CVD Absorption", key: "cvd_divergence_strategy_enabled", category: "Order Flow" },
+                        { id: "setup_13_oi_flush_cascade", num: "13", name: "OI Flush Fade", key: "oi_flush_strategy_enabled", category: "Order Flow" },
+                        { id: "setup_14_fresh_momentum_impulse", num: "14", name: "Fresh Momentum Impulse", key: "fresh_momentum_strategy_enabled", category: "Breakout" },
+                      ];
+
+                      return setupsList.map((setup) => {
+                        const isMasterOn = (msConfig as any)[setup.key] !== false;
+                        const allowedRegimes: MarketRegime[] = activeMatrix[setup.id] || defaultMatrix[setup.id] || [];
+                        const effectiveRegime = currentRegime || MarketRegime.RANGE_BOUND;
+                        const isAllowedInCurrent = allowedRegimes.includes(effectiveRegime);
+                        const isMatrixEnforced = msConfig.dynamic_regime_setup_matrix_enabled !== false;
+                        const isLiveActive = isMasterOn && (!isMatrixEnforced || isAllowedInCurrent);
+
+                        return (
+                          <tr
+                            key={setup.id}
+                            className={`hover:bg-slate-50/70 transition-colors ${
+                              !isMasterOn ? "opacity-40 bg-slate-50/40" : ""
+                            }`}
+                          >
+                            <td className="py-2.5 px-3">
+                              <div className="font-semibold text-slate-800 text-xs flex items-center gap-1.5">
+                                <span className="font-mono text-[10px] text-slate-400 font-bold">#{setup.num}</span>
+                                <span>{setup.name}</span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-2">
+                              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
+                                setup.category.includes("Trend")
+                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  : setup.category.includes("Reversion")
+                                  ? "bg-amber-50 text-amber-700 border border-amber-200"
+                                  : setup.category.includes("Order Flow")
+                                  ? "bg-cyan-50 text-cyan-700 border border-cyan-200"
+                                  : setup.category.includes("Breakout")
+                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                  : "bg-purple-50 text-purple-700 border border-purple-200"
+                              }`}>
+                                {setup.category}
+                              </span>
+                            </td>
+
+                            {[
+                              MarketRegime.STRONG_UPTREND,
+                              MarketRegime.STRONG_DOWNTREND,
+                              MarketRegime.RANGE_BOUND,
+                              MarketRegime.HIGH_VOLATILITY,
+                              MarketRegime.LOW_VOLATILITY,
+                            ].map((reg) => {
+                              const isChecked = allowedRegimes.includes(reg);
+                              const isLiveCol = effectiveRegime === reg;
+
+                              return (
+                                <td
+                                  key={reg}
+                                  className={`py-2 px-3 text-center ${
+                                    isLiveCol ? "bg-indigo-50/40 border-x-2 border-indigo-400" : ""
+                                  }`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const nextList = isChecked
+                                        ? allowedRegimes.filter((r) => r !== reg)
+                                        : [...allowedRegimes, reg];
+                                      const nextMatrix = { ...activeMatrix, [setup.id]: nextList };
+                                      setMsConfig({ ...msConfig, setup_regime_matrix: nextMatrix });
+                                      try {
+                                        await apiFetch("/api/strategy/regime-matrix/toggle-cell", {
+                                          method: "POST",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ setupId: setup.id, regime: reg }),
+                                        });
+                                      } catch (e) {
+                                        console.error("Failed to toggle cell:", e);
+                                      }
+                                    }}
+                                    className={`inline-flex items-center justify-center w-6 h-6 rounded border transition-all cursor-pointer ${
+                                      isChecked
+                                        ? "bg-indigo-600 border-indigo-700 text-white shadow-xs"
+                                        : "bg-white border-slate-200 text-slate-300 hover:border-slate-300 hover:bg-slate-100"
+                                    }`}
+                                    title={`${isChecked ? "Allowed" : "Blocked"} in ${reg}. Click to toggle.`}
+                                  >
+                                    {isChecked ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : <X className="w-3 h-3 text-slate-300" />}
+                                  </button>
+                                </td>
+                              );
+                            })}
+
+                            <td className="py-2.5 px-3 text-center">
+                              <span className={`inline-block text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
+                                !isMasterOn
+                                  ? "bg-slate-100 text-slate-500 border border-slate-200"
+                                  : isLiveActive
+                                  ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                  : "bg-amber-100 text-amber-800 border border-amber-300"
+                              }`}>
+                                {!isMasterOn ? "DISABLED" : isLiveActive ? "ELIGIBLE" : "REGIME GATED"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* ================= DYNAMIC QUANTITATIVE CONDITION RULES ================= */}
+            <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm" id="dynamic-condition-rules">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-indigo-600" />
+                    <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans">
+                      Dynamic Technical Condition Rules (ADX, ATR & Chop Index)
+                    </h4>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Continuous numeric safeguards that dynamically gate setups even if permitted by regime (e.g. blocking counter-trend sweeps when ADX explodes into hyper-trend).
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase font-bold">Rule Guard:</span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const next = msConfig.dynamic_condition_rules_enabled === false ? true : false;
+                      setMsConfig({ ...msConfig, dynamic_condition_rules_enabled: next });
+                      try {
+                        await apiFetch("/api/strategy/dynamic-conditions/update", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ dynamic_condition_rules_enabled: next }),
+                        });
+                      } catch (e) {
+                        console.error("Failed to toggle condition rules:", e);
+                      }
+                    }}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.dynamic_condition_rules_enabled !== false ? "bg-indigo-600" : "bg-slate-300"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.dynamic_condition_rules_enabled !== false ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Rule 1: Mean Reversion Max ADX */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-3 space-y-1.5">
+                  <label className="text-xs font-mono text-slate-500 uppercase font-semibold">
+                    Mean-Reversion ADX Ceiling
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="15"
+                    max="60"
+                    value={msConfig.dynamic_mean_reversion_max_adx ?? 32}
+                    onChange={(e) => setMsConfig({ ...msConfig, dynamic_mean_reversion_max_adx: parseInputNumber(e.target.value) })}
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs text-slate-800 font-mono focus:ring-1 focus:ring-indigo-400 outline-none"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-tight">
+                    Blocks Setups 3, 9, 10, 11 if ADX &gt; this threshold to prevent stepping in front of runaway parabolic trends (Standard: 32).
+                  </p>
+                </div>
+
+                {/* Rule 2: Trend Continuation Min ADX */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-3 space-y-1.5">
+                  <label className="text-xs font-mono text-slate-500 uppercase font-semibold">
+                    Trend Pullback ADX Floor
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="10"
+                    max="45"
+                    value={msConfig.dynamic_trend_min_adx ?? 20}
+                    onChange={(e) => setMsConfig({ ...msConfig, dynamic_trend_min_adx: parseInputNumber(e.target.value) })}
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs text-slate-800 font-mono focus:ring-1 focus:ring-indigo-400 outline-none"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-tight">
+                    Requires minimum directional momentum for Setups 1 &amp; 2. If ADX &lt; this floor, price is considered listless chop (Standard: 20).
+                  </p>
+                </div>
+
+                {/* Rule 3: Trend Max Choppiness Index */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-3 space-y-1.5">
+                  <label className="text-xs font-mono text-slate-500 uppercase font-semibold">
+                    Max Choppiness Index Limit
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="40"
+                    max="75"
+                    value={msConfig.dynamic_trend_max_chop_index ?? 58}
+                    onChange={(e) => setMsConfig({ ...msConfig, dynamic_trend_max_chop_index: parseInputNumber(e.target.value) })}
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs text-slate-800 font-mono focus:ring-1 focus:ring-indigo-400 outline-none"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-tight">
+                    Choppiness Index &gt; 61.8 indicates consolidation. Trend setups are blocked if chop exceeds this value (Standard: 58).
+                  </p>
+                </div>
+
+                {/* Rule 4: Breakout Min ATR */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-3 space-y-1.5">
+                  <label className="text-xs font-mono text-slate-500 uppercase font-semibold">
+                    Fresh Breakout ATR Floor ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="5"
+                    max="100"
+                    value={msConfig.dynamic_breakout_min_atr ?? 15}
+                    onChange={(e) => setMsConfig({ ...msConfig, dynamic_breakout_min_atr: parseInputNumber(e.target.value) })}
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs text-slate-800 font-mono focus:ring-1 focus:ring-indigo-400 outline-none"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-tight">
+                    Requires minimum volatility expansion for Setup 14 (Fresh Momentum Breakout). Avoids low-liquidity false breakouts (Standard: $15).
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Section 1: Breakout & Body Confirmations */}
@@ -3790,12 +4429,22 @@ export default function ConfigPage({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
                   <div className="space-y-0.5">
-                    <span className="text-xs font-sans font-semibold text-slate-800">Enable Liquidity Sweep Strategy (Setup 3)</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Enable Liquidity Sweep Strategy (Setup 3)</span>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold ${
+                        msConfig.liquidity_sweep_enabled !== false
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-rose-100 text-rose-800"
+                      }`}>
+                        {msConfig.liquidity_sweep_enabled !== false ? "ENABLED" : "DISABLED"}
+                      </span>
+                    </div>
                     <p className="text-[10px] text-slate-400">Captures fake breakouts and stop hunts at key support/resistance levels.</p>
                   </div>
                   <button
+                    id="setup_3_toggle"
                     type="button"
-                    onClick={() => setMsConfig({ ...msConfig, liquidity_sweep_enabled: !msConfig.liquidity_sweep_enabled })}
+                    onClick={() => setMsConfig({ ...msConfig, liquidity_sweep_enabled: msConfig.liquidity_sweep_enabled === false ? true : false })}
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                       msConfig.liquidity_sweep_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
                     }`}
@@ -3815,8 +4464,9 @@ export default function ConfigPage({
                   </div>
                   <button
                     type="button"
-                    onClick={() => setMsConfig({ ...msConfig, choch_confirmation_enabled: !msConfig.choch_confirmation_enabled })}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    disabled={msConfig.liquidity_sweep_enabled === false}
+                    onClick={() => setMsConfig({ ...msConfig, choch_confirmation_enabled: msConfig.choch_confirmation_enabled === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 ${
                       msConfig.choch_confirmation_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
                     }`}
                   >
@@ -3834,9 +4484,10 @@ export default function ConfigPage({
                     type="number"
                     min="5"
                     max="100"
+                    disabled={msConfig.liquidity_sweep_enabled === false}
                     value={msConfig.liquidity_sweep_lookback_candles || 20}
                     onChange={(e) => setMsConfig({ ...msConfig, liquidity_sweep_lookback_candles: parseInputNumber(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
                   />
                   <p className="text-[10px] text-slate-400">Number of historical candles scanned to identify key range liquidity boundaries (Standard: 20).</p>
                 </div>
@@ -3848,9 +4499,10 @@ export default function ConfigPage({
                     step="0.05"
                     min="0.1"
                     max="0.9"
+                    disabled={msConfig.liquidity_sweep_enabled === false}
                     value={msConfig.liquidity_sweep_min_wick_ratio || 0.35}
                     onChange={(e) => setMsConfig({ ...msConfig, liquidity_sweep_min_wick_ratio: parseInputNumber(e.target.value, true) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
                   />
                   <p className="text-[10px] text-slate-400">Minimum percentage of the sweep candle's total height that must be rejection wick (Standard: 0.35 / 35%).</p>
                 </div>
@@ -3865,7 +4517,7 @@ export default function ConfigPage({
                   </div>
                   <button
                     type="button"
-                    onClick={() => setMsConfig({ ...msConfig, fvg_strategy_enabled: !msConfig.fvg_strategy_enabled })}
+                    onClick={() => setMsConfig({ ...msConfig, fvg_strategy_enabled: msConfig.fvg_strategy_enabled === false ? true : false })}
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                       msConfig.fvg_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
                     }`}
@@ -4416,6 +5068,86 @@ export default function ConfigPage({
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
                     />
                     <p className="text-[10px] text-slate-400">Minimum rejection wick ratio confirming exhaustion of the liquidation cascade (Standard: 45%).</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid 8: Setup 14 - Fresh Momentum Impulse */}
+              <div className="border-t border-slate-100 pt-4 space-y-4">
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Enable Fresh Momentum Impulse Strategy (Setup 14)</span>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold ${
+                        msConfig.fresh_momentum_strategy_enabled !== false
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-rose-100 text-rose-800"
+                      }`}>
+                        {msConfig.fresh_momentum_strategy_enabled !== false ? "ENABLED" : "DISABLED"}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400">Captures early 1m velocity and high-displacement breakouts before exhaustion or deep pullbacks. Bypasses lagging macro regime and 5m MTF when institutional displacement is confirmed.</p>
+                  </div>
+                  <button
+                    id="fresh_momentum_toggle"
+                    type="button"
+                    onClick={() => setMsConfig({ ...msConfig, fresh_momentum_strategy_enabled: msConfig.fresh_momentum_strategy_enabled === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.fresh_momentum_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.fresh_momentum_strategy_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Body-to-Range Ratio</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.30"
+                      max="0.85"
+                      disabled={msConfig.fresh_momentum_strategy_enabled === false}
+                      value={msConfig.fresh_momentum_min_body_ratio ?? 0.48}
+                      onChange={(e) => setMsConfig({ ...msConfig, fresh_momentum_min_body_ratio: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Minimum candle body / total range ratio confirming institutional displacement (Standard: 0.48 / 48%).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Volume Surge Mult</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="1.0"
+                      max="3.0"
+                      disabled={msConfig.fresh_momentum_strategy_enabled === false}
+                      value={msConfig.fresh_momentum_min_vol_mult ?? 1.15}
+                      onChange={(e) => setMsConfig({ ...msConfig, fresh_momentum_min_vol_mult: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Volume surge multiplier above 20-period average on the breakout candle (Standard: 1.15x).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Max Chase ATR Distance</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="1.5"
+                      max="8.0"
+                      disabled={msConfig.fresh_momentum_strategy_enabled === false}
+                      value={msConfig.fresh_momentum_max_chase_atr ?? 4.5}
+                      onChange={(e) => setMsConfig({ ...msConfig, fresh_momentum_max_chase_atr: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Maximum distance (in ATRs) price is permitted to run from impulse origin before entering (Standard: 4.5x).</p>
                   </div>
                 </div>
               </div>

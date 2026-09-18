@@ -10,7 +10,7 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { dbManager } from "./src/db_sim.js";
 import { tradingEngine } from "./src/engine.js";
-import { ConnectionStatus } from "./src/types.js";
+import { ConnectionStatus, MarketRegime } from "./src/types.js";
 import { GoogleGenAI, Type } from "@google/genai";
 
 function getRequestBaseUrl(req: express.Request): string {
@@ -364,6 +364,171 @@ async function startServer() {
     } else {
       res.json(result);
     }
+  });
+
+  app.post("/api/strategy/toggle-setup-3", (req, res) => {
+    const currentConfig = dbManager.getConfig();
+    const currentVal = currentConfig.market_structure?.liquidity_sweep_enabled !== false;
+    const newVal = req.body && req.body.enabled !== undefined ? !!req.body.enabled : !currentVal;
+    dbManager.updateConfig("market_structure", { liquidity_sweep_enabled: newVal }, "Setup 3 Toggle");
+    res.json({ success: true, liquidity_sweep_enabled: newVal, config: dbManager.getConfig() });
+  });
+
+  const setupFieldMap: Record<string, string> = {
+    setup_1_pullback_retest: "pullback_retest_enabled",
+    setup_2_dynamic_ema_pushback: "ema_pushback_enabled",
+    setup_3_liquidity_sweep: "liquidity_sweep_enabled",
+    setup_4_fvg_retest: "fvg_strategy_enabled",
+    setup_9_range_failed_auction: "failed_auction_strategy_enabled",
+    setup_10_vwap_band_rejection: "vwap_band_reversal_enabled",
+    setup_11_eqh_eql_double_touch: "eqh_eql_strategy_enabled",
+    setup_12_cvd_absorption: "cvd_divergence_strategy_enabled",
+    setup_13_oi_flush_cascade: "oi_flush_strategy_enabled",
+    setup_14_fresh_momentum_impulse: "fresh_momentum_strategy_enabled",
+  };
+
+  app.post("/api/strategy/toggle-setup", (req, res) => {
+    const { setupId, enabled } = req.body || {};
+    if (!setupId || !setupFieldMap[setupId]) {
+      return res.status(400).json({ success: false, message: `Invalid setupId: ${setupId}` });
+    }
+    const currentConfig = dbManager.getConfig();
+    const field = setupFieldMap[setupId];
+    const currentVal = (currentConfig.market_structure as any)?.[field] !== false;
+    const newVal = enabled !== undefined ? !!enabled : !currentVal;
+    dbManager.updateConfig("market_structure", { [field]: newVal }, `Toggle ${setupId}`);
+    res.json({ success: true, setupId, enabled: newVal, config: dbManager.getConfig() });
+  });
+
+  app.post("/api/strategy/regime-matrix/toggle-cell", (req, res) => {
+    const { setupId, regime, enabled } = req.body || {};
+    if (!setupId || !regime) {
+      return res.status(400).json({ success: false, message: "Missing setupId or regime" });
+    }
+    const currentConfig = dbManager.getConfig();
+    const ms = (currentConfig.market_structure || {}) as any;
+    const defaultMatrix: Record<string, MarketRegime[]> = {
+      setup_1_pullback_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+      setup_2_dynamic_ema_pushback: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+      setup_3_liquidity_sweep: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+      setup_4_fvg_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
+      setup_9_range_failed_auction: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+      setup_10_vwap_band_rejection: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+      setup_11_eqh_eql_double_touch: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+      setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
+      setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
+      setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+    };
+
+    const currentMatrix = { ...(ms.setup_regime_matrix || defaultMatrix) };
+    const currentList = currentMatrix[setupId] ? [...currentMatrix[setupId]] : (defaultMatrix[setupId] ? [...defaultMatrix[setupId]] : []);
+
+    let updatedList: MarketRegime[];
+    if (enabled !== undefined) {
+      if (enabled && !currentList.includes(regime)) {
+        updatedList = [...currentList, regime];
+      } else if (!enabled) {
+        updatedList = currentList.filter(r => r !== regime);
+      } else {
+        updatedList = currentList;
+      }
+    } else {
+      if (currentList.includes(regime)) {
+        updatedList = currentList.filter(r => r !== regime);
+      } else {
+        updatedList = [...currentList, regime];
+      }
+    }
+
+    currentMatrix[setupId] = updatedList;
+    dbManager.updateConfig("market_structure", { setup_regime_matrix: currentMatrix }, `Matrix Toggle ${setupId} - ${regime}`);
+    res.json({ success: true, setupId, regime, allowed: updatedList.includes(regime), setup_regime_matrix: currentMatrix });
+  });
+
+  app.post("/api/strategy/regime-matrix/preset", (req, res) => {
+    const { preset } = req.body || {};
+    let matrix: Record<string, MarketRegime[]>;
+
+    if (preset === "ALL_PERMISSIVE") {
+      const all = Object.values(MarketRegime);
+      matrix = {
+        setup_1_pullback_retest: all,
+        setup_2_dynamic_ema_pushback: all,
+        setup_3_liquidity_sweep: all,
+        setup_4_fvg_retest: all,
+        setup_9_range_failed_auction: all,
+        setup_10_vwap_band_rejection: all,
+        setup_11_eqh_eql_double_touch: all,
+        setup_12_cvd_absorption: all,
+        setup_13_oi_flush_cascade: all,
+        setup_14_fresh_momentum_impulse: all,
+      };
+    } else if (preset === "STRICT_TREND") {
+      matrix = {
+        setup_1_pullback_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+        setup_2_dynamic_ema_pushback: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+        setup_3_liquidity_sweep: [],
+        setup_4_fvg_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+        setup_9_range_failed_auction: [],
+        setup_10_vwap_band_rejection: [],
+        setup_11_eqh_eql_double_touch: [],
+        setup_12_cvd_absorption: [],
+        setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY],
+        setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+      };
+    } else if (preset === "STRICT_RANGE") {
+      matrix = {
+        setup_1_pullback_retest: [],
+        setup_2_dynamic_ema_pushback: [],
+        setup_3_liquidity_sweep: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+        setup_4_fvg_retest: [MarketRegime.RANGE_BOUND],
+        setup_9_range_failed_auction: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+        setup_10_vwap_band_rejection: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+        setup_11_eqh_eql_double_touch: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+        setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND],
+        setup_13_oi_flush_cascade: [MarketRegime.RANGE_BOUND],
+        setup_14_fresh_momentum_impulse: [],
+      };
+    } else {
+      // QUANT_OPTIMAL (Default)
+      matrix = {
+        setup_1_pullback_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+        setup_2_dynamic_ema_pushback: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+        setup_3_liquidity_sweep: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+        setup_4_fvg_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
+        setup_9_range_failed_auction: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+        setup_10_vwap_band_rejection: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+        setup_11_eqh_eql_double_touch: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+        setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
+        setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
+        setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+      };
+    }
+
+    dbManager.updateConfig("market_structure", { setup_regime_matrix: matrix }, `Preset applied: ${preset || "QUANT_OPTIMAL"}`);
+    res.json({ success: true, preset: preset || "QUANT_OPTIMAL", setup_regime_matrix: matrix });
+  });
+
+  app.post("/api/strategy/dynamic-conditions/update", (req, res) => {
+    const payload = req.body || {};
+    const updates: any = {};
+    const allowedKeys = [
+      "dynamic_regime_setup_matrix_enabled",
+      "dynamic_condition_rules_enabled",
+      "dynamic_mean_reversion_max_adx",
+      "dynamic_trend_min_adx",
+      "dynamic_trend_max_chop_index",
+      "dynamic_breakout_min_atr",
+    ];
+
+    for (const key of allowedKeys) {
+      if (payload[key] !== undefined) {
+        updates[key] = payload[key];
+      }
+    }
+
+    dbManager.updateConfig("market_structure", updates, "Dynamic Conditions Rules Update");
+    res.json({ success: true, updates, config: dbManager.getConfig() });
   });
 
   // ----------------------------------------------------

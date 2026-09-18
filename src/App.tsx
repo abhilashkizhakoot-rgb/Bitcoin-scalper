@@ -715,6 +715,8 @@ export default function App() {
                 profiles={profiles}
                 history={configHistory}
                 onRefresh={fetchAllData}
+                currentRegime={status?.market_regime}
+                dynamicSetupsStatus={status?.dynamic_setups_status}
               />
             )}
 

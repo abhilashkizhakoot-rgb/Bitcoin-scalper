@@ -26,6 +26,7 @@ import {
   MarketStructureSubCondition,
   SetupId,
   TradingSetupResult,
+  DynamicSetupStatus,
 } from "./types.js";
 import { FinBertSentimentModel } from "./finbert.js";
 import { CrossSourceSentimentAggregator } from "./sentimentEngine.js";
@@ -1240,6 +1241,8 @@ class TradingEngine {
       trade_size_multiplier: this.getTradeSizeMultiplier(),
       market_structure: this.getTrendMarketStructure(),
       market_structure_config: config.market_structure || null,
+      dynamic_setups_status: this.getDynamicSetupsStatus(),
+      config: config,
     };
   }
 
@@ -3851,8 +3854,21 @@ class TradingEngine {
         ? (this.orderFlowStats.takerBuyRatio >= ms.hf_orderflow_taker_buy_ratio_long || this.orderBookStats.imbalanceRatio >= ms.hf_orderflow_imbalance_ratio_long) 
         : (this.orderFlowStats.takerBuyRatio <= ms.hf_orderflow_taker_buy_ratio_short || this.orderBookStats.imbalanceRatio <= ms.hf_orderflow_imbalance_ratio_short));
 
-    // Fresh Momentum Impulse Check (Setup 14)
-    const freshMomentumResult = this.evaluateFreshMomentumImpulseSetup(direction);
+    // Fresh Momentum Impulse Check (Setup 14) with Dynamic Gating
+    const eligSetup14 = this.isSetupEligibleForConditions("setup_14_fresh_momentum_impulse", direction);
+    const freshMomentumResult = eligSetup14.eligible
+      ? this.evaluateFreshMomentumImpulseSetup(direction)
+      : {
+          isValid: false,
+          direction,
+          impulsePrice: 0,
+          bodyRatio: 0,
+          volumeMult: 0,
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: eligSetup14.reason,
+        };
 
     // 2. Evaluate Multi-Timeframe (5m) Trend Alignment Up-Front
     const candles5m = this.aggregateCandles(this.candles1m, 5);
@@ -3899,9 +3915,12 @@ class TradingEngine {
       condDict["Multi-Timeframe Trend Alignment"] = { status: "SKIP", reason: "Not enough 5m candles available (< 10)." };
     }
 
-    // --- PRE-EVALUATE ALL SMC / SPECIALIZED SETUPS UPFRONT ---
+    // --- PRE-EVALUATE ALL SMC / SPECIALIZED SETUPS UPFRONT WITH DYNAMIC REGIME GATING ---
     // 1. Setup 3: Liquidity Sweep
-    const sweepResult = this.detectLiquiditySweep(direction);
+    const eligSetup3 = this.isSetupEligibleForConditions("setup_3_liquidity_sweep", direction);
+    const sweepResult = eligSetup3.eligible
+      ? this.detectLiquiditySweep(direction)
+      : { isSweep: false, sweptLevel: 0, reclaimPrice: 0, wickRatio: 0, volumeMult: 0, stopLoss: 0, takeProfit: 0, description: eligSetup3.reason };
     if (sweepResult.isSweep) {
       condDict["Liquidity Sweep Setup (Setup 3)"] = { status: "PASS", reason: sweepResult.description };
     } else if (sweepResult.description && sweepResult.description.includes("awaiting CHoCH")) {
@@ -3911,60 +3930,78 @@ class TradingEngine {
     }
 
     // Setup 4: Fair Value Gap (FVG) Retest Setup
-    const fvgResult = this.evaluateFairValueGapSetup(direction);
+    const eligSetup4 = this.isSetupEligibleForConditions("setup_4_fvg_retest", direction);
+    const fvgResult = eligSetup4.eligible
+      ? this.evaluateFairValueGapSetup(direction)
+      : { isValid: false, direction, gapHigh: 0, gapLow: 0, consequentEncroachment: 0, stopLoss: 0, takeProfit: 0, description: eligSetup4.reason };
     if (fvgResult.isValid) {
       condDict["Fair Value Gap (FVG) Retest Setup (Setup 4)"] = { status: "PASS", reason: fvgResult.description };
-    } else if (fvgResult.description && !fvgResult.description.includes("No active") && !fvgResult.description.includes("disabled")) {
+    } else if (fvgResult.description && !fvgResult.description.includes("No active") && !fvgResult.description.includes("disabled") && !fvgResult.description.includes("Dynamically gated")) {
       condDict["Fair Value Gap (FVG) Retest Setup (Setup 4)"] = { status: "FAIL", reason: fvgResult.description };
     } else {
       condDict["Fair Value Gap (FVG) Retest Setup (Setup 4)"] = { status: "SKIP", reason: fvgResult.description || "No active Fair Value Gap (FVG) retest setup" };
     }
 
     // Setup 9: Range Failed Auction / SFP Reclaim
-    const failedAuctionResult = this.evaluateFailedAuctionSetup(direction);
+    const eligSetup9 = this.isSetupEligibleForConditions("setup_9_range_failed_auction", direction);
+    const failedAuctionResult = eligSetup9.eligible
+      ? this.evaluateFailedAuctionSetup(direction)
+      : { isValid: false, direction, rangeBoundary: 0, reclaimPrice: 0, deviationAtr: 0, candlesOutside: 0, stopLoss: 0, takeProfit: 0, description: eligSetup9.reason };
     if (failedAuctionResult.isValid) {
       condDict["Range Failed Auction Reclaim Setup (Setup 9)"] = { status: "PASS", reason: failedAuctionResult.description };
-    } else if (failedAuctionResult.description && !failedAuctionResult.description.includes("No active") && !failedAuctionResult.description.includes("disabled")) {
+    } else if (failedAuctionResult.description && !failedAuctionResult.description.includes("No active") && !failedAuctionResult.description.includes("disabled") && !failedAuctionResult.description.includes("Dynamically gated")) {
       condDict["Range Failed Auction Reclaim Setup (Setup 9)"] = { status: "FAIL", reason: failedAuctionResult.description };
     } else {
       condDict["Range Failed Auction Reclaim Setup (Setup 9)"] = { status: "SKIP", reason: failedAuctionResult.description || "No active range failed auction setup" };
     }
 
     // 8. Setup 10: Dedicated VWAP Outer Band Rejection (Mean Reversion Scalp)
-    const vwapBandResult = this.evaluateVwapBandRejectionSetup(direction);
+    const eligSetup10 = this.isSetupEligibleForConditions("setup_10_vwap_band_rejection", direction);
+    const vwapBandResult = eligSetup10.eligible
+      ? this.evaluateVwapBandRejectionSetup(direction)
+      : { isValid: false, direction, bandPrice: 0, stopLoss: 0, takeProfit: 0, description: eligSetup10.reason };
     if (vwapBandResult.isValid) {
       condDict["VWAP Band Rejection Setup (Setup 10)"] = { status: "PASS", reason: vwapBandResult.description };
-    } else if (vwapBandResult.description && !vwapBandResult.description.includes("No active") && !vwapBandResult.description.includes("disabled")) {
+    } else if (vwapBandResult.description && !vwapBandResult.description.includes("No active") && !vwapBandResult.description.includes("disabled") && !vwapBandResult.description.includes("Dynamically gated")) {
       condDict["VWAP Band Rejection Setup (Setup 10)"] = { status: "FAIL", reason: vwapBandResult.description };
     } else {
       condDict["VWAP Band Rejection Setup (Setup 10)"] = { status: "SKIP", reason: vwapBandResult.description || "No active VWAP band rejection setup" };
     }
 
     // 9. Setup 11: EQH / EQL Double Touch Rejection with Divergence
-    const eqhEqlResult = this.evaluateEqhEqlDoubleTouchSetup(direction);
+    const eligSetup11 = this.isSetupEligibleForConditions("setup_11_eqh_eql_double_touch", direction);
+    const eqhEqlResult = eligSetup11.eligible
+      ? this.evaluateEqhEqlDoubleTouchSetup(direction)
+      : { isValid: false, direction, levelPrice: 0, stopLoss: 0, takeProfit: 0, description: eligSetup11.reason };
     if (eqhEqlResult.isValid) {
       condDict["EQH/EQL Double Touch Setup (Setup 11)"] = { status: "PASS", reason: eqhEqlResult.description };
-    } else if (eqhEqlResult.description && !eqhEqlResult.description.includes("No active") && !eqhEqlResult.description.includes("disabled")) {
+    } else if (eqhEqlResult.description && !eqhEqlResult.description.includes("No active") && !eqhEqlResult.description.includes("disabled") && !eqhEqlResult.description.includes("Dynamically gated")) {
       condDict["EQH/EQL Double Touch Setup (Setup 11)"] = { status: "FAIL", reason: eqhEqlResult.description };
     } else {
       condDict["EQH/EQL Double Touch Setup (Setup 11)"] = { status: "SKIP", reason: eqhEqlResult.description || "No active EQH/EQL double touch setup" };
     }
 
     // 10. Setup 12: CVD Absorption & Delta Divergence
-    const cvdAbsorptionResult = this.evaluateCvdAbsorptionDivergenceSetup(direction);
+    const eligSetup12 = this.isSetupEligibleForConditions("setup_12_cvd_absorption", direction);
+    const cvdAbsorptionResult = eligSetup12.eligible
+      ? this.evaluateCvdAbsorptionDivergenceSetup(direction)
+      : { isValid: false, direction, extremePrice: 0, rejectionWickPct: 0, takerBuyRatio: 0, deltaImbalanceRatio: 0, stopLoss: 0, takeProfit: 0, description: eligSetup12.reason };
     if (cvdAbsorptionResult.isValid) {
       condDict["CVD Absorption & Delta Divergence (Setup 12)"] = { status: "PASS", reason: cvdAbsorptionResult.description };
-    } else if (cvdAbsorptionResult.description && !cvdAbsorptionResult.description.includes("No active") && !cvdAbsorptionResult.description.includes("disabled")) {
+    } else if (cvdAbsorptionResult.description && !cvdAbsorptionResult.description.includes("No active") && !cvdAbsorptionResult.description.includes("disabled") && !cvdAbsorptionResult.description.includes("Dynamically gated")) {
       condDict["CVD Absorption & Delta Divergence (Setup 12)"] = { status: "FAIL", reason: cvdAbsorptionResult.description };
     } else {
       condDict["CVD Absorption & Delta Divergence (Setup 12)"] = { status: "SKIP", reason: cvdAbsorptionResult.description || "No active CVD absorption setup" };
     }
 
     // 11. Setup 13: Open Interest (OI) Flush & Cascade Fade
-    const oiFlushResult = this.evaluateOiFlushCascadeFadeSetup(direction);
+    const eligSetup13 = this.isSetupEligibleForConditions("setup_13_oi_flush_cascade", direction);
+    const oiFlushResult = eligSetup13.eligible
+      ? this.evaluateOiFlushCascadeFadeSetup(direction)
+      : { isValid: false, direction, flushExtreme: 0, reversalWickPct: 0, volumeMult: 0, oiContractionPct: 0, stopLoss: 0, takeProfit: 0, description: eligSetup13.reason };
     if (oiFlushResult.isValid) {
       condDict["OI Flush & Cascade Fade (Setup 13)"] = { status: "PASS", reason: oiFlushResult.description };
-    } else if (oiFlushResult.description && !oiFlushResult.description.includes("No active") && !oiFlushResult.description.includes("disabled")) {
+    } else if (oiFlushResult.description && !oiFlushResult.description.includes("No active") && !oiFlushResult.description.includes("disabled") && !oiFlushResult.description.includes("Dynamically gated")) {
       condDict["OI Flush & Cascade Fade (Setup 13)"] = { status: "FAIL", reason: oiFlushResult.description };
     } else {
       condDict["OI Flush & Cascade Fade (Setup 13)"] = { status: "SKIP", reason: oiFlushResult.description || "No active OI flush cascade setup" };
@@ -3973,7 +4010,7 @@ class TradingEngine {
     // 12. Setup 14: Fresh Momentum Impulse Engine
     if (freshMomentumResult.isValid) {
       condDict["Fresh Momentum Impulse (Setup 14)"] = { status: "PASS", reason: freshMomentumResult.description };
-    } else if (freshMomentumResult.description && !freshMomentumResult.description.includes("No active") && !freshMomentumResult.description.includes("disabled")) {
+    } else if (freshMomentumResult.description && !freshMomentumResult.description.includes("No active") && !freshMomentumResult.description.includes("disabled") && !freshMomentumResult.description.includes("Dynamically gated")) {
       condDict["Fresh Momentum Impulse (Setup 14)"] = { status: "FAIL", reason: freshMomentumResult.description };
     } else {
       condDict["Fresh Momentum Impulse (Setup 14)"] = { status: "SKIP", reason: freshMomentumResult.description || "No active fresh momentum impulse setup" };
@@ -4048,14 +4085,14 @@ class TradingEngine {
         riskReward: fvgRiskReward,
         description: `[Setup 4 - Fair Value Gap (FVG) Retest Confirmed]: ${fvgResult.description}`,
         sub_conditions: [
-          { name: "FVG Mitigation Level", status: "PASS", reason: `FVG mitigation zone at $${fvgResult.fvgMitigationPrice.toFixed(2)}` },
-          { name: "Mitigation Rejection Reaction", status: "PASS", reason: `Rejection reaction confirmed (${fvgResult.rejectionType})` },
+          { name: "FVG Mitigation Level", status: "PASS", reason: `FVG mitigation zone at $${((fvgResult as any).fvgMitigationPrice ?? fvgResult.consequentEncroachment).toFixed(2)}` },
+          { name: "Mitigation Rejection Reaction", status: "PASS", reason: `Rejection reaction confirmed (${(fvgResult as any).rejectionType ?? "Reversal Pattern"})` },
           { name: "Mitigation Retrace Volume", status: "PASS", reason: "FVG mitigation retrace on healthy volume" },
           { name: "Dynamic Invalidation Floor/Ceiling", status: "PASS", reason: `SL at $${fvgResult.stopLoss.toFixed(2)} | TP at $${fvgResult.takeProfit.toFixed(2)}` },
         ],
         metrics: {
-          fvgMitigationPrice: fvgResult.fvgMitigationPrice,
-          rejectionType: fvgResult.rejectionType,
+          fvgMitigationPrice: (fvgResult as any).fvgMitigationPrice ?? fvgResult.consequentEncroachment,
+          rejectionType: (fvgResult as any).rejectionType ?? "Reversal Pattern",
           riskReward: fvgRiskReward,
         }
       };
@@ -4440,9 +4477,13 @@ class TradingEngine {
 
       const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close >= reclaimThreshold) && isLongCandleStabilized && isLongRejectionConfirmed;
 
+      const eligSetup1 = this.isSetupEligibleForConditions("setup_1_pullback_retest", direction);
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
-      if (breakoutIdx !== -1 && boBodyRatioMet && !isChasing && !isSetup1Invalidated && (hasPulledBackToZone || isShallowConsolidationHolding)) {
+      if (!eligSetup1.eligible) {
+        isPullbackRetestValid = false;
+        condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: eligSetup1.reason };
+      } else if (breakoutIdx !== -1 && boBodyRatioMet && !isChasing && !isSetup1Invalidated && (hasPulledBackToZone || isShallowConsolidationHolding)) {
         const isRejection = isLongRejectionConfirmed;
         const isContinuation = (currentCandle.close >= breakoutLevel || isLongRejectionConfirmed) && isCurrentHoldingSupport;
         
@@ -4502,12 +4543,15 @@ class TradingEngine {
       
       // Strict Candlestick Confirmation Mandate for EMA Pushback:
       // Must touch the dynamic EMA support zone AND close green with a verified bullish reversal candlestick pattern
-      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isLongRejectionConfirmed && isLongGreen && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
+      const eligSetup2 = this.isSetupEligibleForConditions("setup_2_dynamic_ema_pushback", direction);
+      const isRegularEmaPushbackValid = eligSetup2.eligible && (touchesFirstEma || touchesSecondEma) && isLongRejectionConfirmed && isLongGreen && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
 
       const isEmaPushbackValid = isRegularEmaPushbackValid && !isSetup2Invalidated;
       let emaPushbackMessage = "";
       const matchedEmaVal = touchesFirstEma ? firstEmaVal : (touchesSecondEma ? secondEmaVal : firstEmaVal);
-      if (isEmaPushbackValid) {
+      if (!eligSetup2.eligible) {
+        condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: eligSetup2.reason };
+      } else if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
           emaPushbackMessage = `${emaZoneLabel} Pushback confirmed via [${longRejectionType}]${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected/bounced off dynamic EMA support at $${matchedEmaVal.toFixed(2)} (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: +${effectiveEmaMult.toFixed(2)} * ATR).`;
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "PASS", reason: emaPushbackMessage };
@@ -4845,9 +4889,13 @@ class TradingEngine {
 
       const isShallowConsolidationHolding = isHighAdxConsolidation && postBreakoutCandles.every(c => c.close <= reclaimThreshold) && isShortCandleStabilized && isShortRejectionConfirmed;
 
+      const eligSetup1 = this.isSetupEligibleForConditions("setup_1_pullback_retest", direction);
       let isPullbackRetestValid = false;
       let pullbackRetestMessage = "";
-      if (breakoutIdx !== -1 && boBodyRatioMet && !isChasing && !isSetup1Invalidated && (hasPulledBackToZone || isShallowConsolidationHolding)) {
+      if (!eligSetup1.eligible) {
+        isPullbackRetestValid = false;
+        condDict["Pullback & Retest Setup (Setup 1)"] = { status: "SKIP", reason: eligSetup1.reason };
+      } else if (breakoutIdx !== -1 && boBodyRatioMet && !isChasing && !isSetup1Invalidated && (hasPulledBackToZone || isShallowConsolidationHolding)) {
         const isRejection = isShortRejectionConfirmed;
         const isContinuation = (currentCandle.close <= breakoutLevel || isShortRejectionConfirmed) && isCurrentHoldingResistance;
         
@@ -4907,12 +4955,15 @@ class TradingEngine {
       
       // Strict Candlestick Confirmation Mandate for EMA Pushback:
       // Must touch the dynamic EMA resistance zone AND close red with a verified bearish reversal candlestick pattern
-      const isRegularEmaPushbackValid = (touchesFirstEma || touchesSecondEma) && isShortRejectionConfirmed && isShortRed && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
+      const eligSetup2 = this.isSetupEligibleForConditions("setup_2_dynamic_ema_pushback", direction);
+      const isRegularEmaPushbackValid = eligSetup2.eligible && (touchesFirstEma || touchesSecondEma) && isShortRejectionConfirmed && isShortRed && (hasRetracedToEMA || touchesFirstEma || touchesSecondEma);
 
       const isEmaPushbackValid = isRegularEmaPushbackValid && !isSetup2Invalidated;
       let emaPushbackMessage = "";
       const matchedEmaVal = touchesFirstEma ? firstEmaVal : (touchesSecondEma ? secondEmaVal : firstEmaVal);
-      if (isEmaPushbackValid) {
+      if (!eligSetup2.eligible) {
+        condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "SKIP", reason: eligSetup2.reason };
+      } else if (isEmaPushbackValid) {
         if (isVolumeHealthyForPullback) {
           emaPushbackMessage = `${emaZoneLabel} Pushback confirmed via [${shortRejectionType}]${mtfMessage} (Adaptive Depth: ${classifiedDepth}): Price rejected/bounced off dynamic EMA resistance at $${matchedEmaVal.toFixed(2)} (ADX: ${adxValue.toFixed(1)} [${adxLabel}], EMA limit: -${effectiveEmaMult.toFixed(2)} * ATR).`;
           condDict["EMA Retracement / Pushback Setup (Setup 2)"] = { status: "PASS", reason: emaPushbackMessage };
@@ -6027,6 +6078,227 @@ class TradingEngine {
     return evaluateFreshMomentumImpulseSetupFn(direction, this.getSetupContext());
   }
 
+  /**
+   * Evaluates dynamic regime matrix and real-time market condition rules for any setup.
+   * Dynamically enables or disables setups based on:
+   * 1. Master toggle configuration
+   * 2. Active Market Regime (STRONG_UPTREND, STRONG_DOWNTREND, RANGE_BOUND, HIGH_VOLATILITY, LOW_VOLATILITY)
+   * 3. Counter-trend direction safeguards (e.g. mean-reversion blocked in strong runaway trends)
+   * 4. Indicator-based auto-gates:
+   *    - Mean Reversion (Setups 3, 9, 10, 11): ADX ceiling check (avoids catching falling knives when ADX > max_adx)
+   *    - Trend Continuation (Setups 1, 2): Min ADX floor + Max Choppiness Index (avoids fakeouts in dead/choppy markets)
+   *    - Breakout Expansion (Setup 14): Min ATR volatility floor
+   */
+  public isSetupEligibleForConditions(
+    setupId: string,
+    direction: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL"
+  ): {
+    eligible: boolean;
+    master_enabled: boolean;
+    regime_allowed: boolean;
+    conditions_allowed: boolean;
+    reason: string;
+    allowed_regimes: MarketRegime[];
+  } {
+    const config = dbManager.getConfig();
+    const ms = (config.market_structure || {}) as any;
+
+    const defaultMatrix: Record<string, MarketRegime[]> = {
+      setup_1_pullback_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+      setup_2_dynamic_ema_pushback: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+      setup_3_liquidity_sweep: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+      setup_4_fvg_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
+      setup_9_range_failed_auction: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+      setup_10_vwap_band_rejection: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+      setup_11_eqh_eql_double_touch: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+      setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
+      setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
+      setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+    };
+
+    // 1. Master toggle check
+    let master_enabled = true;
+    switch (setupId) {
+      case "setup_1_pullback_retest":
+        master_enabled = ms.pullback_retest_enabled !== false;
+        break;
+      case "setup_2_dynamic_ema_pushback":
+        master_enabled = ms.ema_pushback_enabled !== false;
+        break;
+      case "setup_3_liquidity_sweep":
+        master_enabled = ms.liquidity_sweep_enabled !== false;
+        break;
+      case "setup_4_fvg_retest":
+        master_enabled = ms.fvg_strategy_enabled !== false;
+        break;
+      case "setup_9_range_failed_auction":
+        master_enabled = ms.failed_auction_strategy_enabled !== false;
+        break;
+      case "setup_10_vwap_band_rejection":
+        master_enabled = ms.vwap_band_reversal_enabled !== false;
+        break;
+      case "setup_11_eqh_eql_double_touch":
+        master_enabled = ms.eqh_eql_strategy_enabled !== false;
+        break;
+      case "setup_12_cvd_absorption":
+        master_enabled = ms.cvd_divergence_strategy_enabled !== false;
+        break;
+      case "setup_13_oi_flush_cascade":
+        master_enabled = ms.oi_flush_strategy_enabled !== false;
+        break;
+      case "setup_14_fresh_momentum_impulse":
+        master_enabled = ms.fresh_momentum_strategy_enabled !== false;
+        break;
+    }
+
+    const matrix = ms.setup_regime_matrix || defaultMatrix;
+    const allowed_regimes = matrix[setupId] || defaultMatrix[setupId] || Object.values(MarketRegime);
+
+    if (!master_enabled) {
+      return {
+        eligible: false,
+        master_enabled: false,
+        regime_allowed: false,
+        conditions_allowed: false,
+        reason: "Strategy setup is disabled in master configuration.",
+        allowed_regimes,
+      };
+    }
+
+    // 2. Market Regime Matrix Gating Check
+    const isMatrixEnabled = ms.dynamic_regime_setup_matrix_enabled !== false;
+    const regime_allowed = !isMatrixEnabled || allowed_regimes.includes(this.currentRegime);
+
+    if (!regime_allowed) {
+      return {
+        eligible: false,
+        master_enabled: true,
+        regime_allowed: false,
+        conditions_allowed: false,
+        reason: `Dynamically gated: Prohibited in current ${this.currentRegime} regime.`,
+        allowed_regimes,
+      };
+    }
+
+    // 3. Directional Counter-trend Safeguard
+    const isMeanReversion = ["setup_3_liquidity_sweep", "setup_9_range_failed_auction", "setup_10_vwap_band_rejection", "setup_11_eqh_eql_double_touch"].includes(setupId);
+    if (direction === "LONG" && this.currentRegime === MarketRegime.STRONG_DOWNTREND && isMeanReversion) {
+      return {
+        eligible: false,
+        master_enabled: true,
+        regime_allowed: false,
+        conditions_allowed: false,
+        reason: `Dynamically gated: Bullish mean-reversion counter-trend entry prohibited in ${this.currentRegime}.`,
+        allowed_regimes,
+      };
+    }
+    if (direction === "SHORT" && this.currentRegime === MarketRegime.STRONG_UPTREND && isMeanReversion) {
+      return {
+        eligible: false,
+        master_enabled: true,
+        regime_allowed: false,
+        conditions_allowed: false,
+        reason: `Dynamically gated: Bearish mean-reversion counter-trend entry prohibited in ${this.currentRegime}.`,
+        allowed_regimes,
+      };
+    }
+
+    // 4. Dynamic Condition Rules (ADX, Chop, ATR)
+    const isConditionsEnabled = ms.dynamic_condition_rules_enabled !== false;
+    let conditions_allowed = true;
+    let conditionReason = "Conditions met";
+
+    if (isConditionsEnabled && this.candles1m.length >= 15) {
+      const lastIdx = this.candles1m.length - 1;
+      const adx14 = this.calculateADX(this.candles1m, 14);
+      const currentAdx = adx14[lastIdx] !== undefined ? adx14[lastIdx] : 25;
+      const atr14 = this.calculateATR(this.candles1m, 14);
+      const currentAtr = atr14[lastIdx] !== undefined ? atr14[lastIdx] : 50;
+      const chopIndex = this.calculateChoppinessIndex(this.candles1m, 14);
+
+      if (isMeanReversion) {
+        const maxAdx = ms.dynamic_mean_reversion_max_adx || 32;
+        if (currentAdx > maxAdx) {
+          conditions_allowed = false;
+          conditionReason = `Dynamically gated: ADX (${currentAdx.toFixed(1)}) exceeds mean-reversion ceiling (${maxAdx}). Strong runaway trend detected.`;
+        }
+      } else if (["setup_1_pullback_retest", "setup_2_dynamic_ema_pushback"].includes(setupId)) {
+        const minAdx = ms.dynamic_trend_min_adx || 20;
+        const maxChop = ms.dynamic_trend_max_chop_index || 58;
+        if (currentAdx < minAdx) {
+          conditions_allowed = false;
+          conditionReason = `Dynamically gated: ADX (${currentAdx.toFixed(1)}) is below trend momentum threshold (${minAdx}).`;
+        } else if (chopIndex > maxChop) {
+          conditions_allowed = false;
+          conditionReason = `Dynamically gated: Choppiness Index (${chopIndex.toFixed(1)}) exceeds trend limit (${maxChop}).`;
+        }
+      } else if (setupId === "setup_14_fresh_momentum_impulse") {
+        const minAtr = ms.dynamic_breakout_min_atr || 12;
+        if (currentAtr < minAtr) {
+          conditions_allowed = false;
+          conditionReason = `Dynamically gated: Current ATR ($${currentAtr.toFixed(1)}) is below breakout impulse minimum ($${minAtr}).`;
+        }
+      }
+    }
+
+    if (!conditions_allowed) {
+      return {
+        eligible: false,
+        master_enabled: true,
+        regime_allowed: true,
+        conditions_allowed: false,
+        reason: conditionReason,
+        allowed_regimes,
+      };
+    }
+
+    return {
+      eligible: true,
+      master_enabled: true,
+      regime_allowed: true,
+      conditions_allowed: true,
+      reason: `Active & eligible for ${this.currentRegime}`,
+      allowed_regimes,
+    };
+  }
+
+  /**
+   * Returns a real-time status summary for all tactical setups.
+   */
+  public getDynamicSetupsStatus(): DynamicSetupStatus[] {
+    const setupDefs: {
+      setupId: string;
+      setupName: string;
+      category: "TREND" | "MEAN_REVERSION" | "BREAKOUT" | "ORDERFLOW" | "SMC";
+    }[] = [
+      { setupId: "setup_1_pullback_retest", setupName: "Setup 1: Pullback & Retest", category: "TREND" },
+      { setupId: "setup_2_dynamic_ema_pushback", setupName: "Setup 2: Dynamic EMA Pushback", category: "TREND" },
+      { setupId: "setup_3_liquidity_sweep", setupName: "Setup 3: Liquidity Sweep Reversal", category: "MEAN_REVERSION" },
+      { setupId: "setup_4_fvg_retest", setupName: "Setup 4: Fair Value Gap Retest", category: "SMC" },
+      { setupId: "setup_9_range_failed_auction", setupName: "Setup 9: Range Failed Auction Reclaim", category: "MEAN_REVERSION" },
+      { setupId: "setup_10_vwap_band_rejection", setupName: "Setup 10: VWAP Band Rejection", category: "MEAN_REVERSION" },
+      { setupId: "setup_11_eqh_eql_double_touch", setupName: "Setup 11: EQH/EQL Double Touch", category: "MEAN_REVERSION" },
+      { setupId: "setup_12_cvd_absorption", setupName: "Setup 12: CVD Absorption & Delta Divergence", category: "ORDERFLOW" },
+      { setupId: "setup_13_oi_flush_cascade", setupName: "Setup 13: OI Flush & Cascade Fade", category: "ORDERFLOW" },
+      { setupId: "setup_14_fresh_momentum_impulse", setupName: "Setup 14: Fresh Momentum Impulse", category: "BREAKOUT" },
+    ];
+
+    return setupDefs.map(def => {
+      const eligibility = this.isSetupEligibleForConditions(def.setupId);
+      return {
+        setupId: def.setupId,
+        setupName: def.setupName,
+        category: def.category,
+        master_enabled: eligibility.master_enabled,
+        regime_allowed: eligibility.regime_allowed,
+        conditions_allowed: eligibility.conditions_allowed,
+        active: eligibility.eligible,
+        reason: eligibility.reason,
+        allowed_regimes: eligibility.allowed_regimes,
+      };
+    });
+  }
+
   public evaluateContextAwareVolume(
     direction: "LONG" | "SHORT" | "NEUTRAL",
     relVolume: number,
@@ -6471,6 +6743,14 @@ class TradingEngine {
             sub_conditions: active_setup.sub_conditions,
           };
         } else if (isRangeLongBreakout) {
+          if (ms.fresh_momentum_strategy_enabled === false) {
+            return {
+              confirmed: false,
+              message: `Range LONG Breakout Blocked: Setup 14 (Fresh Momentum Impulse) is disabled. Waiting for range breakout pullback.`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.58;
           const isTakerBuyDominant = this.orderFlowStats.takerBuyRatio >= 0.58 || this.orderBookStats.imbalanceRatio >= 0.15;
           const isBreakoutMomentumStrong = relVolume >= 1.10 || isTakerBuyDominant;
@@ -6617,6 +6897,14 @@ class TradingEngine {
             sub_conditions: active_setup.sub_conditions,
           };
         } else if (isRangeShortBreakdown) {
+          if (ms.fresh_momentum_strategy_enabled === false) {
+            return {
+              confirmed: false,
+              message: `Range SHORT Breakdown Blocked: Setup 14 (Fresh Momentum Impulse) is disabled. Waiting for range breakdown pullback.`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           const veryHighProbThreshold = ms.very_high_probability_threshold ?? 0.58;
           const probabilityShort = 1 - probabilityLong;
           const isTakerSellDominant = this.orderFlowStats.takerBuyRatio <= 0.42 || this.orderBookStats.imbalanceRatio <= -0.15;

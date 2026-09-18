@@ -344,6 +344,8 @@ export interface StrategyConfig {
     crossover_only_lookback_candles?: number; // Max lookback candles for crossover event check (default: 5)
     timeframe_minutes?: number; // Market Structure Timeframe in minutes (default: 5)
     very_high_probability_threshold?: number; // Probability threshold above which direct breakouts are traded, otherwise waiting for pullback (default: 0.82)
+    pullback_retest_enabled?: boolean; // Enable Pullback & Retest Strategy (Setup 1) (default: true)
+    ema_pushback_enabled?: boolean; // Enable Dynamic EMA Pushback Strategy (Setup 2) (default: true)
     liquidity_sweep_enabled?: boolean; // Enable Liquidity Sweep Strategy (Setup 3) (default: true)
     liquidity_sweep_lookback_candles?: number; // Lookback candles to identify liquidity pools (default: 20)
     liquidity_sweep_min_wick_ratio?: number; // Minimum wick ratio for sweep candle (default: 0.35)
@@ -395,6 +397,14 @@ export interface StrategyConfig {
     fresh_momentum_min_body_ratio?: number; // Minimum body-to-range ratio for displacement candle (default: 0.48)
     fresh_momentum_min_vol_mult?: number; // Minimum volume multiplier relative to 20-period SMA (default: 1.15x)
     fresh_momentum_max_chase_atr?: number; // Maximum ATR distance from impulse origin to qualify as fresh (default: 4.5x)
+    // Dynamic Market Condition & Regime Gating Matrix
+    dynamic_regime_setup_matrix_enabled?: boolean; // Dynamically enable/disable setups based on active Market Regime (default: true)
+    setup_regime_matrix?: Record<string, MarketRegime[]>; // Map of setupId -> allowed MarketRegime[]
+    dynamic_condition_rules_enabled?: boolean; // Dynamically gate setups using real-time ADX, Choppiness Index, and Volatility (default: true)
+    dynamic_mean_reversion_max_adx?: number; // Max ADX allowed for mean reversion setups (Setups 3, 9, 10, 11) (default: 32)
+    dynamic_trend_min_adx?: number; // Min ADX required for trend continuation setups (Setups 1, 2) (default: 20)
+    dynamic_trend_max_chop_index?: number; // Max Chop Index allowed for trend setups (Setups 1, 2) (default: 58)
+    dynamic_breakout_min_atr?: number; // Min ATR required for fresh momentum breakout (Setup 14) (default: 12)
   };
   gate_scoring?: {
     enabled: boolean;
@@ -578,5 +588,17 @@ export interface DomainGateSummary {
   totalConditions: number;
   passedConditions: number;
   conditions: Checkpoint[];
+}
+
+export interface DynamicSetupStatus {
+  setupId: string;
+  setupName: string;
+  category: "TREND" | "MEAN_REVERSION" | "BREAKOUT" | "ORDERFLOW" | "SMC";
+  master_enabled: boolean;
+  regime_allowed: boolean;
+  conditions_allowed: boolean;
+  active: boolean;
+  reason: string;
+  allowed_regimes: MarketRegime[];
 }
 

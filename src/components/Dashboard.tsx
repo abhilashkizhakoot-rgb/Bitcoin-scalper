@@ -181,6 +181,27 @@ export default function Dashboard({
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
+  const [isTogglingSetup3, setIsTogglingSetup3] = useState(false);
+
+  const isSetup3Enabled =
+    status.market_structure_config?.liquidity_sweep_enabled !== false &&
+    status.config?.market_structure?.liquidity_sweep_enabled !== false;
+
+  const handleToggleSetup3 = async () => {
+    setIsTogglingSetup3(true);
+    try {
+      await apiFetch("/api/strategy/toggle-setup-3", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !isSetup3Enabled }),
+      });
+      onRefresh();
+    } catch (err) {
+      console.error("Failed to toggle Setup 3:", err);
+    } finally {
+      setIsTogglingSetup3(false);
+    }
+  };
 
   const activeTrade = status.active_trade as Trade | null;
   const isTradingActive = status.is_trading_active;
@@ -435,6 +456,39 @@ export default function Dashboard({
                     {status.market_structure?.pullbackShortMet ? `YES (Retest/Fib/EMA${status.market_structure_config?.fast_ema_period || 20})` : "Waiting..."}
                   </span>
                 </div>
+              </div>
+
+              {/* Setup 3 (Liquidity Sweep) Quick Dashboard Toggle */}
+              <div className="bg-white/80 border border-slate-200/80 rounded-lg p-2.5 flex items-center justify-between" id="dashboard-setup3-toggle-card">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-sans font-semibold text-slate-800">Setup 3: Liquidity Sweep</span>
+                    <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold uppercase ${
+                      isSetup3Enabled
+                        ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                        : "bg-rose-100 text-rose-800 border border-rose-200"
+                    }`}>
+                      {isSetup3Enabled ? "ACTIVE" : "OFF"}
+                    </span>
+                  </div>
+                  <p className="text-[9px] text-slate-400">SMC key level stop hunt & sweep reversal</p>
+                </div>
+                <button
+                  id="dashboard-btn-toggle-setup3"
+                  type="button"
+                  onClick={handleToggleSetup3}
+                  disabled={isTogglingSetup3}
+                  title={isSetup3Enabled ? "Click to disable Setup 3" : "Click to enable Setup 3"}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 ${
+                    isSetup3Enabled ? "bg-indigo-600" : "bg-slate-300"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      isSetup3Enabled ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
               </div>
             </div>
           </div>

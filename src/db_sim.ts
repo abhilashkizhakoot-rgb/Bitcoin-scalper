@@ -344,6 +344,26 @@ const DEFAULT_CONFIG: StrategyConfig = {
     fresh_momentum_min_body_ratio: 0.48,
     fresh_momentum_min_vol_mult: 1.15,
     fresh_momentum_max_chase_atr: 4.5,
+    pullback_retest_enabled: true,
+    ema_pushback_enabled: true,
+    dynamic_regime_setup_matrix_enabled: true,
+    setup_regime_matrix: {
+      setup_1_pullback_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+      setup_2_dynamic_ema_pushback: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+      setup_3_liquidity_sweep: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+      setup_4_fvg_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
+      setup_9_range_failed_auction: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+      setup_10_vwap_band_rejection: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+      setup_11_eqh_eql_double_touch: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+      setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
+      setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
+      setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+    },
+    dynamic_condition_rules_enabled: true,
+    dynamic_mean_reversion_max_adx: 32,
+    dynamic_trend_min_adx: 20,
+    dynamic_trend_max_chop_index: 58,
+    dynamic_breakout_min_atr: 12,
   },
   gate_scoring: {
     enabled: true,
@@ -1395,6 +1415,15 @@ class DatabaseManager {
       if (ms.fresh_momentum_min_body_ratio === undefined) { ms.fresh_momentum_min_body_ratio = def.fresh_momentum_min_body_ratio || 0.48; changed = true; }
       if (ms.fresh_momentum_min_vol_mult === undefined) { ms.fresh_momentum_min_vol_mult = def.fresh_momentum_min_vol_mult || 1.15; changed = true; }
       if (ms.fresh_momentum_max_chase_atr === undefined) { ms.fresh_momentum_max_chase_atr = def.fresh_momentum_max_chase_atr || 4.5; changed = true; }
+      if (ms.pullback_retest_enabled === undefined) { ms.pullback_retest_enabled = def.pullback_retest_enabled !== false; changed = true; }
+      if (ms.ema_pushback_enabled === undefined) { ms.ema_pushback_enabled = def.ema_pushback_enabled !== false; changed = true; }
+      if (ms.dynamic_regime_setup_matrix_enabled === undefined) { ms.dynamic_regime_setup_matrix_enabled = def.dynamic_regime_setup_matrix_enabled !== false; changed = true; }
+      if (!ms.setup_regime_matrix) { ms.setup_regime_matrix = { ...def.setup_regime_matrix }; changed = true; }
+      if (ms.dynamic_condition_rules_enabled === undefined) { ms.dynamic_condition_rules_enabled = def.dynamic_condition_rules_enabled !== false; changed = true; }
+      if (ms.dynamic_mean_reversion_max_adx === undefined) { ms.dynamic_mean_reversion_max_adx = def.dynamic_mean_reversion_max_adx || 32; changed = true; }
+      if (ms.dynamic_trend_min_adx === undefined) { ms.dynamic_trend_min_adx = def.dynamic_trend_min_adx || 20; changed = true; }
+      if (ms.dynamic_trend_max_chop_index === undefined) { ms.dynamic_trend_max_chop_index = def.dynamic_trend_max_chop_index || 58; changed = true; }
+      if (ms.dynamic_breakout_min_atr === undefined) { ms.dynamic_breakout_min_atr = def.dynamic_breakout_min_atr || 12; changed = true; }
     }
 
     if (!this.cache?.config?.gate_scoring) {

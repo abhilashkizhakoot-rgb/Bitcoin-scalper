@@ -1323,7 +1323,7 @@ class DatabaseManager {
         this.cache.config.risk_management.friction_hurdle_gate_enabled = true;
         changed = true;
       }
-      if (this.cache.config.risk_management.min_net_edge_ratio === undefined) {
+      if (this.cache.config.risk_management.min_net_edge_ratio === undefined || typeof this.cache.config.risk_management.min_net_edge_ratio !== "number" || isNaN(this.cache.config.risk_management.min_net_edge_ratio)) {
         this.cache.config.risk_management.min_net_edge_ratio = 2.2;
         changed = true;
       }

@@ -2714,7 +2714,7 @@ export default function ConfigPage({
                           min="1.2"
                           max="5.0"
                           value={riskConfig.min_net_edge_ratio ?? 2.2}
-                          onChange={(e) => setRiskConfig({ ...riskConfig, min_net_edge_ratio: parseInputNumber(e.target.value) })}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, min_net_edge_ratio: parseInputNumber(e.target.value, true) })}
                           className="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
                         />
                         <p className="text-[9px] text-slate-400">Ratio of Expected Gross Profit % to Round-Trip Friction % (Recommended: 2.0x - 2.5x).</p>
@@ -2738,17 +2738,35 @@ export default function ConfigPage({
                 </div>
 
                 <div className="space-y-2 p-3 bg-indigo-50/50 rounded-lg border border-indigo-100">
-                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
-                    <input
-                      type="checkbox"
-                      checked={riskConfig.hybrid_regime_switching_enabled !== false}
-                      onChange={(e) => setRiskConfig({ ...riskConfig, hybrid_regime_switching_enabled: e.target.checked })}
-                      className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
-                    />
-                    <span className="text-xs font-bold text-indigo-900">Hybrid Regime-Switching Framework (Momentum vs Reversion)</span>
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                      <input
+                        type="checkbox"
+                        checked={msConfig.dynamic_regime_setup_matrix_enabled !== false}
+                        onChange={async (e) => {
+                          const nextVal = e.target.checked;
+                          setRiskConfig({ ...riskConfig, hybrid_regime_switching_enabled: nextVal });
+                          setMsConfig({ ...msConfig, dynamic_regime_setup_matrix_enabled: nextVal });
+                          try {
+                            await apiFetch("/api/strategy/dynamic-conditions/update", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ dynamic_regime_setup_matrix_enabled: nextVal }),
+                            });
+                          } catch (err) {
+                            console.error("Failed to sync hybrid regime toggle:", err);
+                          }
+                        }}
+                        className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-indigo-900">Hybrid Regime-Switching Framework (Momentum vs Reversion)</span>
+                    </label>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-semibold border border-indigo-200">
+                      Linked to Matrix
+                    </span>
+                  </div>
                   <p className="text-[10px] text-slate-600 leading-relaxed pl-6.5">
-                    Separates logic into two distinct modes: <span className="font-semibold text-indigo-800">Momentum Mode</span> during strong trends (only trend pullbacks, FVGs, and impulse continuation) and <span className="font-semibold text-indigo-800">Mean-Reversion Mode</span> during ranges/chop (VWAP bands &plusmn;2&sigma;, liquidity sweeps, CVD absorption). Blocks trend-following breakout chasing during range chop.
+                    Synchronized directly with the <span className="font-semibold text-indigo-800">Dynamic Regime Gating Matrix</span> in Market Structure. Separates execution into <span className="font-semibold text-indigo-800">Momentum Mode</span> during strong trends (only pullbacks, FVGs, and impulse continuation) and <span className="font-semibold text-indigo-800">Mean-Reversion Mode</span> during ranges/chop (VWAP bands &plusmn;2&sigma;, liquidity sweeps, CVD absorption).
                   </p>
                 </div>
 
@@ -3552,6 +3570,7 @@ export default function ConfigPage({
                     onClick={async () => {
                       const next = msConfig.dynamic_regime_setup_matrix_enabled === false ? true : false;
                       setMsConfig({ ...msConfig, dynamic_regime_setup_matrix_enabled: next });
+                      setRiskConfig({ ...riskConfig, hybrid_regime_switching_enabled: next });
                       try {
                         await apiFetch("/api/strategy/dynamic-conditions/update", {
                           method: "POST",

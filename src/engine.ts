@@ -2527,7 +2527,8 @@ class TradingEngine {
       : (config.risk_management?.take_profit_atr_multiplier || 1.65);
     const projectedProfitUSD = Math.max(currentAtr_cp * effectiveTpMultiplier, currentPrice * (config.risk_management?.min_stop_loss_distance_pct || 0.045) / 100);
     const projectedProfitPct = (projectedProfitUSD / currentPrice) * 100;
-    const minNetEdgeRatio = config.risk_management?.min_net_edge_ratio ?? 2.2;
+    const minNetEdgeRatioRaw = Number(config.risk_management?.min_net_edge_ratio);
+    const minNetEdgeRatio = (!isNaN(minNetEdgeRatioRaw) && minNetEdgeRatioRaw > 0) ? minNetEdgeRatioRaw : 2.2;
     const actualEdgeRatio = roundTripFrictionPct > 0 ? (projectedProfitPct / roundTripFrictionPct) : 99;
     const isFrictionHurdlePassed = !config.risk_management?.friction_hurdle_gate_enabled || actualEdgeRatio >= minNetEdgeRatio;
 

@@ -527,6 +527,12 @@ async function startServer() {
       }
     }
 
+    if (payload.dynamic_regime_setup_matrix_enabled !== undefined) {
+      dbManager.updateConfig("risk_management", {
+        hybrid_regime_switching_enabled: payload.dynamic_regime_setup_matrix_enabled === true,
+      });
+    }
+
     dbManager.updateConfig("market_structure", updates, "Dynamic Conditions Rules Update");
     res.json({ success: true, updates, config: dbManager.getConfig() });
   });
@@ -862,6 +868,18 @@ Provide a confidence score (0-100) for each recommendation based on how strongly
   app.put("/api/config/:category", (req, res) => {
     const category = req.params.category as any;
     const updates = req.body;
+
+    // Cross-synchronize Risk Management Hybrid Regime switch with Market Structure Matrix Enforce switch
+    if (category === "risk_management" && updates.hybrid_regime_switching_enabled !== undefined) {
+      dbManager.updateConfig("market_structure", {
+        dynamic_regime_setup_matrix_enabled: updates.hybrid_regime_switching_enabled === true,
+      });
+    } else if (category === "market_structure" && updates.dynamic_regime_setup_matrix_enabled !== undefined) {
+      dbManager.updateConfig("risk_management", {
+        hybrid_regime_switching_enabled: updates.dynamic_regime_setup_matrix_enabled === true,
+      });
+    }
+
     const updated = dbManager.updateConfig(category, updates);
     res.json(updated);
   });

@@ -9122,7 +9122,8 @@
       "smart_stall_exit_enabled": true,
       "stall_evaluation_minutes": 25,
       "max_trade_duration_minutes": 60,
-      "max_allowed_z_dist": 2.5
+      "max_allowed_z_dist": 2.5,
+      "min_net_edge_ratio": 2.2
     }
   },
   "config_profiles": {

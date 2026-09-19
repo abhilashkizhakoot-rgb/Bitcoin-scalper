@@ -129,6 +129,7 @@ class TradingEngine {
   private regimeConfidence: number = 0.5;
   private lastRegimeChangeTimestamp: number | null = null;
   private hasInitializedRegime: boolean = false;
+  private latestCatboostProbabilityLong: number = 0.5;
   private tickCount: number = 0;
   private orderFlowStats = {
     takerBuyVolume: 0,
@@ -1572,6 +1573,8 @@ class TradingEngine {
     if (isRsiOversold || isPriceBbOversold) {
       if (probabilityLong < 0.30) probabilityLong = 0.30;
     }
+
+    this.latestCatboostProbabilityLong = probabilityLong;
 
     let signalDirection: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL";
     const struct = this.getTrendMarketStructure();
@@ -8203,6 +8206,8 @@ class TradingEngine {
         slippage_usdt: totalSlippageUsdt,
         ofi_score: this.orderFlowStats.ofiScore,
         ofi_signal: this.orderFlowStats.ofiLeadSignal,
+        catboost_counter_streak: 0,
+        last_counter_candle_time: 0,
       },
     });
 
@@ -8648,6 +8653,52 @@ class TradingEngine {
       if (durationSec >= 29 * 60) {
         shouldExit = true;
         reason = ExitReason.TIME_LIMIT_29MIN;
+      }
+    }
+
+    // --- CATBOOST COUNTER-TREND REVERSAL EXIT ENGINE ---
+    // Closes position early if machine learning detects an opposing trend impulse with sustained conviction
+    if (!shouldExit && config.risk_management?.enable_catboost_counter_exit === true) {
+      const gracePeriodSec = config.risk_management.catboost_counter_exit_grace_period_seconds !== undefined
+        ? config.risk_management.catboost_counter_exit_grace_period_seconds
+        : 180;
+
+      if (durationSec >= gracePeriodSec) {
+        const threshold = config.risk_management.catboost_counter_exit_threshold !== undefined
+          ? config.risk_management.catboost_counter_exit_threshold
+          : 0.75;
+        const requiredCandles = config.risk_management.catboost_counter_exit_confirmation_candles !== undefined
+          ? config.risk_management.catboost_counter_exit_confirmation_candles
+          : 2;
+
+        const probLong = this.latestCatboostProbabilityLong !== undefined ? this.latestCatboostProbabilityLong : 0.5;
+        const opposingProb = direction === TradeDirection.LONG ? (1 - probLong) : probLong;
+        const opposingDirection = direction === TradeDirection.LONG ? "SHORT" : "LONG";
+
+        if (!this.activeTrade.feature_snapshot) {
+          this.activeTrade.feature_snapshot = {};
+        }
+
+        const latestCandleTime = this.candles1m && this.candles1m.length > 0 ? this.candles1m[this.candles1m.length - 1].time : 0;
+
+        if (opposingProb >= threshold) {
+          if (this.activeTrade.feature_snapshot.last_counter_candle_time !== latestCandleTime) {
+            this.activeTrade.feature_snapshot.last_counter_candle_time = latestCandleTime;
+            this.activeTrade.feature_snapshot.catboost_counter_streak = (this.activeTrade.feature_snapshot.catboost_counter_streak || 0) + 1;
+          }
+          const streak = this.activeTrade.feature_snapshot.catboost_counter_streak || 1;
+          if (streak >= requiredCandles) {
+            shouldExit = true;
+            reason = ExitReason.CATBOOST_REVERSAL;
+            this.log(`  [CATBOOST COUNTER EXIT] Machine learning prediction flipped to ${opposingDirection} with high conviction: P(${opposingDirection}) = ${(opposingProb * 100).toFixed(1)}% (Threshold: ${(threshold * 100).toFixed(0)}%) sustained across ${streak} consecutive 1m candles. Holding duration: ${(durationSec / 60).toFixed(1)}m, Unrealized PnL: $${currentPnL.toFixed(2)} USDT. Exiting trade early to protect capital against severe reversal.`);
+          }
+        } else {
+          // If opposing conviction drops below threshold on a new candle, reset the confirmation streak
+          if (this.activeTrade.feature_snapshot.last_counter_candle_time !== latestCandleTime) {
+            this.activeTrade.feature_snapshot.last_counter_candle_time = latestCandleTime;
+            this.activeTrade.feature_snapshot.catboost_counter_streak = 0;
+          }
+        }
       }
     }
 

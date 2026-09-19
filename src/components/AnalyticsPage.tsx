@@ -1042,6 +1042,10 @@ export default function AnalyticsPage({
                 <span className="font-bold text-indigo-500">{exitReasons["TRAILING_STOP_LOSS"] || 0}</span>
               </div>
               <div className="flex justify-between items-center">
+                <span className="text-slate-400 uppercase">CATBOOST REVERSAL:</span>
+                <span className="font-bold text-purple-600">{exitReasons["CATBOOST_REVERSAL"] || 0}</span>
+              </div>
+              <div className="flex justify-between items-center">
                 <span className="text-slate-400 uppercase">MANUAL:</span>
                 <span className="font-bold text-slate-600">{exitReasons["MANUAL"] || 0}</span>
               </div>

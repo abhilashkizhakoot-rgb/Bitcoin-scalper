@@ -258,6 +258,10 @@ export default function ConfigPage({
         atr_parity_base_value: 55.0,
         atr_parity_min_quantity_btc: 0.0002,
         atr_parity_max_quantity_btc: 0.004,
+        enable_catboost_counter_exit: true,
+        catboost_counter_exit_threshold: 0.75,
+        catboost_counter_exit_confirmation_candles: 2,
+        catboost_counter_exit_grace_period_seconds: 180,
         risk_per_trade_pct: 0.5,
         max_risk_per_trade_pct: 1.0,
         leverage: 20,
@@ -2771,6 +2775,82 @@ export default function ConfigPage({
                           min={35}
                           max={180}
                         />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* CatBoost Counter-Trend Reversal Exit */}
+                <div className="space-y-3 p-3.5 bg-purple-50/50 rounded-lg border border-purple-200/80 col-span-1 md:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
+                      <input
+                        type="checkbox"
+                        checked={riskConfig.enable_catboost_counter_exit !== false}
+                        onChange={(e) => setRiskConfig({ ...riskConfig, enable_catboost_counter_exit: e.target.checked })}
+                        className="rounded border-purple-300 bg-white text-purple-600 focus:ring-purple-400 h-4 w-4 cursor-pointer"
+                        id="config-enable-catboost-counter-exit"
+                      />
+                      <span className="text-xs font-bold text-purple-950">CatBoost Counter-Trend Reversal Exit (Guarded ML Cut)</span>
+                    </label>
+                    <span className={`text-[10px] font-mono px-2.5 py-0.5 rounded-full font-semibold border ${
+                      riskConfig.enable_catboost_counter_exit !== false
+                        ? "bg-purple-100 text-purple-800 border-purple-300"
+                        : "bg-slate-100 text-slate-500 border-slate-200"
+                    }`}>
+                      {riskConfig.enable_catboost_counter_exit !== false ? "ACTIVE (GUARDED)" : "DISABLED"}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-purple-900/80 leading-relaxed pl-6.5">
+                    Closes an open position early if the CatBoost machine learning model detects an aggressive opposing momentum impulse with high conviction.
+                    By enforcing a high conviction threshold (default &ge; 75%), a multi-candle confirmation window (default 2 candles), and an entry grace period (default 180s), it prevents whipsaw shakeouts while saving ~50–65% of the Stop Loss distance when a genuine trend reversal develops against your position.
+                  </p>
+                  {riskConfig.enable_catboost_counter_exit !== false && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 pl-6.5 border-t border-purple-200/60">
+                      <div>
+                        <label className="text-[10px] font-mono text-purple-900 uppercase block mb-1">Opposing Conviction Threshold (%)</label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="55"
+                          max="95"
+                          value={Math.round((riskConfig.catboost_counter_exit_threshold !== undefined ? riskConfig.catboost_counter_exit_threshold : 0.75) * 100)}
+                          onChange={(e) => {
+                            const val = parseInputNumber(e.target.value);
+                            setRiskConfig({ ...riskConfig, catboost_counter_exit_threshold: typeof val === "number" ? val / 100 : 0.75 });
+                          }}
+                          className="w-full bg-white border border-purple-200 rounded p-1.5 text-xs text-slate-800 font-mono focus:ring-1 focus:ring-purple-400 outline-none"
+                          id="config-catboost-exit-threshold"
+                        />
+                        <p className="text-[9px] text-purple-700/70 mt-1">Opposing ML probability &ge; this level triggers exit (Default: 75%).</p>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-mono text-purple-900 uppercase block mb-1">Confirmation Candles</label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="1"
+                          max="5"
+                          value={riskConfig.catboost_counter_exit_confirmation_candles || 2}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, catboost_counter_exit_confirmation_candles: parseInputNumber(e.target.value) })}
+                          className="w-full bg-white border border-purple-200 rounded p-1.5 text-xs text-slate-800 font-mono focus:ring-1 focus:ring-purple-400 outline-none"
+                          id="config-catboost-exit-candles"
+                        />
+                        <p className="text-[9px] text-purple-700/70 mt-1">Consecutive 1m candles required to confirm reversal (Default: 2).</p>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-mono text-purple-900 uppercase block mb-1">Entry Grace Period (Secs)</label>
+                        <input
+                          type="number"
+                          step="15"
+                          min="0"
+                          max="600"
+                          value={riskConfig.catboost_counter_exit_grace_period_seconds !== undefined ? riskConfig.catboost_counter_exit_grace_period_seconds : 180}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, catboost_counter_exit_grace_period_seconds: parseInputNumber(e.target.value) })}
+                          className="w-full bg-white border border-purple-200 rounded p-1.5 text-xs text-slate-800 font-mono focus:ring-1 focus:ring-purple-400 outline-none"
+                          id="config-catboost-exit-grace"
+                        />
+                        <p className="text-[9px] text-purple-700/70 mt-1">Breathing room after entry before ML exits activate (Default: 180s).</p>
                       </div>
                     </div>
                   )}

@@ -23,6 +23,7 @@ export enum ExitReason {
   TIME_LIMIT_29MIN = "TIME_LIMIT_29MIN",
   STALL_DECAY = "STALL_DECAY",
   SENTIMENT_REVERSAL = "SENTIMENT_REVERSAL",
+  CATBOOST_REVERSAL = "CATBOOST_REVERSAL",
   REGIME_CHANGE = "REGIME_CHANGE",
   CIRCUIT_BREAKER = "CIRCUIT_BREAKER",
   MANUAL_EXIT = "MANUAL_EXIT",
@@ -286,6 +287,10 @@ export interface StrategyConfig {
     hard_time_limit_29m_enabled?: boolean; // Enable or disable 29-minute hard cutoff exit (default: true)
     stall_evaluation_minutes?: number; // Minute mark to begin smart stall evaluation (default: 25)
     max_trade_duration_minutes?: number; // Max holding time ceiling for profitable runners (default: 60)
+    enable_catboost_counter_exit?: boolean; // Exit trade early if CatBoost predicts opposite direction with high conviction
+    catboost_counter_exit_threshold?: number; // Probability threshold for opposing CatBoost prediction (default: 0.75 or 75%)
+    catboost_counter_exit_confirmation_candles?: number; // Number of consecutive candle evaluations required before exiting (default: 2)
+    catboost_counter_exit_grace_period_seconds?: number; // Grace period in seconds after entry before counter exit is active (default: 180s)
     default_order_execution?: "MAKER" | "TAKER"; // Default order execution type
     trailing_stop_loss_enabled?: boolean; // Dynamic trailing stop loss trigger
     trailing_stop_loss_distance_atr?: number; // ATR distance multiplier for trailing

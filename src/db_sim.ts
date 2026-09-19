@@ -236,6 +236,10 @@ const DEFAULT_CONFIG: StrategyConfig = {
     smart_stall_exit_enabled: true,
     stall_evaluation_minutes: 25,
     max_trade_duration_minutes: 60,
+    enable_catboost_counter_exit: true,
+    catboost_counter_exit_threshold: 0.75,
+    catboost_counter_exit_confirmation_candles: 2,
+    catboost_counter_exit_grace_period_seconds: 180,
     default_order_execution: "TAKER",
     trailing_stop_loss_enabled: true,
     trailing_stop_loss_distance_atr: 1.45,
@@ -1362,6 +1366,22 @@ class DatabaseManager {
       }
       if (this.cache.config.risk_management.atr_parity_max_quantity_btc === undefined) {
         this.cache.config.risk_management.atr_parity_max_quantity_btc = 0.004;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.enable_catboost_counter_exit === undefined) {
+        this.cache.config.risk_management.enable_catboost_counter_exit = true;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.catboost_counter_exit_threshold === undefined) {
+        this.cache.config.risk_management.catboost_counter_exit_threshold = 0.75;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.catboost_counter_exit_confirmation_candles === undefined) {
+        this.cache.config.risk_management.catboost_counter_exit_confirmation_candles = 2;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.catboost_counter_exit_grace_period_seconds === undefined) {
+        this.cache.config.risk_management.catboost_counter_exit_grace_period_seconds = 180;
         changed = true;
       }
     }

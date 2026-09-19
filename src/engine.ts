@@ -173,6 +173,10 @@ class TradingEngine {
   }
 
   public getTradeSizeMultiplier(direction?: TradeDirection | "LONG" | "SHORT", probability?: number): number {
+    const config = dbManager.getConfig();
+    if (config.risk_management?.enable_dynamic_position_sizing === false) {
+      return 1.0;
+    }
     let mult = 1.0;
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY) {
       mult = 0.5; // Reduce position size by 50% under low volatility to preserve capital
@@ -8025,10 +8029,46 @@ class TradingEngine {
     }
 
     // Adaptive Confidence-Weighted Sizing & Constant Dollar Risk Scaling:
-    const sizeMultiplier = this.getTradeSizeMultiplier(execDirection, probability);
-    const baseQty = config.risk_management.default_quantity_btc || 0.001;
-    const slRiskScaling = structuralSlDistance > stopLossDistance ? Math.max(0.4, stopLossDistance / structuralSlDistance) : 1.0;
-    const positionQtyBtc = Number((baseQty * sizeMultiplier * slRiskScaling).toFixed(5));
+    const isDynamicSizingEnabled = config.risk_management?.enable_dynamic_position_sizing !== false;
+    const isAtrParityEnabled = config.risk_management?.enable_atr_parity_sizing === true;
+    const baseQty = config.risk_management?.default_quantity_btc || 0.001;
+    let positionQtyBtc: number;
+
+    // ATR-Normalized Dollar-Risk Parity Scaling:
+    // If ATR > base (e.g. 55), proportionally decreases BTC size.
+    // If ATR < base (e.g. 55), proportionally increases BTC size.
+    // Result: Dollar loss (SL) and Dollar profit (TP) remain fixed across varying market volatilities.
+    let atrParityScale = 1.0;
+    if (isAtrParityEnabled) {
+      const baseAtr = config.risk_management?.atr_parity_base_value || 55.0;
+      const safeCurrentAtr = Math.max(5.0, lastAtr);
+      atrParityScale = baseAtr / safeCurrentAtr;
+    }
+
+    if (isDynamicSizingEnabled) {
+      const sizeMultiplier = this.getTradeSizeMultiplier(execDirection, probability);
+      const slRiskScaling = structuralSlDistance > stopLossDistance ? Math.max(0.4, stopLossDistance / structuralSlDistance) : 1.0;
+      let calculatedQty = baseQty * sizeMultiplier * slRiskScaling * atrParityScale;
+
+      if (isAtrParityEnabled) {
+        const minQty = config.risk_management?.atr_parity_min_quantity_btc || 0.0002;
+        const maxQty = config.risk_management?.atr_parity_max_quantity_btc || 0.004;
+        calculatedQty = Math.max(minQty, Math.min(maxQty, calculatedQty));
+        this.log(`  [Position Sizing] ATR-Parity + Dynamic Sizing Active: Base ${baseQty} BTC * ATR Parity ${atrParityScale.toFixed(2)}x (Base ATR 55 / Current ATR ${lastAtr.toFixed(1)}) * Multiplier ${sizeMultiplier.toFixed(2)}x * SL Scale ${slRiskScaling.toFixed(2)}x -> Final Qty: ${calculatedQty.toFixed(5)} BTC`);
+      } else {
+        this.log(`  [Position Sizing] Dynamic Sizing Active: Base ${baseQty} BTC * Multiplier ${sizeMultiplier.toFixed(2)}x * SL Risk Scale ${slRiskScaling.toFixed(2)}x = ${calculatedQty.toFixed(5)} BTC`);
+      }
+      positionQtyBtc = Number(calculatedQty.toFixed(5));
+    } else if (isAtrParityEnabled) {
+      const minQty = config.risk_management?.atr_parity_min_quantity_btc || 0.0002;
+      const maxQty = config.risk_management?.atr_parity_max_quantity_btc || 0.004;
+      const calculatedQty = Math.max(minQty, Math.min(maxQty, baseQty * atrParityScale));
+      positionQtyBtc = Number(calculatedQty.toFixed(5));
+      this.log(`  [Position Sizing] ATR Dollar-Risk Parity Sizing Active: Base ${baseQty} BTC * Parity Scale ${atrParityScale.toFixed(2)}x (Base 55 / Current ATR ${lastAtr.toFixed(1)}) -> Locked Qty: ${positionQtyBtc} BTC (AI Multipliers Bypassed)`);
+    } else {
+      positionQtyBtc = Number(baseQty.toFixed(5));
+      this.log(`  [Position Sizing] Fixed Sizing Active: Locked strictly to default quantity ${positionQtyBtc} BTC (Dynamic sizing & ATR parity disabled)`);
+    }
     const totalSlippageUsdt = Number((slippageUsdPerBtc * positionQtyBtc).toFixed(4));
     const leverage = config.risk_management.leverage || 20;
 

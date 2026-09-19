@@ -9123,7 +9123,11 @@
       "stall_evaluation_minutes": 25,
       "max_trade_duration_minutes": 60,
       "max_allowed_z_dist": 2.5,
-      "min_net_edge_ratio": 2.2
+      "min_net_edge_ratio": 2.2,
+      "enable_atr_parity_sizing": true,
+      "atr_parity_base_value": 55,
+      "atr_parity_min_quantity_btc": 0.0002,
+      "atr_parity_max_quantity_btc": 0.004
     }
   },
   "config_profiles": {

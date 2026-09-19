@@ -225,6 +225,11 @@ const DEFAULT_CONFIG: StrategyConfig = {
     intra_trade_drawdown_limit_pct: 1.5,
     leverage: 20,
     default_quantity_btc: 0.001,
+    enable_dynamic_position_sizing: true,
+    enable_atr_parity_sizing: true,
+    atr_parity_base_value: 55.0,
+    atr_parity_min_quantity_btc: 0.0002,
+    atr_parity_max_quantity_btc: 0.004,
     simulate_paper_fees: true,
     delta_india_gst_enabled: true,
     delta_scalper_offer_enabled: true,
@@ -1337,6 +1342,26 @@ class DatabaseManager {
       }
       if (this.cache.config.risk_management.hybrid_regime_switching_enabled === undefined) {
         this.cache.config.risk_management.hybrid_regime_switching_enabled = true;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.enable_dynamic_position_sizing === undefined) {
+        this.cache.config.risk_management.enable_dynamic_position_sizing = true;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.enable_atr_parity_sizing === undefined) {
+        this.cache.config.risk_management.enable_atr_parity_sizing = true;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.atr_parity_base_value === undefined) {
+        this.cache.config.risk_management.atr_parity_base_value = 55.0;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.atr_parity_min_quantity_btc === undefined) {
+        this.cache.config.risk_management.atr_parity_min_quantity_btc = 0.0002;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.atr_parity_max_quantity_btc === undefined) {
+        this.cache.config.risk_management.atr_parity_max_quantity_btc = 0.004;
         changed = true;
       }
     }

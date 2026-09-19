@@ -274,6 +274,11 @@ export interface StrategyConfig {
     intra_trade_drawdown_limit_pct: number; // e.g. 1.5
     leverage: number; // leverage setting (e.g. 10x, 20x, 50x)
     default_quantity_btc: number; // default trading size (e.g. 0.001)
+    enable_dynamic_position_sizing?: boolean; // When false, strictly locks trade size to default_quantity_btc (disables CatBoost confidence scaling, structural SL downsizing, and low-volatility halving)
+    enable_atr_parity_sizing?: boolean; // When true, inversely scales BTC size based on (base_atr / current_atr) so dollar loss and profit remain constant regardless of ATR
+    atr_parity_base_value?: number; // The baseline ATR value (default: 55.0) where quantity = default_quantity_btc
+    atr_parity_min_quantity_btc?: number; // Minimum allowed BTC quantity floor (default: 0.0001)
+    atr_parity_max_quantity_btc?: number; // Maximum allowed BTC quantity ceiling (default: 0.005)
     simulate_paper_fees?: boolean; // Whether to simulate exchange fees in paper mode
     delta_india_gst_enabled?: boolean; // Whether to apply 18% GST to trading fees
     delta_scalper_offer_enabled?: boolean; // Pay zero closing fee if trade is closed within 30 minutes

@@ -253,6 +253,11 @@ export default function ConfigPage({
       },
       risk_management: {
         default_quantity_btc: 0.001,
+        enable_dynamic_position_sizing: true,
+        enable_atr_parity_sizing: true,
+        atr_parity_base_value: 55.0,
+        atr_parity_min_quantity_btc: 0.0002,
+        atr_parity_max_quantity_btc: 0.004,
         risk_per_trade_pct: 0.5,
         max_risk_per_trade_pct: 1.0,
         leverage: 20,
@@ -1864,6 +1869,107 @@ export default function ConfigPage({
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Standard trade position volume size in BTC used for automatic breakout signal execution and manual UI orders (e.g. 0.001 BTC scales exposure accordingly).
                   </p>
+                </div>
+
+                <div className="space-y-2 bg-slate-50/80 border border-slate-200/90 rounded-xl p-3.5">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 cursor-pointer font-sans select-none text-xs font-semibold text-slate-800">
+                      <input
+                        type="checkbox"
+                        checked={riskConfig.enable_dynamic_position_sizing !== false}
+                        onChange={(e) => setRiskConfig({ ...riskConfig, enable_dynamic_position_sizing: e.target.checked })}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                        id="config-enable-dynamic-position-sizing"
+                      />
+                      Enable Dynamic Position Sizing
+                    </label>
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-semibold border ${
+                      riskConfig.enable_dynamic_position_sizing !== false
+                        ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                        : "bg-amber-50 text-amber-700 border-amber-200"
+                    }`}>
+                      {riskConfig.enable_dynamic_position_sizing !== false ? "DYNAMIC (SCALED)" : "STRICTLY FIXED"}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                    {riskConfig.enable_dynamic_position_sizing !== false
+                      ? "Scales BTC quantity dynamically using CatBoost AI probability (0.25x - 1.0x), structural stop distance dollar-risk calibration (down to 0.40x), and low-volatility halving (0.50x)."
+                      : "Strictly locks every executed trade to the exact Default Trading Quantity set on the left (e.g. exactly " + (riskConfig.default_quantity_btc || 0.001) + " BTC). All automatic downsizing is bypassed."}
+                  </p>
+                </div>
+
+                <div className="space-y-3 bg-emerald-50/50 border border-emerald-200/80 rounded-xl p-3.5 col-span-1 md:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 cursor-pointer font-sans select-none text-xs font-semibold text-emerald-950">
+                      <input
+                        type="checkbox"
+                        checked={riskConfig.enable_atr_parity_sizing === true}
+                        onChange={(e) => setRiskConfig({ ...riskConfig, enable_atr_parity_sizing: e.target.checked })}
+                        className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                        id="config-enable-atr-parity-sizing"
+                      />
+                      ATR Dollar-Risk Parity Sizing (Fixed Loss & Profit Guarantee)
+                    </label>
+                    <span className={`text-[10px] font-mono px-2.5 py-0.5 rounded-full font-semibold border ${
+                      riskConfig.enable_atr_parity_sizing === true
+                        ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                        : "bg-slate-100 text-slate-500 border-slate-200"
+                    }`}>
+                      {riskConfig.enable_atr_parity_sizing === true ? "ACTIVE (PARITY FIXED)" : "DISABLED"}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-emerald-800/80 leading-relaxed">
+                    Scales position volume inversely to ATR: <span className="font-mono font-semibold">Quantity = Base Qty × (Base ATR / Current ATR)</span>.
+                    When ATR is high (e.g. &gt; 55), volume decreases so a stop-out never blows past your planned loss.
+                    When ATR is low (e.g. &lt; 55), volume increases so small price moves deliver the exact same dollar profit.
+                    Prevents 1 volatile loss from wiping out 2–3 previous profits.
+                  </p>
+
+                  {riskConfig.enable_atr_parity_sizing === true && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-emerald-200/60">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-mono text-emerald-900 uppercase">Baseline ATR Target ($)</label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="10"
+                          value={riskConfig.atr_parity_base_value !== undefined ? riskConfig.atr_parity_base_value : 55.0}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, atr_parity_base_value: parseInputNumber(e.target.value, true) })}
+                          className="w-full bg-white border border-emerald-200 rounded-lg p-2 text-xs text-slate-800 focus:ring-1 focus:ring-emerald-400 outline-none font-mono"
+                          id="config-atr-parity-base"
+                        />
+                        <p className="text-[9px] text-emerald-700/70">ATR where trade size = exactly Base Qty (Recommended: 55).</p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-mono text-emerald-900 uppercase">Min Quantity Floor (BTC)</label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          min="0.0001"
+                          value={riskConfig.atr_parity_min_quantity_btc !== undefined ? riskConfig.atr_parity_min_quantity_btc : 0.0002}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, atr_parity_min_quantity_btc: parseInputNumber(e.target.value, true) })}
+                          className="w-full bg-white border border-emerald-200 rounded-lg p-2 text-xs text-slate-800 focus:ring-1 focus:ring-emerald-400 outline-none font-mono"
+                          id="config-atr-parity-min-qty"
+                        />
+                        <p className="text-[9px] text-emerald-700/70">Floor during extreme volatility spikes (e.g. 0.0002 BTC).</p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-mono text-emerald-900 uppercase">Max Quantity Cap (BTC)</label>
+                        <input
+                          type="number"
+                          step="0.0005"
+                          min="0.0005"
+                          value={riskConfig.atr_parity_max_quantity_btc !== undefined ? riskConfig.atr_parity_max_quantity_btc : 0.004}
+                          onChange={(e) => setRiskConfig({ ...riskConfig, atr_parity_max_quantity_btc: parseInputNumber(e.target.value, true) })}
+                          className="w-full bg-white border border-emerald-200 rounded-lg p-2 text-xs text-slate-800 focus:ring-1 focus:ring-emerald-400 outline-none font-mono"
+                          id="config-atr-parity-max-qty"
+                        />
+                        <p className="text-[9px] text-emerald-700/70">Cap during sluggish / ultra-low ATR periods (e.g. 0.004 BTC).</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-1.5">

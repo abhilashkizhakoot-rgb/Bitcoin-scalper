@@ -649,12 +649,22 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                           {safeFormatTime(t.entry_timestamp, true)}
                         </td>
                         <td className="py-3.5 px-4">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
-                            t.direction === TradeDirection.LONG ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-rose-50 border-rose-200 text-rose-700"
-                          }`}>
-                            {t.direction === TradeDirection.LONG ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                            {t.direction}
-                          </span>
+                          <div className="flex items-center gap-1">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
+                              t.direction === TradeDirection.LONG ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-rose-50 border-rose-200 text-rose-700"
+                            }`}>
+                              {t.direction === TradeDirection.LONG ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                              {t.direction}
+                            </span>
+                            {t.feature_snapshot?.inverted_from_signal && (
+                              <span
+                                className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-purple-100 text-purple-700 border border-purple-200"
+                                title={`Inverted in Reverse Trading Mode (Confirmed signal was ${t.feature_snapshot.inverted_from_signal})`}
+                              >
+                                REV
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3.5 px-4">
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-indigo-50/70 border border-indigo-150 text-indigo-750 font-sans shadow-2xs">
@@ -839,6 +849,12 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                                    <span className="text-slate-400">Entry Score:</span>
                                    <span className="font-mono text-indigo-600 font-bold">{t.entry_signal_score}/100</span>
                                  </div>
+                                 {t.feature_snapshot?.inverted_from_signal && (
+                                   <div className="flex justify-between pt-1 border-t border-slate-200/50">
+                                     <span className="text-purple-600 font-medium">Reverse Mode:</span>
+                                     <span className="font-mono text-purple-700 font-bold">Inverted from {t.feature_snapshot.inverted_from_signal}</span>
+                                   </div>
+                                 )}
                                </div>
                              </div>
                            </div>

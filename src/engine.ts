@@ -185,8 +185,13 @@ class TradingEngine {
     // AI Model Confidence-Weighted Fractional Sizing (Non-blocking risk reduction):
     // If trade direction and CatBoost probability are provided, scale exposure dynamically:
     if (direction && probability !== undefined && !isNaN(probability)) {
+      const isInverted = config.general?.invert_confirmed_trades === true;
       const isLong = (direction as string) === "LONG" || direction === TradeDirection.LONG;
-      const modelProb = isLong ? probability : (1 - probability);
+      // In Reverse Trading Mode, the trade direction is intentionally inverted from the confirmed setup.
+      // The confidence of the inverted trade corresponds to the strength of the confirmed setup being faded.
+      const modelProb = isInverted
+        ? (isLong ? (1 - probability) : probability)
+        : (isLong ? probability : (1 - probability));
       if (modelProb >= 0.65) {
         // High alignment: full size
         mult *= 1.0;
@@ -2500,7 +2505,11 @@ class TradingEngine {
     });
 
     // Anti-Whipsaw Directional Lockout Gate (Mandatory Safety Gate)
-    const whipsawCheck = this.getAntiWhipsawLockoutStatus(signalDirection as "LONG" | "SHORT");
+    const isInverted = config.general.invert_confirmed_trades === true;
+    const effectiveTradeDirection: "LONG" | "SHORT" = isInverted
+      ? (signalDirection === "LONG" ? "SHORT" : "LONG")
+      : (signalDirection as "LONG" | "SHORT");
+    const whipsawCheck = this.getAntiWhipsawLockoutStatus(effectiveTradeDirection);
     const isWhipsawGateMet = !whipsawCheck.active;
 
     conditions.push({
@@ -2508,7 +2517,9 @@ class TradingEngine {
       met: isWhipsawGateMet,
       current_value: whipsawCheck.active
         ? `BLOCKED: ${whipsawCheck.reason}`
-        : "PASSING (No immediate opposing stop-loss exit within 180s)",
+        : isInverted
+          ? `PASSING (Reverse Mode: Candidate ${effectiveTradeDirection} evaluated, no opposing stop-loss lockout)`
+          : "PASSING (No immediate opposing stop-loss exit within 180s)",
       required: "Wait >= 180s before flipping to opposite direction after stop-loss exit",
       description: "Strictly blocks entering trades in the opposing direction within 180 seconds after a stop-out, preventing market maker liquidity sweeps and consecutive whipsaw losses.",
       priority: "CRITICAL",
@@ -8658,7 +8669,9 @@ class TradingEngine {
 
     // --- CATBOOST COUNTER-TREND REVERSAL EXIT ENGINE ---
     // Closes position early if machine learning detects an opposing trend impulse with sustained conviction
-    if (!shouldExit && config.risk_management?.enable_catboost_counter_exit === true) {
+    // Note: If trade was entered in Reverse Trading Mode (inverted_from_signal is set), CatBoost baseline prediction is expectedly opposing, so counter-exit is bypassed to avoid aborting contrarian trades
+    const isTradeInverted = !!this.activeTrade.feature_snapshot?.inverted_from_signal;
+    if (!shouldExit && config.risk_management?.enable_catboost_counter_exit === true && !isTradeInverted) {
       const gracePeriodSec = config.risk_management.catboost_counter_exit_grace_period_seconds !== undefined
         ? config.risk_management.catboost_counter_exit_grace_period_seconds
         : 180;

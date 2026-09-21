@@ -24,6 +24,7 @@ import {
   TrendingUp as TrendUpIcon,
   CheckCircle,
   XCircle,
+  ArrowLeftRight,
 } from "lucide-react";
 import {
   ComposedChart,
@@ -205,6 +206,25 @@ export default function Dashboard({
 
   const activeTrade = status.active_trade as Trade | null;
   const isTradingActive = status.is_trading_active;
+  const [isTogglingReverse, setIsTogglingReverse] = useState(false);
+
+  const isInvertTrades = status.config?.general?.invert_confirmed_trades === true;
+
+  const handleToggleReverseTrading = async () => {
+    setIsTogglingReverse(true);
+    try {
+      await apiFetch("/api/trading/toggle-reverse-trading", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invert_confirmed_trades: !isInvertTrades }),
+      });
+      onRefresh();
+    } catch (err) {
+      console.error("Failed to toggle Reverse Trading:", err);
+    } finally {
+      setIsTogglingReverse(false);
+    }
+  };
 
   const handleToggleTrading = async () => {
     if (isTradingActive) {
@@ -352,6 +372,43 @@ export default function Dashboard({
               }`}>
                 {status.is_paper_trading ? "DEMO" : "REAL"}
               </span>
+            </div>
+
+            {/* Reverse Trading Mode Card & Quick Toggle */}
+            <div className={`p-3 rounded-xl border flex items-center justify-between shadow-2xs transition-all ${
+              isInvertTrades
+                ? "bg-purple-50/90 border-purple-200 text-purple-950"
+                : "bg-slate-50/80 border-slate-200/80 text-slate-700"
+            }`}>
+              <div className="flex items-center gap-2.5">
+                <div className={`p-1.5 rounded-lg ${
+                  isInvertTrades
+                    ? "bg-purple-600 text-white shadow-xs"
+                    : "bg-slate-200/80 text-slate-500"
+                }`}>
+                  <ArrowLeftRight className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-slate-400">Signal Execution</p>
+                  <p className="text-xs font-sans font-bold mt-0.5">
+                    {isInvertTrades ? "Reverse Trading (Inverted)" : "Standard Direction"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleReverseTrading}
+                disabled={isTogglingReverse}
+                className={`text-[10px] font-mono px-2.5 py-1 rounded-md font-bold uppercase transition-all cursor-pointer ${
+                  isInvertTrades
+                    ? "bg-purple-600 hover:bg-purple-700 text-white shadow-xs"
+                    : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-800"
+                }`}
+                title="Toggle Reverse Trading Mode: If enabled, confirmed LONG setups execute as SHORT trades, and vice versa."
+                id="btn-toggle-reverse-trading"
+              >
+                {isInvertTrades ? "INVERT ON" : "STANDARD"}
+              </button>
             </div>
 
             <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 flex justify-between items-center">

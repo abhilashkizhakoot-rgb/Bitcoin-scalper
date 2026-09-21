@@ -330,6 +330,16 @@ async function startServer() {
     res.json({ success: true, is_paper_trading: dbManager.isPaperMode() });
   });
 
+  app.post("/api/trading/toggle-reverse-trading", (req, res) => {
+    const config = dbManager.getConfig();
+    const current = config.general.invert_confirmed_trades === true;
+    const updatedVal = req.body.invert_confirmed_trades !== undefined
+      ? req.body.invert_confirmed_trades === true
+      : !current;
+    dbManager.updateConfig("general", { invert_confirmed_trades: updatedVal });
+    res.json({ success: true, invert_confirmed_trades: updatedVal });
+  });
+
   app.post("/api/trading/clear-history", (req, res) => {
     const { mode } = req.body;
     if (!mode || !["live", "paper", "both"].includes(mode)) {

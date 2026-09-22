@@ -154,6 +154,34 @@ export function getTradeTimingWindow(entryTimestampStr: string, customWindows?: 
   };
 }
 
+export function calculateTradeAtrExcursions(t: Trade) {
+  const entryAtr = Number(t.feature_snapshot?.atr_14 ?? t.feature_snapshot?.entry_atr ?? 0);
+  const mfePct = Number(t.max_favorable_excursion ?? 0);
+  const maePct = Number(t.max_adverse_excursion ?? 0);
+  const entryPrice = Number(t.entry_price ?? 0);
+
+  // Peak points moved in favorable and opposite/adverse directions
+  const favPoints = entryPrice > 0 ? (entryPrice * mfePct) / 100 : 0;
+  const oppPoints = entryPrice > 0 ? (entryPrice * maePct) / 100 : 0;
+
+  // Percentage of entry ATR moved (e.g. if entry ATR was 50 and price moved 100 points -> 200% movement)
+  const favAtrPct = entryAtr > 0
+    ? (favPoints / entryAtr) * 100
+    : Number(t.max_favorable_atr_pct ?? 0);
+  const oppAtrPct = entryAtr > 0
+    ? (oppPoints / entryAtr) * 100
+    : Number(t.max_adverse_atr_pct ?? 0);
+
+  return {
+    entryAtr,
+    entryPrice,
+    favPoints,
+    oppPoints,
+    favAtrPct,
+    oppAtrPct,
+  };
+}
+
 interface TradeHistoryProps {
   trades: Trade[];
   isPaperMode?: boolean;
@@ -171,6 +199,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
   const [regimeFilter, setRegimeFilter] = useState<string>("ALL");
   const [showTargetsInTable, setShowTargetsInTable] = useState<boolean>(false);
   const [showAtrInTable, setShowAtrInTable] = useState<boolean>(false);
+  const [showAtrExcursions, setShowAtrExcursions] = useState<boolean>(true);
 
   // Clear modal states
   const [showClearModal, setShowClearModal] = useState(false);
@@ -299,6 +328,10 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
       "Target SL ($)",
       "Target TP ($)",
       "Entry ATR ($)",
+      "Favorable ATR Move (%)",
+      "Opposite ATR Move (%)",
+      "Favorable Points ($)",
+      "Opposite Points ($)",
       "Exit Reason",
       "Net P&L ($)",
       "Leverage",
@@ -324,6 +357,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
         ? t.feature_snapshot.atr_14
         : "";
       const setupTriggered = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Setup 1: Pullback & Retest";
+      const { entryAtr, favPoints, oppPoints, favAtrPct, oppAtrPct } = calculateTradeAtrExcursions(t);
 
       return [
         t.entry_timestamp,
@@ -335,6 +369,10 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
         sl,
         tp,
         atr,
+        entryAtr > 0 ? Number(favAtrPct.toFixed(2)) : "",
+        entryAtr > 0 ? Number(oppAtrPct.toFixed(2)) : "",
+        Number(favPoints.toFixed(2)),
+        Number(oppPoints.toFixed(2)),
         t.exit_reason || "Active",
         t.pnl_usdt !== undefined ? t.pnl_usdt : "Active",
         t.leverage,
@@ -582,6 +620,17 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
             <span>Show Entry ATR</span>
           </label>
 
+          {/* Toggle ATR Excursions (% ATR) column */}
+          <label className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100/80 text-slate-700 border border-slate-200 rounded-lg text-xs font-sans font-medium transition-colors cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showAtrExcursions}
+              onChange={(e) => setShowAtrExcursions(e.target.checked)}
+              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer"
+            />
+            <span>Show Excursion (% ATR)</span>
+          </label>
+
           {/* Export CSV Button */}
           <button
             onClick={exportToCSV}
@@ -625,6 +674,11 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                 {showAtrInTable && (
                   <th className="py-3 px-4 font-normal">Entry ATR</th>
                 )}
+                {showAtrExcursions && (
+                  <th className="py-3 px-4 font-normal" title="Peak price excursion as % of Entry ATR (Fav: favorable / Opp: opposite direction)">
+                    Excursion (% ATR)
+                  </th>
+                )}
                 <th className="py-3 px-4 font-normal">Exit Price</th>
                 <th className="py-3 px-4 font-normal">Session IST</th>
                 <th className="py-3 px-4 font-normal">Trigger Reason</th>
@@ -637,6 +691,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                 const isSelected = selectedTradeId === t.id;
                 const tWindow = getTradeTimingWindow(t.entry_timestamp, windowsList);
                 const setupName = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Setup 1: Pullback & Retest";
+                const { entryAtr, favPoints, oppPoints, favAtrPct, oppAtrPct } = calculateTradeAtrExcursions(t);
                 return (
                   <React.Fragment key={t.id}>
                                          <tr
@@ -703,6 +758,24 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                               : "—"}
                           </td>
                         )}
+                        {showAtrExcursions && (
+                          <td className="py-3.5 px-4 font-mono text-xs">
+                            <div className="flex flex-col gap-0.5">
+                              <span
+                                className="text-emerald-600 font-bold"
+                                title={`Favorable Move: +${favAtrPct.toFixed(1)}% of Entry ATR (+${favPoints.toFixed(1)} pts / ${(favAtrPct / 100).toFixed(2)}x ATR)`}
+                              >
+                                +{favAtrPct.toFixed(1)}% <span className="text-[10px] text-slate-400 font-normal">(+${favPoints.toFixed(1)})</span>
+                              </span>
+                              <span
+                                className="text-rose-600 font-medium"
+                                title={`Opposite Move: -${oppAtrPct.toFixed(1)}% of Entry ATR (-${oppPoints.toFixed(1)} pts / ${(oppAtrPct / 100).toFixed(2)}x ATR)`}
+                              >
+                                -{oppAtrPct.toFixed(1)}% <span className="text-[10px] text-slate-400 font-normal">(-${oppPoints.toFixed(1)})</span>
+                              </span>
+                            </div>
+                          </td>
+                        )}
                         <td className="py-3.5 px-4 font-mono text-slate-500">
                           {t.exit_price ? `$${safeFormatNumber(t.exit_price)}` : "Active..."}
                         </td>
@@ -742,7 +815,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                      {/* Trade Detail Drawer */}
                      {isSelected && (
                        <tr>
-                         <td colSpan={(showTargetsInTable ? 12 : 10) + (showAtrInTable ? 1 : 0)} className="bg-slate-50 border-t border-b border-slate-100 p-5">
+                         <td colSpan={(showTargetsInTable ? 12 : 10) + (showAtrInTable ? 1 : 0) + (showAtrExcursions ? 1 : 0)} className="bg-slate-50 border-t border-b border-slate-100 p-5">
                            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-slate-600" id={`trade-drawer-${t.id}`}>
                              {/* Execution stats */}
                              <div className="space-y-3">
@@ -799,17 +872,35 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                                </div>
                              </div>
  
-                             {/* Adverse excursions */}
+                             {/* Excursions & ATR movement */}
                              <div className="space-y-3">
-                               <h4 className="text-[10px] font-mono text-rose-600 uppercase tracking-wider">Risk Excursions</h4>
+                               <h4 className="text-[10px] font-mono text-indigo-600 uppercase tracking-wider">Excursions & ATR Move</h4>
                                <div className="space-y-1.5 text-xs font-sans">
                                  <div className="flex justify-between border-b border-slate-200/50 pb-1">
-                                   <span className="text-slate-400">Max Fav Excursion (MFE):</span>
-                                   <span className="font-mono text-emerald-600 font-bold">+{t.max_favorable_excursion.toFixed(3)}%</span>
+                                   <span className="text-slate-400">Fav ATR Move:</span>
+                                   <span className="font-mono text-emerald-600 font-bold">
+                                     +{favAtrPct.toFixed(1)}% ATR
+                                     <span className="text-slate-400 text-[10px] font-normal ml-1">
+                                       (+${favPoints.toFixed(2)} | {(favAtrPct / 100).toFixed(2)}x ATR)
+                                     </span>
+                                   </span>
+                                 </div>
+                                 <div className="flex justify-between border-b border-slate-200/50 pb-1">
+                                   <span className="text-slate-400">Opposite ATR Move:</span>
+                                   <span className="font-mono text-rose-600 font-bold">
+                                     -{oppAtrPct.toFixed(1)}% ATR
+                                     <span className="text-slate-400 text-[10px] font-normal ml-1">
+                                       (-${oppPoints.toFixed(2)} | {(oppAtrPct / 100).toFixed(2)}x ATR)
+                                     </span>
+                                   </span>
+                                 </div>
+                                 <div className="flex justify-between border-b border-slate-200/50 pb-1">
+                                   <span className="text-slate-400">Max Fav Excursion:</span>
+                                   <span className="font-mono text-emerald-600 font-semibold">+{t.max_favorable_excursion.toFixed(3)}%</span>
                                  </div>
                                  <div className="flex justify-between">
-                                   <span className="text-slate-400">Max Adv Excursion (MAE):</span>
-                                   <span className="font-mono text-rose-600 font-bold">-{t.max_adverse_excursion.toFixed(3)}%</span>
+                                   <span className="text-slate-400">Max Adv Excursion:</span>
+                                   <span className="font-mono text-rose-600 font-semibold">-{t.max_adverse_excursion.toFixed(3)}%</span>
                                  </div>
                                </div>
                              </div>

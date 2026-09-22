@@ -88,6 +88,8 @@ export interface Trade {
   entry_signal_score: number;
   max_favorable_excursion: number; // Max price reach in trade direction %
   max_adverse_excursion: number; // Max drawdown in trade direction %
+  max_favorable_atr_pct?: number; // Peak excursion as % of entry ATR (e.g. 200% if price moved 2x ATR)
+  max_adverse_atr_pct?: number; // Peak opposite/adverse excursion as % of entry ATR
   hold_duration_seconds: number;
   is_win: boolean | null;
   setup_triggered?: string;

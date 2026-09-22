@@ -1174,12 +1174,21 @@ class TradingEngine {
       const rsi14 = hasEnough ? this.calculateRSI(closes, 14) : [50];
       const currentRsi = rsi14[closes.length - 1] !== undefined ? rsi14[closes.length - 1] : 50;
 
+      const entryAtr = Number(trade.feature_snapshot?.atr_14 || 0);
+      const mfePct = Number(trade.max_favorable_excursion || 0);
+      const maePct = Number(trade.max_adverse_excursion || 0);
+      const favPoints = (trade.entry_price * mfePct) / 100;
+      const advPoints = (trade.entry_price * maePct) / 100;
+      const favAtrPct = entryAtr > 0 ? (favPoints / entryAtr) * 100 : (trade.max_favorable_atr_pct || 0);
+      const advAtrPct = entryAtr > 0 ? (advPoints / entryAtr) * 100 : (trade.max_adverse_atr_pct || 0);
+
       const logEntry =
         `[TRADE EXIT] ${timestamp}\n` +
         `Trade ID         : ${trade.id}\n` +
         `Direction        : ${trade.direction}\n` +
         `Entry Price      : $${trade.entry_price}\n` +
         `Exit Price       : $${trade.exit_price}\n` +
+        `Entry ATR (14)   : $${entryAtr.toFixed(2)}\n` +
         `Quantity (BTC)   : ${trade.quantity_btc} BTC\n` +
         `Hold Duration    : ${Math.floor(trade.hold_duration_seconds / 60)}m ${trade.hold_duration_seconds % 60}s\n` +
         `Exit Reason      : ${trade.exit_reason || "--"}\n` +
@@ -1190,8 +1199,8 @@ class TradingEngine {
         `DETAILED EXIT STATE SNAPSHOT FOR OFFLINE OPTIMIZATION:\n` +
         `  - Exit Market Regime : ${this.currentRegime}\n` +
         `  - Exit RSI (14-period): ${currentRsi.toFixed(2)}\n` +
-        `  - Max Favorable Excursion (MFE): ${(trade.max_favorable_excursion || 0).toFixed(4)}%\n` +
-        `  - Max Adverse Excursion (MAE) : ${(trade.max_adverse_excursion || 0).toFixed(4)}%\n` +
+        `  - Max Favorable Excursion (MFE): ${mfePct.toFixed(4)}% (+${favPoints.toFixed(2)} pts | +${favAtrPct.toFixed(1)}% of Entry ATR)\n` +
+        `  - Max Opposite/Adverse (MAE)  : ${maePct.toFixed(4)}% (-${advPoints.toFixed(2)} pts | -${advAtrPct.toFixed(1)}% of Entry ATR)\n` +
         `  - Final Position QuantityBTC : ${trade.quantity_btc} BTC\n` +
         `  - Final PNL % (including leverage): ${(trade.pnl_pct || 0).toFixed(4)}%\n` +
         `  - Entry Feature Snapshot Dump: ${JSON.stringify(trade.feature_snapshot || {})}\n` +
@@ -8197,6 +8206,8 @@ class TradingEngine {
       entry_signal_score: score,
       max_favorable_excursion: 0,
       max_adverse_excursion: 0,
+      max_favorable_atr_pct: 0,
+      max_adverse_atr_pct: 0,
       hold_duration_seconds: 0,
       is_win: null,
       setup_triggered: triggeredSetup || "Setup 1: Pullback & Retest",
@@ -8419,11 +8430,16 @@ class TradingEngine {
       }
     }
 
+    const entryAtr = Number(this.activeTrade.feature_snapshot?.atr_14 || 0);
     if (peakFavPct > (this.activeTrade.max_favorable_excursion || 0)) {
       this.activeTrade.max_favorable_excursion = Number(peakFavPct.toFixed(4));
+      const favPoints = (entryPrice * peakFavPct) / 100;
+      this.activeTrade.max_favorable_atr_pct = entryAtr > 0 ? Number(((favPoints / entryAtr) * 100).toFixed(1)) : 0;
     }
     if (peakAdvPct > (this.activeTrade.max_adverse_excursion || 0)) {
       this.activeTrade.max_adverse_excursion = Number(peakAdvPct.toFixed(4));
+      const advPoints = (entryPrice * peakAdvPct) / 100;
+      this.activeTrade.max_adverse_atr_pct = entryAtr > 0 ? Number(((advPoints / entryAtr) * 100).toFixed(1)) : 0;
     }
 
     // Check exit conditions
@@ -8750,6 +8766,12 @@ class TradingEngine {
       finalMae = Number(finalAdverse.toFixed(4));
     }
 
+    const entryAtr = Number(trade.feature_snapshot?.atr_14 || 0);
+    const finalFavPoints = (trade.entry_price * finalMfe) / 100;
+    const finalOppPoints = (trade.entry_price * finalMae) / 100;
+    const finalFavAtrPct = entryAtr > 0 ? Number(((finalFavPoints / entryAtr) * 100).toFixed(1)) : 0;
+    const finalOppAtrPct = entryAtr > 0 ? Number(((finalOppPoints / entryAtr) * 100).toFixed(1)) : 0;
+
     // Update trade fields
     const updated = dbManager.updateTrade(trade.id, {
       exit_timestamp: new Date().toISOString(),
@@ -8762,6 +8784,8 @@ class TradingEngine {
       fees_paid_usdt: totalFeesPaid,
       max_favorable_excursion: finalMfe,
       max_adverse_excursion: finalMae,
+      max_favorable_atr_pct: finalFavAtrPct,
+      max_adverse_atr_pct: finalOppAtrPct,
     });
 
     this.logTradeExitToFile(updated);
@@ -8870,6 +8894,8 @@ class TradingEngine {
       entry_signal_score: 100, // Manual execution max score
       max_favorable_excursion: 0,
       max_adverse_excursion: 0,
+      max_favorable_atr_pct: 0,
+      max_adverse_atr_pct: 0,
       hold_duration_seconds: 0,
       is_win: null,
       setup_triggered: "Manual Execution",

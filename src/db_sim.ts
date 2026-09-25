@@ -233,6 +233,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     simulate_paper_fees: true,
     delta_india_gst_enabled: true,
     delta_scalper_offer_enabled: true,
+    anti_whipsaw_cooldown_seconds: 180,
     smart_stall_exit_enabled: true,
     stall_evaluation_minutes: 25,
     max_trade_duration_minutes: 60,
@@ -1386,6 +1387,10 @@ class DatabaseManager {
       }
       if (this.cache.config.risk_management.catboost_counter_exit_grace_period_seconds === undefined) {
         this.cache.config.risk_management.catboost_counter_exit_grace_period_seconds = 180;
+        changed = true;
+      }
+      if (this.cache.config.risk_management.anti_whipsaw_cooldown_seconds === undefined) {
+        this.cache.config.risk_management.anti_whipsaw_cooldown_seconds = 180;
         changed = true;
       }
     }

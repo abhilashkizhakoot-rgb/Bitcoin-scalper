@@ -273,6 +273,7 @@ export default function ConfigPage({
         adx_quick_scalp_threshold: 18.0,
         adx_quick_scalp_tp_atr: 1.05,
         breakeven_trigger_atr: 1.15,
+        anti_whipsaw_cooldown_seconds: 180,
         min_stop_loss_distance_usd: 25,
         min_stop_loss_distance_pct: 0.035,
         static_stop_loss_value_usd: 150,
@@ -2761,20 +2762,22 @@ export default function ConfigPage({
                           value={riskConfig.stall_evaluation_minutes || 25}
                           onChange={(e) => setRiskConfig({ ...riskConfig, stall_evaluation_minutes: parseInputNumber(e.target.value) })}
                           className="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
-                          min={15}
+                          min={5}
                           max={28}
                         />
+                        <p className="text-[9px] text-slate-400 mt-1">Stagnation check window before fee deadline (Default: 25m, Min: 5m).</p>
                       </div>
                       <div>
-                        <label className="text-[10px] font-mono text-slate-500 uppercase block mb-1">Max Runner Ceiling (Mins)</label>
+                        <label className="text-[10px] font-mono text-slate-500 uppercase block mb-1">Max Trade Duration / Runner Ceiling (Mins)</label>
                         <input
                           type="number"
                           value={riskConfig.max_trade_duration_minutes || 60}
                           onChange={(e) => setRiskConfig({ ...riskConfig, max_trade_duration_minutes: parseInputNumber(e.target.value) })}
                           className="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-slate-800 font-mono"
-                          min={35}
+                          min={5}
                           max={180}
                         />
+                        <p className="text-[9px] text-slate-400 mt-1">Hard duration ceiling (e.g. 15m / 900s time-stop, or 60m default).</p>
                       </div>
                     </div>
                   )}
@@ -3002,6 +3005,19 @@ export default function ConfigPage({
                   />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Waiting period in minutes enforced immediately after the Regime Filter detects a market regime transition. Pauses new trade entries to prevent entering bad trades during volatile regime shifts.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Anti-Whipsaw Directional Cooldown (Seconds)</label>
+                  <input
+                    type="number"
+                    value={riskConfig.anti_whipsaw_cooldown_seconds !== undefined ? riskConfig.anti_whipsaw_cooldown_seconds : 180}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, anti_whipsaw_cooldown_seconds: parseInputNumber(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Lockout window in seconds that blocks immediate re-entry in the opposing or same direction after an adverse stop-out or sudden exit, eliminating chop whipsaws (Default: 180s).
                   </p>
                 </div>
 

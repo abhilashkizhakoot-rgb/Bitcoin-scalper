@@ -6250,21 +6250,27 @@ class TradingEngine {
           conditions_allowed = false;
           conditionReason = `Dynamically gated: ADX (${currentAdx.toFixed(1)}) exceeds mean-reversion ceiling (${maxAdx}). Strong runaway trend detected.`;
         }
-      } else if (["setup_1_pullback_retest", "setup_2_dynamic_ema_pushback"].includes(setupId)) {
+      } else if (["setup_1_pullback_retest", "setup_2_dynamic_ema_pushback", "setup_4_fvg_retest", "setup_14_fresh_momentum_impulse"].includes(setupId)) {
         const minAdx = ms.dynamic_trend_min_adx || 20;
         const maxChop = ms.dynamic_trend_max_chop_index || 58;
+        const efficiencyRatio = this.calculateEfficiencyRatio(this.candles1m, 10);
+        const minEfficiency = config.general.min_allowed_efficiency_ratio || 0.20;
+
         if (currentAdx < minAdx) {
           conditions_allowed = false;
           conditionReason = `Dynamically gated: ADX (${currentAdx.toFixed(1)}) is below trend momentum threshold (${minAdx}).`;
         } else if (chopIndex > maxChop) {
           conditions_allowed = false;
-          conditionReason = `Dynamically gated: Choppiness Index (${chopIndex.toFixed(1)}) exceeds trend limit (${maxChop}).`;
-        }
-      } else if (setupId === "setup_14_fresh_momentum_impulse") {
-        const minAtr = ms.dynamic_breakout_min_atr || 12;
-        if (currentAtr < minAtr) {
+          conditionReason = `Dynamically gated: Choppiness Index (${chopIndex.toFixed(1)}) exceeds trend limit (${maxChop}). Sideways chop detected; deferring to range boundary/mean-reversion setups.`;
+        } else if (efficiencyRatio < minEfficiency) {
           conditions_allowed = false;
-          conditionReason = `Dynamically gated: Current ATR ($${currentAtr.toFixed(1)}) is below breakout impulse minimum ($${minAtr}).`;
+          conditionReason = `Dynamically gated: Kaufman Efficiency Ratio (${efficiencyRatio.toFixed(2)}) is below minimum trend threshold (${minEfficiency}). High path friction; deferring to mean-reversion setups.`;
+        } else if (setupId === "setup_14_fresh_momentum_impulse") {
+          const minAtr = ms.dynamic_breakout_min_atr || 12;
+          if (currentAtr < minAtr) {
+            conditions_allowed = false;
+            conditionReason = `Dynamically gated: Current ATR ($${currentAtr.toFixed(1)}) is below breakout impulse minimum ($${minAtr}).`;
+          }
         }
       }
     }
@@ -7487,29 +7493,35 @@ class TradingEngine {
     }
 
     // Step 5: 1-Minute Fast-Track Momentum Acceleration Override
-    // Instantly transitions regime to STRONG_DOWNTREND or STRONG_UPTREND on 1m momentum bursts before multi-minute aggregator catches up
+    // Instantly transitions regime to STRONG_DOWNTREND or STRONG_UPTREND on 1m momentum bursts before multi-minute aggregator catches up,
+    // guarded against false flips when the 1m market is in heavy sideways consolidation/chop or flat macro compression.
     if (this.candles1m.length >= 25 && regime !== MarketRegime.HIGH_VOLATILITY) {
-      const c1m = this.candles1m;
-      const l1m = c1m.length - 1;
-      const closes1m = c1m.map(c => c.close);
-      const ema9List1m = this.calculateEMA(closes1m, 9);
-      const ema21List1m = this.calculateEMA(closes1m, 21);
-      const ema50List1m = this.calculateEMA(closes1m, 50);
-      const ema9_1m = ema9List1m[l1m];
-      const ema21_1m = ema21List1m[l1m];
-      const ema50_1m = ema50List1m[l1m];
-      const adx1mList = this.calculateADX(c1m, 14);
-      const adx1m = adx1mList[l1m] || 20;
+      const chop1m = this.calculateChoppinessIndex(this.candles1m, 14);
+      const isChopSuppressed = chop1m > 58.0 || (isSlopeFlat && isRibbonCompressed);
 
-      const is1mBearWaterfall = (ema9_1m < ema21_1m && ema21_1m < ema50_1m && adx1m >= 24.0 && closes1m[l1m] < ema50_1m);
-      const is1mBullRocket = (ema9_1m > ema21_1m && ema21_1m > ema50_1m && adx1m >= 24.0 && closes1m[l1m] > ema50_1m);
+      if (!isChopSuppressed) {
+        const c1m = this.candles1m;
+        const l1m = c1m.length - 1;
+        const closes1m = c1m.map(c => c.close);
+        const ema9List1m = this.calculateEMA(closes1m, 9);
+        const ema21List1m = this.calculateEMA(closes1m, 21);
+        const ema50List1m = this.calculateEMA(closes1m, 50);
+        const ema9_1m = ema9List1m[l1m];
+        const ema21_1m = ema21List1m[l1m];
+        const ema50_1m = ema50List1m[l1m];
+        const adx1mList = this.calculateADX(c1m, 14);
+        const adx1m = adx1mList[l1m] || 20;
 
-      if (is1mBearWaterfall) {
-        regime = MarketRegime.STRONG_DOWNTREND;
-        confidence = Math.max(confidence, 0.75 + (adx1m / 100) * 0.2);
-      } else if (is1mBullRocket) {
-        regime = MarketRegime.STRONG_UPTREND;
-        confidence = Math.max(confidence, 0.75 + (adx1m / 100) * 0.2);
+        const is1mBearWaterfall = (ema9_1m < ema21_1m && ema21_1m < ema50_1m && adx1m >= 24.0 && closes1m[l1m] < ema50_1m);
+        const is1mBullRocket = (ema9_1m > ema21_1m && ema21_1m > ema50_1m && adx1m >= 24.0 && closes1m[l1m] > ema50_1m);
+
+        if (is1mBearWaterfall) {
+          regime = MarketRegime.STRONG_DOWNTREND;
+          confidence = Math.max(confidence, 0.75 + (adx1m / 100) * 0.2);
+        } else if (is1mBullRocket) {
+          regime = MarketRegime.STRONG_UPTREND;
+          confidence = Math.max(confidence, 0.75 + (adx1m / 100) * 0.2);
+        }
       }
     }
 
@@ -8006,10 +8018,11 @@ class TradingEngine {
     const quickScalpTpAtr = config.risk_management.adx_quick_scalp_tp_atr || 1.05;
 
     let isQuickScalpActive = false;
-    if (enableAdxCompression && ((currentAdx < adxThreshold && adxSlope < 1.0) || this.currentRegime === MarketRegime.RANGE_BOUND)) {
+    const chop1m = this.calculateChoppinessIndex(this.candles1m, 14);
+    if (enableAdxCompression && ((currentAdx < adxThreshold && adxSlope < 1.0) || this.currentRegime === MarketRegime.RANGE_BOUND || chop1m > 55.0)) {
       effectiveTpAtrMult = quickScalpTpAtr;
       isQuickScalpActive = true;
-      this.log(`  [Quick-Scalp Target Active] Low/Flat ADX (${currentAdx.toFixed(1)}, slope: ${adxSlope >= 0 ? "+" : ""}${adxSlope.toFixed(2)}) or Range-Bound: Compressed Take Profit to ${effectiveTpAtrMult.toFixed(2)}x ATR`);
+      this.log(`  [Quick-Scalp Target Active] Low/Flat ADX (${currentAdx.toFixed(1)}), Chop Index (${chop1m.toFixed(1)}), or Range-Bound: Compressed Take Profit to ${effectiveTpAtrMult.toFixed(2)}x ATR`);
     }
 
     // Enforce a sensible minimum stop loss distance floor to prevent sub-tick anomalies without overriding ATR scaling
@@ -8471,9 +8484,11 @@ class TradingEngine {
       const closedCandles = this.candles1m.slice(-4, -1);
 
       // Trailing distance multiplier (default: 1.45x ATR, min 35 USD)
-      const trailDistMult = config.risk_management.trailing_stop_loss_distance_atr !== undefined && !isNaN(config.risk_management.trailing_stop_loss_distance_atr) && config.risk_management.trailing_stop_loss_distance_atr > 0
+      const baseTrailDist = config.risk_management.trailing_stop_loss_distance_atr !== undefined && !isNaN(config.risk_management.trailing_stop_loss_distance_atr) && config.risk_management.trailing_stop_loss_distance_atr > 0
         ? config.risk_management.trailing_stop_loss_distance_atr
         : 1.45;
+      // In HIGH_VOLATILITY, expand trailing buffer to at least 1.45x ATR so normal 1m wick spikes do not choke position
+      const trailDistMult = this.currentRegime === MarketRegime.HIGH_VOLATILITY ? Math.max(baseTrailDist, 1.45) : baseTrailDist;
       const trailingBuffer = Math.max(lastAtr * trailDistMult, 35);
       
       if (direction === TradeDirection.LONG) {
@@ -8498,8 +8513,9 @@ class TradingEngine {
         // De-choking guard: structural anchor must NOT pull SL tighter than peakPrice - trailingBuffer
         const candidateTrailingSl = Math.min(structuralAnchor, atrTrailingSl);
         
-        // 2. Anti-Choking Hard Floor: Never place trailing stop closer than 1.35 * ATR from current market price
-        const maxAllowedTrailingSl = currentPrice - 1.35 * lastAtr;
+        // 2. Anti-Choking Hard Floor: In high volatility never place closer than 1.45 * ATR, otherwise 1.15 * ATR
+        const antiChokeMult = this.currentRegime === MarketRegime.HIGH_VOLATILITY ? 1.45 : 1.15;
+        const maxAllowedTrailingSl = currentPrice - antiChokeMult * lastAtr;
         const safeTrailingSl = Math.min(candidateTrailingSl, maxAllowedTrailingSl);
         
         // 3. Monotonic ratcheting: Trailing stop must never move backward
@@ -8566,8 +8582,9 @@ class TradingEngine {
         // De-choking guard: structural anchor must NOT pull SL tighter than valleyPrice + trailingBuffer
         const candidateTrailingSl = Math.max(structuralAnchor, atrTrailingSl);
         
-        // 2. Anti-Choking Hard Floor: Never place trailing stop closer than 1.35 * ATR from current market price
-        const minAllowedTrailingSl = currentPrice + 1.35 * lastAtr;
+        // 2. Anti-Choking Hard Floor: In high volatility never place closer than 1.45 * ATR, otherwise 1.15 * ATR
+        const antiChokeMultShort = this.currentRegime === MarketRegime.HIGH_VOLATILITY ? 1.45 : 1.15;
+        const minAllowedTrailingSl = currentPrice + antiChokeMultShort * lastAtr;
         const safeTrailingSl = Math.max(candidateTrailingSl, minAllowedTrailingSl);
         
         // 3. Monotonic ratcheting: Trailing stop must never move backward (downward for shorts)

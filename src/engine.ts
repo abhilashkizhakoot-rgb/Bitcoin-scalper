@@ -2513,6 +2513,23 @@ class TradingEngine {
       softened: isCooldownBypassed,
     });
 
+    // Choppy Market Filter Gate
+    const compositeChopScan = this.calculateCompositeChop(this.candles1m);
+    const maxChopLimit = config.general.max_allowed_chop_index || 58.0;
+    const isChopFilterActive = config.general.enable_choppy_market_filter !== false;
+    const isChopPassing = !isChopFilterActive || !compositeChopScan.isChoppy;
+
+    conditions.push({
+      name: "Choppy Market Filter",
+      met: isChopPassing,
+      current_value: isChopPassing
+        ? `PASSED: Composite Chop Index ${compositeChopScan.compositeChop} <= ${maxChopLimit} (Efficiency: ${compositeChopScan.efficiencyRatio.toFixed(2)}, Crosses: ${compositeChopScan.emaCrossovers})`
+        : `BLOCKED: Composite Chop Index ${compositeChopScan.compositeChop} > ${maxChopLimit} (${compositeChopScan.reason})`,
+      required: `Composite Choppiness Index <= ${maxChopLimit} (Requires directional efficiency & clean EMA separation)`,
+      description: "Evaluates multi-horizon Dreiss choppiness, Kaufman directional efficiency, EMA ribbon cross frequency, and wick ratios to detect true sideways chop and prevent false breakout losses.",
+      priority: "CRITICAL",
+    });
+
     // Anti-Whipsaw Directional Lockout Gate (Mandatory Safety Gate)
     const isInverted = config.general.invert_confirmed_trades === true;
     const effectiveTradeDirection: "LONG" | "SHORT" = isInverted
@@ -3507,6 +3524,10 @@ class TradingEngine {
 
   private calculateChoppinessIndex(candles: Candlestick[], period = 14): number {
     return indicators.calculateChoppinessIndex(candles, period);
+  }
+
+  public calculateCompositeChop(candles: Candlestick[] = this.candles1m, period = 20) {
+    return indicators.calculateCompositeChopIndex(candles, period);
   }
 
   private calculateEfficiencyRatio(candles: Candlestick[], period = 10): number {
@@ -6242,7 +6263,8 @@ class TradingEngine {
       const currentAdx = adx14[lastIdx] !== undefined ? adx14[lastIdx] : 25;
       const atr14 = this.calculateATR(this.candles1m, 14);
       const currentAtr = atr14[lastIdx] !== undefined ? atr14[lastIdx] : 50;
-      const chopIndex = this.calculateChoppinessIndex(this.candles1m, 14);
+      const compositeChop = this.calculateCompositeChop(this.candles1m);
+      const chopIndex = compositeChop.compositeChop;
 
       if (isMeanReversion) {
         const maxAdx = ms.dynamic_mean_reversion_max_adx || 32;
@@ -6253,18 +6275,17 @@ class TradingEngine {
       } else if (["setup_1_pullback_retest", "setup_2_dynamic_ema_pushback", "setup_4_fvg_retest", "setup_14_fresh_momentum_impulse"].includes(setupId)) {
         const minAdx = ms.dynamic_trend_min_adx || 20;
         const maxChop = ms.dynamic_trend_max_chop_index || 58;
-        const efficiencyRatio = this.calculateEfficiencyRatio(this.candles1m, 10);
         const minEfficiency = config.general.min_allowed_efficiency_ratio || 0.20;
 
         if (currentAdx < minAdx) {
           conditions_allowed = false;
           conditionReason = `Dynamically gated: ADX (${currentAdx.toFixed(1)}) is below trend momentum threshold (${minAdx}).`;
-        } else if (chopIndex > maxChop) {
+        } else if (compositeChop.isChoppy || chopIndex > maxChop) {
           conditions_allowed = false;
-          conditionReason = `Dynamically gated: Choppiness Index (${chopIndex.toFixed(1)}) exceeds trend limit (${maxChop}). Sideways chop detected; deferring to range boundary/mean-reversion setups.`;
-        } else if (efficiencyRatio < minEfficiency) {
+          conditionReason = `Dynamically gated: ${compositeChop.reason} (Composite Chop: ${chopIndex} > ${maxChop}). Sideways chop detected; deferring to range boundary/mean-reversion setups.`;
+        } else if (compositeChop.efficiencyRatio < minEfficiency) {
           conditions_allowed = false;
-          conditionReason = `Dynamically gated: Kaufman Efficiency Ratio (${efficiencyRatio.toFixed(2)}) is below minimum trend threshold (${minEfficiency}). High path friction; deferring to mean-reversion setups.`;
+          conditionReason = `Dynamically gated: Kaufman Efficiency Ratio (${compositeChop.efficiencyRatio.toFixed(2)}) is below minimum trend threshold (${minEfficiency}). High path friction; deferring to mean-reversion setups.`;
         } else if (setupId === "setup_14_fresh_momentum_impulse") {
           const minAtr = ms.dynamic_breakout_min_atr || 12;
           if (currentAtr < minAtr) {
@@ -7465,6 +7486,8 @@ class TradingEngine {
     let regime = MarketRegime.RANGE_BOUND;
     let confidence = 0.5;
 
+    const compositeChopRegime = this.calculateCompositeChop(this.candles1m);
+
     // Step 1: Volatility Extremes
     if (atrExpansionRatio < 0.6) {
       regime = MarketRegime.LOW_VOLATILITY;
@@ -7473,10 +7496,10 @@ class TradingEngine {
       regime = MarketRegime.HIGH_VOLATILITY;
       confidence = 0.7 + (atrExpansionRatio - 1.5) * 0.2;
     } 
-    // Step 2: Compression Intercept
-    else if (isSlopeFlat && isRibbonCompressed) {
+    // Step 2: Compression & Real Chop Intercept
+    else if ((isSlopeFlat && isRibbonCompressed) || compositeChopRegime.isChoppy) {
       regime = MarketRegime.RANGE_BOUND;
-      confidence = 0.8 + (1 - normalizedSpread / compressionThreshold) * 0.15;
+      confidence = 0.85;
     } 
     // Step 3: Trend Alignment
     else if (isStrongUptrend) {
@@ -7494,10 +7517,9 @@ class TradingEngine {
 
     // Step 5: 1-Minute Fast-Track Momentum Acceleration Override
     // Instantly transitions regime to STRONG_DOWNTREND or STRONG_UPTREND on 1m momentum bursts before multi-minute aggregator catches up,
-    // guarded against false flips when the 1m market is in heavy sideways consolidation/chop or flat macro compression.
+    // strictly guarded against false flips when the market is in structural chop or flat macro compression.
     if (this.candles1m.length >= 25 && regime !== MarketRegime.HIGH_VOLATILITY) {
-      const chop1m = this.calculateChoppinessIndex(this.candles1m, 14);
-      const isChopSuppressed = chop1m > 58.0 || (isSlopeFlat && isRibbonCompressed);
+      const isChopSuppressed = compositeChopRegime.isChoppy || (isSlopeFlat && isRibbonCompressed);
 
       if (!isChopSuppressed) {
         const c1m = this.candles1m;
@@ -8018,11 +8040,11 @@ class TradingEngine {
     const quickScalpTpAtr = config.risk_management.adx_quick_scalp_tp_atr || 1.05;
 
     let isQuickScalpActive = false;
-    const chop1m = this.calculateChoppinessIndex(this.candles1m, 14);
-    if (enableAdxCompression && ((currentAdx < adxThreshold && adxSlope < 1.0) || this.currentRegime === MarketRegime.RANGE_BOUND || chop1m > 55.0)) {
+    const compositeChopTarget = this.calculateCompositeChop(this.candles1m);
+    if (enableAdxCompression && ((currentAdx < adxThreshold && adxSlope < 1.0) || this.currentRegime === MarketRegime.RANGE_BOUND || compositeChopTarget.isChoppy)) {
       effectiveTpAtrMult = quickScalpTpAtr;
       isQuickScalpActive = true;
-      this.log(`  [Quick-Scalp Target Active] Low/Flat ADX (${currentAdx.toFixed(1)}), Chop Index (${chop1m.toFixed(1)}), or Range-Bound: Compressed Take Profit to ${effectiveTpAtrMult.toFixed(2)}x ATR`);
+      this.log(`  [Quick-Scalp Target Active] Real Chop Detected (${compositeChopTarget.reason}) or Range-Bound: Compressed Take Profit to ${effectiveTpAtrMult.toFixed(2)}x ATR`);
     }
 
     // Enforce a sensible minimum stop loss distance floor to prevent sub-tick anomalies without overriding ATR scaling

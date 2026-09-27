@@ -387,12 +387,13 @@ export class IndicatorCalculator {
 
   public calculateChoppinessIndex(candles: Candlestick[], period = 14): number {
     if (candles.length < period) return 50.0;
+    const startIndex = candles.length - period;
     const slice = candles.slice(-period);
     let sumTR = 0;
     for (let i = 0; i < slice.length; i++) {
       const high = slice[i].high;
       const low = slice[i].low;
-      const prevClose = i > 0 ? slice[i - 1].close : slice[i].open;
+      const prevClose = (startIndex + i > 0) ? candles[startIndex + i - 1].close : slice[i].open;
       const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
       sumTR += tr;
     }
@@ -402,6 +403,94 @@ export class IndicatorCalculator {
     if (range <= 0) return 100.0;
     const chop = 100 * (Math.log10(sumTR / range) / Math.log10(period));
     return Math.max(0, Math.min(100, Number(chop.toFixed(2))));
+  }
+
+  public calculateCompositeChopIndex(candles: Candlestick[], period = 20): {
+    compositeChop: number;
+    isChoppy: boolean;
+    dreissChop14: number;
+    dreissChop30: number;
+    efficiencyRatio: number;
+    wickRatio: number;
+    emaCrossovers: number;
+    reason: string;
+  } {
+    if (candles.length < 15) {
+      return {
+        compositeChop: 50,
+        isChoppy: false,
+        dreissChop14: 50,
+        dreissChop30: 50,
+        efficiencyRatio: 0.5,
+        wickRatio: 0.35,
+        emaCrossovers: 0,
+        reason: "Insufficient candle history",
+      };
+    }
+
+    const dreiss14 = this.calculateChoppinessIndex(candles, 14);
+    const dreiss30 = this.calculateChoppinessIndex(candles, Math.min(candles.length, 30));
+    const effRatio = this.calculateEfficiencyRatio(candles, Math.min(candles.length - 1, 20));
+    const wickRatio = this.calculateAverageWickRatio(candles, Math.min(candles.length, 14));
+
+    // Calculate EMA 9 / 21 crossovers in the last 20 candles
+    const closes = candles.map(c => c.close);
+    const ema9 = this.calculateEMA(closes, 9);
+    const ema21 = this.calculateEMA(closes, 21);
+    const lookback = Math.min(20, ema9.length - 1);
+    let emaCrossovers = 0;
+    const startIdx = ema9.length - lookback;
+    for (let i = startIdx + 1; i < ema9.length; i++) {
+      const prevDiff = ema9[i - 1] - ema21[i - 1];
+      const currDiff = ema9[i] - ema21[i];
+      if ((prevDiff > 0 && currDiff < 0) || (prevDiff < 0 && currDiff > 0)) {
+        emaCrossovers++;
+      }
+    }
+
+    // 1. Multi-horizon Dreiss (max of 14 and 30 prevents single-wick false trend dips): 30% weight
+    const dreissScore = Math.max(dreiss14, dreiss30);
+
+    // 2. Efficiency Ratio: 0.50 -> 0 chop, 0.10 -> 100 chop: 35% weight
+    const effChop = Math.max(0, Math.min(100, (1 - effRatio) * 100));
+
+    // 3. EMA tangling: 0 crosses -> 0 chop, 1 cross -> 35 chop, 2 crosses -> 70 chop, >=3 crosses -> 100 chop: 20% weight
+    const emaChop = Math.min(100, emaCrossovers * 35);
+
+    // 4. Wick ratio: > 0.45 adds to chop: 15% weight
+    const wickChop = Math.max(0, Math.min(100, (wickRatio - 0.25) * 160));
+
+    // Composite Weighted Score (0 to 100):
+    const compositeChop = Number((
+      dreissScore * 0.30 +
+      effChop * 0.35 +
+      emaChop * 0.20 +
+      wickChop * 0.15
+    ).toFixed(1));
+
+    // Confirmed choppy if composite >= 58, OR efficiency < 0.22 with multiple EMA crosses, OR dreiss >= 61.8 with low efficiency
+    const isChoppy = compositeChop >= 58.0 || (effRatio < 0.22 && emaCrossovers >= 2) || (dreiss14 >= 61.8 && effRatio < 0.30);
+
+    let reason = "Clean directional momentum";
+    if (isChoppy) {
+      const reasons: string[] = [];
+      if (effRatio < 0.22) reasons.push(`Low Directional Efficiency (${effRatio.toFixed(2)})`);
+      if (emaCrossovers >= 2) reasons.push(`${emaCrossovers} EMA Crossovers (Tangling)`);
+      if (dreissScore >= 58) reasons.push(`Multi-Horizon Dreiss Chop (${dreissScore.toFixed(0)})`);
+      if (wickRatio >= 0.50) reasons.push(`High Wick Ratio (${(wickRatio * 100).toFixed(0)}%)`);
+      reason = `Chop confirmed: ${reasons.join(", ")}`;
+    }
+
+    return {
+      compositeChop,
+      isChoppy,
+      dreissChop14: dreiss14,
+      dreissChop30: dreiss30,
+      efficiencyRatio: effRatio,
+      wickRatio,
+      emaCrossovers,
+      reason,
+    };
   }
 
   public calculateEfficiencyRatio(candles: Candlestick[], period = 10): number {

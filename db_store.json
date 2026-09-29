@@ -45,9 +45,11 @@
         "adx": 32.5,
         "atr_14": 147.3411485523536,
         "rsi_14": 38,
-        "macd_hist": -14.2
+        "macd_hist": -14.2,
+        "setup_triggered": "Setup 1: Pullback & Retest"
       },
-      "created_at": "2026-06-20T22:42:59.967Z"
+      "created_at": "2026-06-20T22:42:59.967Z",
+      "setup_triggered": "Setup 1: Pullback & Retest"
     },
     {
       "id": "trade-hist-2",
@@ -75,9 +77,11 @@
         "adx": 32.5,
         "atr_14": 194.27493950748925,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 2: Dynamic EMA Pushback"
       },
-      "created_at": "2026-06-21T02:05:23.764Z"
+      "created_at": "2026-06-21T02:05:23.764Z",
+      "setup_triggered": "Setup 2: Dynamic EMA Pushback"
     },
     {
       "id": "trade-hist-3",
@@ -105,9 +109,11 @@
         "adx": 32.5,
         "atr_14": 144.09329368271716,
         "rsi_14": 38,
-        "macd_hist": -14.2
+        "macd_hist": -14.2,
+        "setup_triggered": "Setup 14: Fresh Momentum Impulse"
       },
-      "created_at": "2026-06-21T03:32:26.594Z"
+      "created_at": "2026-06-21T03:32:26.594Z",
+      "setup_triggered": "Setup 14: Fresh Momentum Impulse"
     },
     {
       "id": "trade-hist-4",
@@ -135,9 +141,11 @@
         "adx": 32.5,
         "atr_14": 120.66033673523674,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 4: Fair Value Gap Retest"
       },
-      "created_at": "2026-06-21T06:38:22.454Z"
+      "created_at": "2026-06-21T06:38:22.454Z",
+      "setup_triggered": "Setup 4: Fair Value Gap Retest"
     },
     {
       "id": "trade-hist-5",
@@ -165,9 +173,11 @@
         "adx": 32.5,
         "atr_14": 188.99026725379707,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 3: Liquidity Sweep Reversal"
       },
-      "created_at": "2026-06-21T09:31:29.076Z"
+      "created_at": "2026-06-21T09:31:29.076Z",
+      "setup_triggered": "Setup 3: Liquidity Sweep Reversal"
     },
     {
       "id": "trade-hist-6",
@@ -195,9 +205,11 @@
         "adx": 32.5,
         "atr_14": 147.4667041723469,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 9: Range Failed Auction Reclaim"
       },
-      "created_at": "2026-06-21T12:55:04.487Z"
+      "created_at": "2026-06-21T12:55:04.487Z",
+      "setup_triggered": "Setup 9: Range Failed Auction Reclaim"
     },
     {
       "id": "trade-hist-7",
@@ -225,9 +237,11 @@
         "adx": 32.5,
         "atr_14": 138.0039116226468,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 12: CVD Absorption & Delta Divergence"
       },
-      "created_at": "2026-06-21T14:43:34.023Z"
+      "created_at": "2026-06-21T14:43:34.023Z",
+      "setup_triggered": "Setup 12: CVD Absorption & Delta Divergence"
     },
     {
       "id": "trade-hist-8",
@@ -255,9 +269,11 @@
         "adx": 32.5,
         "atr_14": 177.97216677555608,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 10: VWAP Band Rejection"
       },
-      "created_at": "2026-06-21T18:34:59.414Z"
+      "created_at": "2026-06-21T18:34:59.414Z",
+      "setup_triggered": "Setup 10: VWAP Band Rejection"
     },
     {
       "id": "trade-hist-9",
@@ -285,9 +301,11 @@
         "adx": 32.5,
         "atr_14": 172.44924441289368,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 1: Pullback & Retest"
       },
-      "created_at": "2026-06-21T21:35:19.496Z"
+      "created_at": "2026-06-21T21:35:19.496Z",
+      "setup_triggered": "Setup 1: Pullback & Retest"
     },
     {
       "id": "trade-hist-10",
@@ -315,9 +333,11 @@
         "adx": 32.5,
         "atr_14": 176.40123355861067,
         "rsi_14": 38,
-        "macd_hist": -14.2
+        "macd_hist": -14.2,
+        "setup_triggered": "Setup 2: Dynamic EMA Pushback"
       },
-      "created_at": "2026-06-22T00:04:56.962Z"
+      "created_at": "2026-06-22T00:04:56.962Z",
+      "setup_triggered": "Setup 2: Dynamic EMA Pushback"
     },
     {
       "id": "trade-hist-11",
@@ -345,9 +365,11 @@
         "adx": 32.5,
         "atr_14": 138.43909380274687,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 14: Fresh Momentum Impulse"
       },
-      "created_at": "2026-06-22T02:05:28.538Z"
+      "created_at": "2026-06-22T02:05:28.538Z",
+      "setup_triggered": "Setup 14: Fresh Momentum Impulse"
     },
     {
       "id": "trade-hist-12",
@@ -375,9 +397,11 @@
         "adx": 32.5,
         "atr_14": 131.43921769210093,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 4: Fair Value Gap Retest"
       },
-      "created_at": "2026-06-22T04:52:25.559Z"
+      "created_at": "2026-06-22T04:52:25.559Z",
+      "setup_triggered": "Setup 4: Fair Value Gap Retest"
     },
     {
       "id": "trade-hist-13",
@@ -405,9 +429,11 @@
         "adx": 32.5,
         "atr_14": 122.98915431721525,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 3: Liquidity Sweep Reversal"
       },
-      "created_at": "2026-06-22T08:22:34.377Z"
+      "created_at": "2026-06-22T08:22:34.377Z",
+      "setup_triggered": "Setup 3: Liquidity Sweep Reversal"
     },
     {
       "id": "trade-hist-14",
@@ -435,9 +461,11 @@
         "adx": 32.5,
         "atr_14": 131.65294530515422,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 9: Range Failed Auction Reclaim"
       },
-      "created_at": "2026-06-22T11:04:41.038Z"
+      "created_at": "2026-06-22T11:04:41.038Z",
+      "setup_triggered": "Setup 9: Range Failed Auction Reclaim"
     },
     {
       "id": "trade-hist-15",
@@ -465,9 +493,11 @@
         "adx": 32.5,
         "atr_14": 130.7118453027188,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 12: CVD Absorption & Delta Divergence"
       },
-      "created_at": "2026-06-22T14:03:57.636Z"
+      "created_at": "2026-06-22T14:03:57.636Z",
+      "setup_triggered": "Setup 12: CVD Absorption & Delta Divergence"
     },
     {
       "id": "trade-hist-16",
@@ -495,9 +525,11 @@
         "adx": 32.5,
         "atr_14": 127.84614492450115,
         "rsi_14": 38,
-        "macd_hist": -14.2
+        "macd_hist": -14.2,
+        "setup_triggered": "Setup 10: VWAP Band Rejection"
       },
-      "created_at": "2026-06-22T16:17:34.333Z"
+      "created_at": "2026-06-22T16:17:34.333Z",
+      "setup_triggered": "Setup 10: VWAP Band Rejection"
     },
     {
       "id": "trade-hist-17",
@@ -525,9 +557,11 @@
         "adx": 32.5,
         "atr_14": 187.4442981323275,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 1: Pullback & Retest"
       },
-      "created_at": "2026-06-22T19:37:37.564Z"
+      "created_at": "2026-06-22T19:37:37.564Z",
+      "setup_triggered": "Setup 1: Pullback & Retest"
     },
     {
       "id": "trade-hist-18",
@@ -555,9 +589,11 @@
         "adx": 32.5,
         "atr_14": 158.52415056109047,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 2: Dynamic EMA Pushback"
       },
-      "created_at": "2026-06-22T22:38:12.343Z"
+      "created_at": "2026-06-22T22:38:12.343Z",
+      "setup_triggered": "Setup 2: Dynamic EMA Pushback"
     },
     {
       "id": "trade-hist-19",
@@ -585,9 +621,11 @@
         "adx": 32.5,
         "atr_14": 142.17721783348136,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 14: Fresh Momentum Impulse"
       },
-      "created_at": "2026-06-23T00:24:44.691Z"
+      "created_at": "2026-06-23T00:24:44.691Z",
+      "setup_triggered": "Setup 14: Fresh Momentum Impulse"
     },
     {
       "id": "trade-hist-20",
@@ -615,9 +653,11 @@
         "adx": 32.5,
         "atr_14": 122.86335954386061,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 4: Fair Value Gap Retest"
       },
-      "created_at": "2026-06-23T04:13:21.013Z"
+      "created_at": "2026-06-23T04:13:21.013Z",
+      "setup_triggered": "Setup 4: Fair Value Gap Retest"
     },
     {
       "id": "trade-hist-21",
@@ -645,9 +685,11 @@
         "adx": 32.5,
         "atr_14": 161.1003632572234,
         "rsi_14": 38,
-        "macd_hist": -14.2
+        "macd_hist": -14.2,
+        "setup_triggered": "Setup 3: Liquidity Sweep Reversal"
       },
-      "created_at": "2026-06-23T05:56:26.011Z"
+      "created_at": "2026-06-23T05:56:26.011Z",
+      "setup_triggered": "Setup 3: Liquidity Sweep Reversal"
     },
     {
       "id": "trade-hist-22",
@@ -675,9 +717,11 @@
         "adx": 32.5,
         "atr_14": 156.84282210856878,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 9: Range Failed Auction Reclaim"
       },
-      "created_at": "2026-06-23T08:43:26.339Z"
+      "created_at": "2026-06-23T08:43:26.339Z",
+      "setup_triggered": "Setup 9: Range Failed Auction Reclaim"
     },
     {
       "id": "trade-hist-23",
@@ -705,9 +749,11 @@
         "adx": 32.5,
         "atr_14": 147.28493303268914,
         "rsi_14": 38,
-        "macd_hist": -14.2
+        "macd_hist": -14.2,
+        "setup_triggered": "Setup 12: CVD Absorption & Delta Divergence"
       },
-      "created_at": "2026-06-23T12:15:50.681Z"
+      "created_at": "2026-06-23T12:15:50.681Z",
+      "setup_triggered": "Setup 12: CVD Absorption & Delta Divergence"
     },
     {
       "id": "trade-hist-24",
@@ -735,9 +781,11 @@
         "adx": 32.5,
         "atr_14": 181.67463580380232,
         "rsi_14": 62,
-        "macd_hist": 12.5
+        "macd_hist": 12.5,
+        "setup_triggered": "Setup 10: VWAP Band Rejection"
       },
-      "created_at": "2026-06-23T14:57:19.469Z"
+      "created_at": "2026-06-23T14:57:19.469Z",
+      "setup_triggered": "Setup 10: VWAP Band Rejection"
     },
     {
       "id": "trade-hist-25",
@@ -765,9 +813,11 @@
         "adx": 32.5,
         "atr_14": 137.77251224654387,
         "rsi_14": 38,
-        "macd_hist": -14.2
+        "macd_hist": -14.2,
+        "setup_triggered": "Setup 1: Pullback & Retest"
       },
-      "created_at": "2026-06-23T18:22:38.243Z"
+      "created_at": "2026-06-23T18:22:38.243Z",
+      "setup_triggered": "Setup 1: Pullback & Retest"
     }
   ],
   "signals": [

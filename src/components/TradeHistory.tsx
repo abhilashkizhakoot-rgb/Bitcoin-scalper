@@ -283,7 +283,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
 
   const uniqueSetups = Array.from(
     new Set(
-      trades.map((t) => t.setup_triggered || t.feature_snapshot?.setup_triggered || "Setup 1: Pullback & Retest")
+      trades.map((t) => t.setup_triggered || t.feature_snapshot?.setup_triggered || "Market Structure Validated")
     )
   ).sort();
 
@@ -291,7 +291,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
   const filteredTrades = trades.filter((t) => {
     if (directionFilter !== "ALL" && t.direction !== directionFilter) return false;
     if (setupFilter !== "ALL") {
-      const s = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Setup 1: Pullback & Retest";
+      const s = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Market Structure Validated";
       if (s !== setupFilter) return false;
     }
     if (winFilter === "WINS" && !t.is_win) return false;
@@ -356,7 +356,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
       const atr = t.feature_snapshot?.atr_14 !== undefined
         ? t.feature_snapshot.atr_14
         : "";
-      const setupTriggered = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Setup 1: Pullback & Retest";
+      const setupTriggered = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Market Structure Validated";
       const { entryAtr, favPoints, oppPoints, favAtrPct, oppAtrPct } = calculateTradeAtrExcursions(t);
 
       return [
@@ -690,7 +690,7 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
               {filteredTrades.map((t) => {
                 const isSelected = selectedTradeId === t.id;
                 const tWindow = getTradeTimingWindow(t.entry_timestamp, windowsList);
-                const setupName = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Setup 1: Pullback & Retest";
+                const setupName = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Market Structure Validated";
                 const { entryAtr, favPoints, oppPoints, favAtrPct, oppAtrPct } = calculateTradeAtrExcursions(t);
                 return (
                   <React.Fragment key={t.id}>

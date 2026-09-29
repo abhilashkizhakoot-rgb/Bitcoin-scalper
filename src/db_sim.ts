@@ -683,13 +683,13 @@ function generateMockPaperHistory(): { credentials: ExchangeCredentials; trades:
   let currentBalance = 100000; // Starting capital is $100,000 USDT for paper account
   const basePrice = 101250;
 
-  for (let k = 15; k >= 1; k--) {
-    const tradeHoursAgo = k * 4.2 + Math.random() * 2.5;
+  for (let k = 24; k >= 1; k--) {
+    const tradeHoursAgo = k * 2.8 + Math.random() * 1.5;
     const entryTime = new Date(now - tradeHoursAgo * 3600 * 1000);
     const exitTime = new Date(entryTime.getTime() + (12 + Math.floor(Math.random() * 15)) * 60000);
 
     const direction = Math.random() > 0.45 ? TradeDirection.LONG : TradeDirection.SHORT;
-    const isWin = Math.random() > 0.38; // ~62% Win Rate for paper trading
+    const isWin = Math.random() > 0.35; // ~65% Win Rate for paper trading
 
     const entryPrice = basePrice + (direction === TradeDirection.LONG ? -150 : 150) + Math.random() * 800 - Math.random() * 800;
     const atrValue = 130 + Math.random() * 60;
@@ -731,7 +731,7 @@ function generateMockPaperHistory(): { credentials: ExchangeCredentials; trades:
     const regime = direction === TradeDirection.LONG ? MarketRegime.STRONG_UPTREND : MarketRegime.STRONG_DOWNTREND;
 
     trades.push({
-      id: `trade-paper-hist-${16 - k}`,
+      id: `trade-paper-hist-${25 - k}`,
       entry_timestamp: entryTime.toISOString(),
       exit_timestamp: exitTime.toISOString(),
       direction,
@@ -754,20 +754,20 @@ function generateMockPaperHistory(): { credentials: ExchangeCredentials; trades:
       max_adverse_atr_pct: Number(((((isWin ? 0.2 + Math.random() * 0.4 : 1.30) / 100 * entryPrice) / atrValue) * 100).toFixed(1)),
       hold_duration_seconds: Math.floor((exitTime.getTime() - entryTime.getTime()) / 1000),
       is_win: isWin,
-      setup_triggered: MOCK_SETUPS[(16 - k) % MOCK_SETUPS.length],
+      setup_triggered: MOCK_SETUPS[(25 - k) % MOCK_SETUPS.length],
       feature_snapshot: {
         last_price: entryPrice,
         atr_14: atrValue,
         regime,
         average_sentiment: direction === TradeDirection.LONG ? 0.35 : -0.35,
-        setup_triggered: MOCK_SETUPS[(16 - k) % MOCK_SETUPS.length],
+        setup_triggered: MOCK_SETUPS[(25 - k) % MOCK_SETUPS.length],
       },
       created_at: entryTime.toISOString(),
     });
 
     signals.push({
-      id: `sig-paper-${16 - k}`,
-      trade_id: `trade-paper-hist-${16 - k}`,
+      id: `sig-paper-${25 - k}`,
+      trade_id: `trade-paper-hist-${25 - k}`,
       timestamp: entryTime.toISOString(),
       catboost_probability: Number(catboostProbability.toFixed(4)),
       direction,
@@ -849,6 +849,13 @@ class DatabaseManager {
               t.setup_triggered = (t.feature_snapshot && (t.feature_snapshot as any).setup_triggered) || MOCK_SETUPS[idx % MOCK_SETUPS.length];
               tradesUpdated = true;
             }
+            if (!t.feature_snapshot) {
+              t.feature_snapshot = {};
+            }
+            if (!t.feature_snapshot.setup_triggered) {
+              t.feature_snapshot.setup_triggered = t.setup_triggered;
+              tradesUpdated = true;
+            }
           });
           if (tradesUpdated) {
             this.save();
@@ -868,7 +875,10 @@ class DatabaseManager {
       if (fs.existsSync(DB_PAPER_FILE_PATH)) {
         const fileContent = fs.readFileSync(DB_PAPER_FILE_PATH, "utf-8");
         this.paperCache = JSON.parse(fileContent);
-        if (this.paperCache && this.paperCache.trades) {
+        if (this.paperCache && this.paperCache.trades && this.paperCache.trades.length < 24) {
+          this.paperCache = generateMockPaperHistory();
+          this.savePaper();
+        } else if (this.paperCache && this.paperCache.trades) {
           let paperUpdated = false;
           this.paperCache.trades.forEach((t, idx) => {
             if (!t.setup_triggered) {
@@ -1741,7 +1751,7 @@ class DatabaseManager {
     const analysis: Record<string, { trades: number; wins: number; losses: number; pnl: number; grossProfit: number; grossLoss: number; holdTimes: number[] }> = {};
 
     trades.forEach((t) => {
-      const setup = t.setup_triggered || (t.feature_snapshot && (t.feature_snapshot as any).setup_triggered) || "Setup 1: Pullback & Retest";
+      const setup = t.setup_triggered || (t.feature_snapshot && (t.feature_snapshot as any).setup_triggered) || "Market Structure Validated";
       if (!analysis[setup]) {
         analysis[setup] = { trades: 0, wins: 0, losses: 0, pnl: 0, grossProfit: 0, grossLoss: 0, holdTimes: [] };
       }

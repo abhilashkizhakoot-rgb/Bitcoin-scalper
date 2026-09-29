@@ -4453,11 +4453,13 @@ class TradingEngine {
       }
       condDict["Immediate Breakout Entry Allowance"] = { status: "SKIP", reason: "Evaluated pullback (not currently on breakout candle)." };
 
+      const marketStruct = struct || this.getTrendMarketStructure();
       const postBreakoutCandles = breakoutIdx !== -1 ? this.candles1m.slice(breakoutIdx + 1) : this.candles1m.slice(-10);
 
       // --- FEATURE 4: Dynamic Invalidation & Stop-Loss Zones ---
-      const structuralHL = struct.current_HL ? struct.current_HL.price : 0;
-      const reclaimThreshold = Math.min(breakoutLevel, Math.max(breakoutLevel - invalidationMultiplier * currentAtr, structuralHL - 0.1 * currentAtr));
+      const structuralHL = marketStruct.current_HL ? marketStruct.current_HL.price : 0;
+      const effectiveInvalMult = Math.max(0.75, invalidationMultiplier);
+      const reclaimThreshold = Math.min(breakoutLevel, Math.max(breakoutLevel - effectiveInvalMult * currentAtr, structuralHL - 0.2 * currentAtr));
       const hasReclaimed = postBreakoutCandles.some(c => c.close < reclaimThreshold);
       const isSetup1Invalidated = breakoutIdx === -1 || hasReclaimed || currentPrice < reclaimThreshold;
 
@@ -4702,15 +4704,19 @@ class TradingEngine {
 
       // Final Setup-Specific Branching for LONG
       if (isPullbackRetestValid && !pullbackRetestMessage.startsWith("Blocked")) {
+        const retestSwingLow = recentPostBreakoutCandles.length > 0 ? Math.min(...recentPostBreakoutCandles.map(c => c.low)) : currentPrice;
+        const robustSlLong = Math.min(currentPrice - 1.5 * currentAtr, Math.min(breakoutLevel - 0.75 * currentAtr, retestSwingLow - 0.35 * currentAtr));
+        const takeProfitLong = currentPrice + 2.0 * currentAtr;
+        const riskDistLong = Math.max(1, currentPrice - robustSlLong);
         const setupResult: TradingSetupResult = {
           setupId: "setup_1_pullback_retest",
           setupName: "Setup 1: Pullback & Retest",
           isValid: true,
           direction: "LONG",
           entryPrice: currentPrice,
-          stopLoss: reclaimThreshold,
-          takeProfit: currentPrice + 2.0 * currentAtr,
-          riskReward: 2.0,
+          stopLoss: robustSlLong,
+          takeProfit: takeProfitLong,
+          riskReward: (takeProfitLong - currentPrice) / riskDistLong,
           description: pullbackRetestMessage,
           sub_conditions: [
             { name: "5m MTF Alignment", status: "PASS", reason: "5m trend aligned" },
@@ -4868,11 +4874,13 @@ class TradingEngine {
       }
       condDict["Immediate Breakout Entry Allowance"] = { status: "SKIP", reason: "Evaluated pullback (not currently on breakout candle)." };
 
+      const marketStruct = struct || this.getTrendMarketStructure();
       const postBreakoutCandles = breakoutIdx !== -1 ? this.candles1m.slice(breakoutIdx + 1) : this.candles1m.slice(-10);
 
       // --- FEATURE 4: Dynamic Invalidation & Stop-Loss Zones ---
-      const structuralLH = struct.current_LH ? struct.current_LH.price : Infinity;
-      const reclaimThreshold = Math.max(breakoutLevel, Math.min(breakoutLevel + invalidationMultiplier * currentAtr, structuralLH + 0.1 * currentAtr));
+      const structuralLH = marketStruct.current_LH ? marketStruct.current_LH.price : Infinity;
+      const effectiveInvalMult = Math.max(0.75, invalidationMultiplier);
+      const reclaimThreshold = Math.max(breakoutLevel, Math.min(breakoutLevel + effectiveInvalMult * currentAtr, structuralLH + 0.2 * currentAtr));
       const hasReclaimed = postBreakoutCandles.some(c => c.close > reclaimThreshold);
       const isSetup1Invalidated = breakoutIdx === -1 || hasReclaimed || currentPrice > reclaimThreshold;
 
@@ -5114,15 +5122,19 @@ class TradingEngine {
 
       // Final Setup-Specific Branching for SHORT
       if (isPullbackRetestValid && !pullbackRetestMessage.startsWith("Blocked")) {
+        const retestSwingHigh = recentPostBreakoutCandles.length > 0 ? Math.max(...recentPostBreakoutCandles.map(c => c.high)) : currentPrice;
+        const robustSlShort = Math.max(currentPrice + 1.5 * currentAtr, Math.max(breakoutLevel + 0.75 * currentAtr, retestSwingHigh + 0.35 * currentAtr));
+        const takeProfitShort = currentPrice - 2.0 * currentAtr;
+        const riskDistShort = Math.max(1, robustSlShort - currentPrice);
         const setupResult: TradingSetupResult = {
           setupId: "setup_1_pullback_retest",
           setupName: "Setup 1: Pullback & Retest",
           isValid: true,
           direction: "SHORT",
           entryPrice: currentPrice,
-          stopLoss: reclaimThreshold,
-          takeProfit: currentPrice - 2.0 * currentAtr,
-          riskReward: 2.0,
+          stopLoss: robustSlShort,
+          takeProfit: takeProfitShort,
+          riskReward: (currentPrice - takeProfitShort) / riskDistShort,
           description: pullbackRetestMessage,
           sub_conditions: [
             { name: "5m MTF Alignment", status: "PASS", reason: "5m trend aligned" },
@@ -6972,7 +6984,7 @@ class TradingEngine {
             isValid: true,
             direction: "LONG",
             entryPrice: currentPrice,
-            stopLoss: boRangeHigh - 0.5 * currentAtrForPullback,
+            stopLoss: Math.min(currentPrice - 1.5 * currentAtrForPullback, boRangeHigh - 1.0 * currentAtrForPullback),
             takeProfit: currentPrice + 2.0 * currentAtrForPullback,
             riskReward: 2.0,
             description: `${rangeLongPullbackDetails} ${microTrendDetails}`,
@@ -7374,7 +7386,7 @@ class TradingEngine {
             isValid: true,
             direction: "SHORT",
             entryPrice: currentPrice,
-            stopLoss: boRangeLow + 0.5 * currentAtrForPullback,
+            stopLoss: Math.max(currentPrice + 1.5 * currentAtrForPullback, boRangeLow + 1.0 * currentAtrForPullback),
             takeProfit: currentPrice - 2.0 * currentAtrForPullback,
             riskReward: 2.0,
             description: `${rangeShortPullbackDetails} ${microTrendDetails}`,

@@ -171,7 +171,7 @@ export default function AnalyticsPage({
   }>();
 
   completedTrades.forEach((t) => {
-    const setupName = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Setup 1: Pullback & Retest";
+    const setupName = t.setup_triggered || t.feature_snapshot?.setup_triggered || "Market Structure Validated";
     if (!setupPerformanceMap.has(setupName)) {
       setupPerformanceMap.set(setupName, {
         setup_name: setupName,

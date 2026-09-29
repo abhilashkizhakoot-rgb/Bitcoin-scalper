@@ -412,6 +412,9 @@ export interface StrategyConfig {
     fresh_momentum_min_body_ratio?: number; // Minimum body-to-range ratio for displacement candle (default: 0.48)
     fresh_momentum_min_vol_mult?: number; // Minimum volume multiplier relative to 20-period SMA (default: 1.15x)
     fresh_momentum_max_chase_atr?: number; // Maximum ATR distance from impulse origin to qualify as fresh (default: 4.5x)
+    fresh_momentum_respect_ema200_overextension?: boolean; // Respect 200 EMA overextension filter to avoid entering into macro exhaustion (default: true)
+    fresh_momentum_max_ema200_extension_atr?: number; // Maximum allowed ATR extension from 200 EMA before Fresh Momentum is blocked (default: 2.5)
+    fresh_momentum_ema200_proximity_block?: boolean; // Block Fresh Momentum entry if 200 EMA sits as an immediate adverse barrier in trade path (default: true)
     // Dynamic Market Condition & Regime Gating Matrix
     dynamic_regime_setup_matrix_enabled?: boolean; // Dynamically enable/disable setups based on active Market Regime (default: true)
     setup_regime_matrix?: Record<string, MarketRegime[]>; // Map of setupId -> allowed MarketRegime[]

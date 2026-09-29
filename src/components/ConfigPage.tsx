@@ -5428,6 +5428,66 @@ export default function ConfigPage({
                     <p className="text-[10px] text-slate-400">Maximum distance (in ATRs) price is permitted to run from impulse origin before entering (Standard: 4.5x).</p>
                   </div>
                 </div>
+
+                {/* 200 EMA Overextension & Macro Mean Settings for Fresh Momentum */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                  <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Respect 200 EMA Overextension</span>
+                      <p className="text-[10px] text-slate-400">Blocks fresh momentum entries when price is stretched excessively from the 200 EMA to avoid macro exhaustion tops/bottoms.</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={msConfig.fresh_momentum_strategy_enabled === false}
+                      onClick={() => setMsConfig({ ...msConfig, fresh_momentum_respect_ema200_overextension: msConfig.fresh_momentum_respect_ema200_overextension === false ? true : false })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 ${
+                        msConfig.fresh_momentum_respect_ema200_overextension !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.fresh_momentum_respect_ema200_overextension !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">200 EMA Max Stretch (ATR)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="1.0"
+                      max="6.0"
+                      disabled={msConfig.fresh_momentum_strategy_enabled === false}
+                      value={msConfig.fresh_momentum_max_ema200_extension_atr || 2.5}
+                      onChange={(e) => setMsConfig({ ...msConfig, fresh_momentum_max_ema200_extension_atr: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Max allowed ATR deviation from 200 EMA before Fresh Momentum is blocked (Default: 2.5 ATR).</p>
+                  </div>
+
+                  <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">200 EMA Adverse Barrier Guard</span>
+                      <p className="text-[10px] text-slate-400">Blocks momentum entries directly into an adverse 200 EMA ceiling/floor within 1.2x ATR.</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={msConfig.fresh_momentum_strategy_enabled === false}
+                      onClick={() => setMsConfig({ ...msConfig, fresh_momentum_ema200_proximity_block: msConfig.fresh_momentum_ema200_proximity_block === false ? true : false })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 ${
+                        msConfig.fresh_momentum_ema200_proximity_block !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.fresh_momentum_ema200_proximity_block !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 

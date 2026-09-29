@@ -357,6 +357,9 @@ const DEFAULT_CONFIG: StrategyConfig = {
     fresh_momentum_min_body_ratio: 0.48,
     fresh_momentum_min_vol_mult: 1.15,
     fresh_momentum_max_chase_atr: 4.5,
+    fresh_momentum_respect_ema200_overextension: true,
+    fresh_momentum_max_ema200_extension_atr: 2.5,
+    fresh_momentum_ema200_proximity_block: true,
     pullback_retest_enabled: true,
     ema_pushback_enabled: true,
     dynamic_regime_setup_matrix_enabled: true,
@@ -1485,6 +1488,9 @@ class DatabaseManager {
       if (ms.fresh_momentum_min_body_ratio === undefined) { ms.fresh_momentum_min_body_ratio = def.fresh_momentum_min_body_ratio || 0.48; changed = true; }
       if (ms.fresh_momentum_min_vol_mult === undefined) { ms.fresh_momentum_min_vol_mult = def.fresh_momentum_min_vol_mult || 1.15; changed = true; }
       if (ms.fresh_momentum_max_chase_atr === undefined) { ms.fresh_momentum_max_chase_atr = def.fresh_momentum_max_chase_atr || 4.5; changed = true; }
+      if (ms.fresh_momentum_respect_ema200_overextension === undefined) { ms.fresh_momentum_respect_ema200_overextension = def.fresh_momentum_respect_ema200_overextension !== false; changed = true; }
+      if (ms.fresh_momentum_max_ema200_extension_atr === undefined) { ms.fresh_momentum_max_ema200_extension_atr = def.fresh_momentum_max_ema200_extension_atr || 2.5; changed = true; }
+      if (ms.fresh_momentum_ema200_proximity_block === undefined) { ms.fresh_momentum_ema200_proximity_block = def.fresh_momentum_ema200_proximity_block !== false; changed = true; }
       if (ms.pullback_retest_enabled === undefined) { ms.pullback_retest_enabled = def.pullback_retest_enabled !== false; changed = true; }
       if (ms.ema_pushback_enabled === undefined) { ms.ema_pushback_enabled = def.ema_pushback_enabled !== false; changed = true; }
       if (ms.dynamic_regime_setup_matrix_enabled === undefined) { ms.dynamic_regime_setup_matrix_enabled = def.dynamic_regime_setup_matrix_enabled !== false; changed = true; }

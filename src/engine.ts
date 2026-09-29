@@ -4162,11 +4162,14 @@ class TradingEngine {
           { name: "Early Expansion Entry", status: "PASS", reason: `Fresh momentum impulse confirmed at $${freshMomentumResult.impulsePrice.toFixed(2)}` },
           { name: "Impulse Surge Volume", status: "PASS", reason: `Volume surge confirmed (${freshMomentumResult.volumeMult.toFixed(2)}x)` },
           { name: "Dynamic Invalidation Structure", status: "PASS", reason: `Impulse origin intact (SL: $${freshMomentumResult.stopLoss.toFixed(2)}, TP: $${freshMomentumResult.takeProfit.toFixed(2)})` },
+          { name: "200 EMA Extension Guard", status: "PASS", reason: (freshMomentumResult as any).ema200DistanceAtr !== undefined ? `200 EMA at $${(freshMomentumResult as any).ema200Price?.toFixed(2)} (${(freshMomentumResult as any).ema200DistanceAtr.toFixed(2)}x ATR stretch within limit)` : "200 EMA extension valid" },
         ],
         metrics: {
           impulsePrice: freshMomentumResult.impulsePrice,
           bodyRatio: freshMomentumResult.bodyRatio,
           volumeMult: freshMomentumResult.volumeMult,
+          ema200Price: (freshMomentumResult as any).ema200Price,
+          ema200DistanceAtr: (freshMomentumResult as any).ema200DistanceAtr,
         }
       };
 

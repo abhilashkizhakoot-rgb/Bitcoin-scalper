@@ -721,7 +721,9 @@ class TradingEngine {
     if (gateId === "value_extension") return true;
     // 2. Anti-Whipsaw Directional Lockout: Prevents instant reverse-trading into market maker liquidity sweeps
     if (gateId === "whipsaw") return true;
-    // 3. Microstructure Friction & Net Expectancy Hurdle: Enforces positive mathematical edge
+    // 3. Market Structure Confirmation: Prevents trading without a confirmed structural setup
+    if (gateId === "structure") return true;
+    // 4. Microstructure Friction & Net Expectancy Hurdle: Enforces positive mathematical edge
     if (gateId === "friction_hurdle") {
       return config.risk_management?.friction_hurdle_gate_enabled !== false;
     }
@@ -730,7 +732,10 @@ class TradingEngine {
     if (adaptiveStatus === "MANDATORY") return true;
     if (adaptiveStatus === "WEIGHTED" || adaptiveStatus === "BYPASSED") return false;
 
-    const mandatory = config.general.mandatory_gates || [];
+    const mandatory = [
+      ...(config.general.mandatory_gates || []),
+      ...((config.general as any).required_gates || [])
+    ];
     if (mandatory.includes(gateId)) return true;
     if (gateId === "preflight" && mandatory.some(g => ["limit", "equity", "credentials", "cooldown"].includes(g))) return true;
     return false;
@@ -738,7 +743,7 @@ class TradingEngine {
 
   private isGateActive(config: StrategyConfig, name: string): boolean {
     const gateId = this.getGateIdByName(name);
-    if (gateId === "value_extension" || gateId === "whipsaw") return true;
+    if (gateId === "value_extension" || gateId === "whipsaw" || gateId === "structure") return true;
     if (gateId === "friction_hurdle") {
       return config.risk_management?.friction_hurdle_gate_enabled !== false;
     }
@@ -1669,23 +1674,56 @@ class TradingEngine {
       const exhaustionLong = this.evaluateExhaustionReversalCondition("LONG", currentPrice, closes, lastIdx);
       const exhaustionShort = this.evaluateExhaustionReversalCondition("SHORT", currentPrice, closes, lastIdx);
 
+      const eligFreshLong = this.isSetupEligibleForConditions("setup_14_fresh_momentum_impulse", "LONG");
+      const eligFreshShort = this.isSetupEligibleForConditions("setup_14_fresh_momentum_impulse", "SHORT");
+      const eligFvgLong = this.isSetupEligibleForConditions("setup_4_fvg_retest", "LONG");
+      const eligFvgShort = this.isSetupEligibleForConditions("setup_4_fvg_retest", "SHORT");
+      const eligOiLong = this.isSetupEligibleForConditions("setup_13_oi_flush_cascade", "LONG");
+      const eligOiShort = this.isSetupEligibleForConditions("setup_13_oi_flush_cascade", "SHORT");
+      const eligCvdLong = this.isSetupEligibleForConditions("setup_12_cvd_absorption", "LONG");
+      const eligCvdShort = this.isSetupEligibleForConditions("setup_12_cvd_absorption", "SHORT");
+      const eligVwapLong = this.isSetupEligibleForConditions("setup_10_vwap_band_rejection", "LONG");
+      const eligVwapShort = this.isSetupEligibleForConditions("setup_10_vwap_band_rejection", "SHORT");
+      const eligEqLong = this.isSetupEligibleForConditions("setup_11_eqh_eql_double_touch", "LONG");
+      const eligEqShort = this.isSetupEligibleForConditions("setup_11_eqh_eql_double_touch", "SHORT");
+      const eligSweepLong = this.isSetupEligibleForConditions("setup_3_liquidity_sweep", "LONG");
+      const eligSweepShort = this.isSetupEligibleForConditions("setup_3_liquidity_sweep", "SHORT");
+      const eligRangeReversalLong = this.isSetupEligibleForConditions("setup_9_range_failed_auction", "LONG");
+      const eligRangeReversalShort = this.isSetupEligibleForConditions("setup_9_range_failed_auction", "SHORT");
+
       // Priority 0: Fresh Momentum Impulse (Early aggressive breakout displacement)
-      if (freshMomentumShort.isValid) {
+      if (eligFreshShort.eligible && freshMomentumShort.isValid) {
         signalDirection = "SHORT";
-      } else if (freshMomentumLong.isValid) {
+      } else if (eligFreshLong.eligible && freshMomentumLong.isValid) {
         signalDirection = "LONG";
       // Priority 1: Range Breakout / Breakdown (when price escapes range boundaries)
-      } else if (isRangeShortBreakdown) {
+      } else if (eligFreshShort.eligible && isRangeShortBreakdown) {
         signalDirection = "SHORT";
-      } else if (isRangeLongBreakout) {
+      } else if (eligFreshLong.eligible && isRangeLongBreakout) {
         signalDirection = "LONG";
-      } else if (fvgLong.isValid || oiFlushLong.isValid || cvdAbsorptionLong.isValid || isRangeLongReversal || vwapReversalLong.isValid || eqhEqlLong.isValid || (exhaustionLong.isExhausted && probabilityLong >= 0.48)) {
+      } else if (
+        (eligFvgLong.eligible && fvgLong.isValid) ||
+        (eligOiLong.eligible && oiFlushLong.isValid) ||
+        (eligCvdLong.eligible && cvdAbsorptionLong.isValid) ||
+        (eligRangeReversalLong.eligible && isRangeLongReversal) ||
+        (eligVwapLong.eligible && vwapReversalLong.isValid) ||
+        (eligEqLong.eligible && eqhEqlLong.isValid) ||
+        (exhaustionLong.isExhausted && probabilityLong >= 0.48)
+      ) {
         signalDirection = "LONG";
-      } else if (fvgShort.isValid || oiFlushShort.isValid || cvdAbsorptionShort.isValid || isRangeShortReversal || vwapReversalShort.isValid || eqhEqlShort.isValid || (exhaustionShort.isExhausted && probabilityShort >= 0.48)) {
+      } else if (
+        (eligFvgShort.eligible && fvgShort.isValid) ||
+        (eligOiShort.eligible && oiFlushShort.isValid) ||
+        (eligCvdShort.eligible && cvdAbsorptionShort.isValid) ||
+        (eligRangeReversalShort.eligible && isRangeShortReversal) ||
+        (eligVwapShort.eligible && vwapReversalShort.isValid) ||
+        (eligEqShort.eligible && eqhEqlShort.isValid) ||
+        (exhaustionShort.isExhausted && probabilityShort >= 0.48)
+      ) {
         signalDirection = "SHORT";
-      } else if (smcSweepLong.isSweep) {
+      } else if (eligSweepLong.eligible && smcSweepLong.isSweep) {
         signalDirection = "LONG";
-      } else if (smcSweepShort.isSweep) {
+      } else if (eligSweepShort.eligible && smcSweepShort.isSweep) {
         signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
@@ -1705,13 +1743,38 @@ class TradingEngine {
       const oiLong = this.evaluateOiFlushCascadeFadeSetup("LONG");
       const oiShort = this.evaluateOiFlushCascadeFadeSetup("SHORT");
 
-      if (freshMomentumShort.isValid) {
+      const eligFreshLong = this.isSetupEligibleForConditions("setup_14_fresh_momentum_impulse", "LONG");
+      const eligFreshShort = this.isSetupEligibleForConditions("setup_14_fresh_momentum_impulse", "SHORT");
+      const eligFvgLong = this.isSetupEligibleForConditions("setup_4_fvg_retest", "LONG");
+      const eligFvgShort = this.isSetupEligibleForConditions("setup_4_fvg_retest", "SHORT");
+      const eligVwapLong = this.isSetupEligibleForConditions("setup_10_vwap_band_rejection", "LONG");
+      const eligVwapShort = this.isSetupEligibleForConditions("setup_10_vwap_band_rejection", "SHORT");
+      const eligEqLong = this.isSetupEligibleForConditions("setup_11_eqh_eql_double_touch", "LONG");
+      const eligEqShort = this.isSetupEligibleForConditions("setup_11_eqh_eql_double_touch", "SHORT");
+      const eligCvdLong = this.isSetupEligibleForConditions("setup_12_cvd_absorption", "LONG");
+      const eligCvdShort = this.isSetupEligibleForConditions("setup_12_cvd_absorption", "SHORT");
+      const eligOiLong = this.isSetupEligibleForConditions("setup_13_oi_flush_cascade", "LONG");
+      const eligOiShort = this.isSetupEligibleForConditions("setup_13_oi_flush_cascade", "SHORT");
+
+      if (eligFreshShort.eligible && freshMomentumShort.isValid) {
         signalDirection = "SHORT";
-      } else if (freshMomentumLong.isValid) {
+      } else if (eligFreshLong.eligible && freshMomentumLong.isValid) {
         signalDirection = "LONG";
-      } else if (fvgLong.isValid || oiLong.isValid || cvdLong.isValid || vwapLong.isValid || eqLong.isValid) {
+      } else if (
+        (eligFvgLong.eligible && fvgLong.isValid) ||
+        (eligOiLong.eligible && oiLong.isValid) ||
+        (eligCvdLong.eligible && cvdLong.isValid) ||
+        (eligVwapLong.eligible && vwapLong.isValid) ||
+        (eligEqLong.eligible && eqLong.isValid)
+      ) {
         signalDirection = "LONG";
-      } else if (fvgShort.isValid || oiShort.isValid || cvdShort.isValid || vwapShort.isValid || eqShort.isValid) {
+      } else if (
+        (eligFvgShort.eligible && fvgShort.isValid) ||
+        (eligOiShort.eligible && oiShort.isValid) ||
+        (eligCvdShort.eligible && cvdShort.isValid) ||
+        (eligVwapShort.eligible && vwapShort.isValid) ||
+        (eligEqShort.eligible && eqShort.isValid)
+      ) {
         signalDirection = "SHORT";
       } else {
         signalDirection = "NEUTRAL";
@@ -1841,17 +1904,31 @@ class TradingEngine {
       };
     }
 
-    // Evaluate active SMC / structural setup presence for threshold & alignment bypass
-    const smcFvgActive = (signalDirection === "LONG" && this.evaluateFairValueGapSetup("LONG").isValid) ||
-                         (signalDirection === "SHORT" && this.evaluateFairValueGapSetup("SHORT").isValid);
-    const smcVwapActive = (signalDirection === "LONG" && this.evaluateVwapBandRejectionSetup("LONG").isValid) ||
-                          (signalDirection === "SHORT" && this.evaluateVwapBandRejectionSetup("SHORT").isValid);
-    const smcEqhEqlActive = (signalDirection === "LONG" && this.evaluateEqhEqlDoubleTouchSetup("LONG").isValid) ||
-                            (signalDirection === "SHORT" && this.evaluateEqhEqlDoubleTouchSetup("SHORT").isValid);
-    const smcFreshMomentumActive = (signalDirection === "LONG" && this.evaluateFreshMomentumImpulseSetup("LONG").isValid) ||
-                                   (signalDirection === "SHORT" && this.evaluateFreshMomentumImpulseSetup("SHORT").isValid);
-    const isSmcActive = (signalDirection === "LONG" && (this.detectLiquiditySweep("LONG").isSweep || this.evaluateFailedAuctionSetup("LONG").isValid || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive)) ||
-                        (signalDirection === "SHORT" && (this.detectLiquiditySweep("SHORT").isSweep || this.evaluateFailedAuctionSetup("SHORT").isValid || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive));
+    // Evaluate active SMC / structural setup presence for threshold & alignment bypass with regime gating
+    const eligFvgDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_4_fvg_retest", signalDirection).eligible;
+    const smcFvgActive = eligFvgDir && (
+      (signalDirection === "LONG" && this.evaluateFairValueGapSetup("LONG").isValid) ||
+      (signalDirection === "SHORT" && this.evaluateFairValueGapSetup("SHORT").isValid)
+    );
+    const eligVwapDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_10_vwap_band_rejection", signalDirection).eligible;
+    const smcVwapActive = eligVwapDir && (
+      (signalDirection === "LONG" && this.evaluateVwapBandRejectionSetup("LONG").isValid) ||
+      (signalDirection === "SHORT" && this.evaluateVwapBandRejectionSetup("SHORT").isValid)
+    );
+    const eligEqhEqlDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_11_eqh_eql_double_touch", signalDirection).eligible;
+    const smcEqhEqlActive = eligEqhEqlDir && (
+      (signalDirection === "LONG" && this.evaluateEqhEqlDoubleTouchSetup("LONG").isValid) ||
+      (signalDirection === "SHORT" && this.evaluateEqhEqlDoubleTouchSetup("SHORT").isValid)
+    );
+    const eligFreshDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_14_fresh_momentum_impulse", signalDirection).eligible;
+    const smcFreshMomentumActive = eligFreshDir && (
+      (signalDirection === "LONG" && this.evaluateFreshMomentumImpulseSetup("LONG").isValid) ||
+      (signalDirection === "SHORT" && this.evaluateFreshMomentumImpulseSetup("SHORT").isValid)
+    );
+    const eligSweepDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_3_liquidity_sweep", signalDirection).eligible;
+    const eligFailedAuctionDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_9_range_failed_auction", signalDirection).eligible;
+    const isSmcActive = (signalDirection === "LONG" && ((eligSweepDir && this.detectLiquiditySweep("LONG").isSweep) || (eligFailedAuctionDir && this.evaluateFailedAuctionSetup("LONG").isValid) || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive)) ||
+                        (signalDirection === "SHORT" && ((eligSweepDir && this.detectLiquiditySweep("SHORT").isSweep) || (eligFailedAuctionDir && this.evaluateFailedAuctionSetup("SHORT").isValid) || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive));
 
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY && !isSmcActive) {
       const earlyConds: Checkpoint[] = [
@@ -2703,12 +2780,12 @@ class TradingEngine {
       if (totalTacticalWeight > 0) {
         let calculatedScore = Math.round((earnedTacticalWeight / totalTacticalWeight) * 100);
 
-        // Adaptive AI Alignment Penalty (Non-Blocking):
+        // Adaptive AI Alignment Penalty:
         // If CatBoost model strongly predicts the OPPOSING direction (P(opposing) >= 70%),
-        // apply a modest confidence dampener (0-10 pts) so it doesn't double-penalize alongside gate weighting.
+        // apply a decisive confidence dampener to prevent counter-AI executions.
         const opposingProb = signalDirection === "LONG" ? probabilityShort : probabilityLong;
         if (opposingProb >= 0.70) {
-          const aiPenalty = Math.min(10, Math.round((opposingProb - 0.70) * 33));
+          const aiPenalty = opposingProb >= 0.85 ? 40 : (opposingProb >= 0.75 ? 25 : Math.round((opposingProb - 0.70) * 50));
           calculatedScore = Math.max(0, calculatedScore - aiPenalty);
         }
 
@@ -2779,7 +2856,8 @@ class TradingEngine {
         structCheck.message.includes("Setup 12") ? "Setup 12: CVD Absorption & Delta Divergence" :
         structCheck.message.includes("Setup 13") ? "Setup 13: OI Flush & Cascade Fade" :
         structCheck.message.includes("Setup 2") ? "Setup 2: Dynamic EMA Pushback" :
-        "Setup 1: Pullback & Retest"
+        structCheck.message.includes("Setup 1") ? "Setup 1: Pullback & Retest" :
+        undefined
       ) : undefined
     );
 
@@ -6647,43 +6725,45 @@ class TradingEngine {
       const isRangeLongBreakout = (currentPrice > rangeHigh) && breakoutValidationLong.isValid;
       const isRangeShortBreakdown = (currentPrice < rangeLow) && breakoutValidationShort.isValid;
 
+      const atr14ForPullback = this.calculateATR(this.candles1m, 14);
+      const currentAtrForPullback = atr14ForPullback[lastIdx] || 50;
+
       // Range LONG Breakout Pullback Check
       let isRangeLongPullback = false;
       let rangeLongPullbackDetails = "";
       let boRangeHigh = rangeHigh;
-
       let rangeLongBreakoutIdx = -1;
-      for (let i = lastIdx - 15; i < lastIdx; i++) {
-        if (i < 30) continue;
-        const prevCandles = this.candles1m.slice(i - 30, i);
-        const rHigh = Math.max(...prevCandles.map(c => c.high));
-        if (this.candles1m[i].close > rHigh) {
-          rangeLongBreakoutIdx = i;
-          boRangeHigh = rHigh;
-          break;
+
+      const eligRangeLongPb = this.isSetupEligibleForConditions("setup_1_pullback_retest", "LONG");
+      if (eligRangeLongPb.eligible) {
+        for (let i = lastIdx - 15; i < lastIdx; i++) {
+          if (i < 30) continue;
+          const prevCandles = this.candles1m.slice(i - 30, i);
+          const rHigh = Math.max(...prevCandles.map(c => c.high));
+          if (this.candles1m[i].close > rHigh) {
+            rangeLongBreakoutIdx = i;
+            boRangeHigh = rHigh;
+            break;
+          }
         }
-      }
 
-      const atr14ForPullback = this.calculateATR(this.candles1m, 14);
-      const currentAtrForPullback = atr14ForPullback[lastIdx] || 50;
+        if (rangeLongBreakoutIdx !== -1) {
+          const postBreakoutCandles = this.candles1m.slice(rangeLongBreakoutIdx + 1);
+          const pullbackThreshold = boRangeHigh + 0.5 * currentAtrForPullback;
+          
+          const recentPostBreakoutCandles = postBreakoutCandles.slice(-4);
+          const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.low <= pullbackThreshold);
+          
+          // Check for bullish rejection on the current candle
+          const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtrForPullback);
+          const isLongRejectionConfirmed = rejectionCheck.confirmed;
 
-      if (rangeLongBreakoutIdx !== -1) {
-        const postBreakoutCandles = this.candles1m.slice(rangeLongBreakoutIdx + 1);
-        const pullbackThreshold = boRangeHigh + 0.5 * currentAtrForPullback;
-        
-        const recentPostBreakoutCandles = postBreakoutCandles.slice(-4);
-        const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.low <= pullbackThreshold);
-        
-        // Check for bullish rejection on the current candle
-        const rejectionCheck = this.isMultiCandleLongRejection(lastIdx, currentAtrForPullback);
-        const isLongRejectionConfirmed = rejectionCheck.confirmed;
-        const longRejectionType = rejectionCheck.type;
+          const isNearBrokenSupport = currentPrice >= boRangeHigh - 0.25 * currentAtrForPullback && currentPrice <= boRangeHigh + 0.8 * currentAtrForPullback;
 
-        const isNearBrokenSupport = currentPrice >= boRangeHigh - 0.25 * currentAtrForPullback && currentPrice <= boRangeHigh + 0.8 * currentAtrForPullback;
-
-        if (hasPulledBackToZone && isLongRejectionConfirmed && isNearBrokenSupport) {
-          isRangeLongPullback = true;
-          rangeLongPullbackDetails = `Range LONG Breakout Pullback Confirmed: Price broke out above range resistance ($${boRangeHigh.toFixed(2)}) recently (index ${rangeLongBreakoutIdx}) and successfully retested it as support with a bullish rejection.`;
+          if (hasPulledBackToZone && isLongRejectionConfirmed && isNearBrokenSupport) {
+            isRangeLongPullback = true;
+            rangeLongPullbackDetails = `Range LONG Breakout Pullback Confirmed: Price broke out above range resistance ($${boRangeHigh.toFixed(2)}) recently (index ${rangeLongBreakoutIdx}) and successfully retested it as support with a bullish rejection.`;
+          }
         }
       }
 
@@ -6691,36 +6771,38 @@ class TradingEngine {
       let isRangeShortPullback = false;
       let rangeShortPullbackDetails = "";
       let boRangeLow = rangeLow;
-
       let rangeShortBreakoutIdx = -1;
-      for (let i = lastIdx - 15; i < lastIdx; i++) {
-        if (i < 30) continue;
-        const prevCandles = this.candles1m.slice(i - 30, i);
-        const rLow = Math.min(...prevCandles.map(c => c.low));
-        if (this.candles1m[i].close < rLow) {
-          rangeShortBreakoutIdx = i;
-          boRangeLow = rLow;
-          break;
+
+      const eligRangeShortPb = this.isSetupEligibleForConditions("setup_1_pullback_retest", "SHORT");
+      if (eligRangeShortPb.eligible) {
+        for (let i = lastIdx - 15; i < lastIdx; i++) {
+          if (i < 30) continue;
+          const prevCandles = this.candles1m.slice(i - 30, i);
+          const rLow = Math.min(...prevCandles.map(c => c.low));
+          if (this.candles1m[i].close < rLow) {
+            rangeShortBreakoutIdx = i;
+            boRangeLow = rLow;
+            break;
+          }
         }
-      }
 
-      if (rangeShortBreakoutIdx !== -1) {
-        const postBreakoutCandles = this.candles1m.slice(rangeShortBreakoutIdx + 1);
-        const pullbackThreshold = boRangeLow - 0.5 * currentAtrForPullback;
-        
-        const recentPostBreakoutCandles = postBreakoutCandles.slice(-4);
-        const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.high >= pullbackThreshold);
-        
-        // Check for bearish rejection on current candle
-        const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtrForPullback);
-        const isShortRejectionConfirmed = rejectionCheck.confirmed;
-        const shortRejectionType = rejectionCheck.type;
+        if (rangeShortBreakoutIdx !== -1) {
+          const postBreakoutCandles = this.candles1m.slice(rangeShortBreakoutIdx + 1);
+          const pullbackThreshold = boRangeLow - 0.5 * currentAtrForPullback;
+          
+          const recentPostBreakoutCandles = postBreakoutCandles.slice(-4);
+          const hasPulledBackToZone = recentPostBreakoutCandles.some(c => c.high >= pullbackThreshold);
+          
+          // Check for bearish rejection on current candle
+          const rejectionCheck = this.isMultiCandleShortRejection(lastIdx, currentAtrForPullback);
+          const isShortRejectionConfirmed = rejectionCheck.confirmed;
 
-        const isNearBrokenResistance = currentPrice <= boRangeLow + 0.25 * currentAtrForPullback && currentPrice >= boRangeLow - 0.8 * currentAtrForPullback;
+          const isNearBrokenResistance = currentPrice <= boRangeLow + 0.25 * currentAtrForPullback && currentPrice >= boRangeLow - 0.8 * currentAtrForPullback;
 
-        if (hasPulledBackToZone && isShortRejectionConfirmed && isNearBrokenResistance) {
-          isRangeShortPullback = true;
-          rangeShortPullbackDetails = `Range SHORT Breakdown Pullback Confirmed: Price broke below range support ($${boRangeLow.toFixed(2)}) recently (index ${rangeShortBreakoutIdx}) and successfully retested it as resistance with a bearish rejection.`;
+          if (hasPulledBackToZone && isShortRejectionConfirmed && isNearBrokenResistance) {
+            isRangeShortPullback = true;
+            rangeShortPullbackDetails = `Range SHORT Breakdown Pullback Confirmed: Price broke below range support ($${boRangeLow.toFixed(2)}) recently (index ${rangeShortBreakoutIdx}) and successfully retested it as resistance with a bearish rejection.`;
+          }
         }
       }
 
@@ -6758,6 +6840,15 @@ class TradingEngine {
 
       if (signalDirection === "LONG") {
         if (isRangeLongReversal) {
+          const eligSetup9 = this.isSetupEligibleForConditions("setup_9_range_failed_auction", "LONG");
+          if (!eligSetup9.eligible) {
+            return {
+              confirmed: false,
+              message: `Range LONG Reversal Blocked: Setup 9 (Range Reversal) is prohibited in ${this.currentRegime} (${eligSetup9.reason}).`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
             return {
               confirmed: false,
@@ -6798,10 +6889,11 @@ class TradingEngine {
             sub_conditions: active_setup.sub_conditions,
           };
         } else if (isRangeLongBreakout) {
-          if (ms.fresh_momentum_strategy_enabled === false) {
+          const eligSetup14 = this.isSetupEligibleForConditions("setup_14_fresh_momentum_impulse", "LONG");
+          if (!eligSetup14.eligible) {
             return {
               confirmed: false,
-              message: `Range LONG Breakout Blocked: Setup 14 (Fresh Momentum Impulse) is disabled. Waiting for range breakout pullback.`,
+              message: `Range LONG Breakout Blocked: Setup 14 (Fresh Momentum Impulse) is prohibited in ${this.currentRegime} (${eligSetup14.reason}). Waiting for range breakout pullback.`,
               swingHigh: rangeHigh,
               swingLow: rangeLow
             };
@@ -6857,6 +6949,15 @@ class TradingEngine {
             sub_conditions: active_setup.sub_conditions,
           };
         } else if (isRangeLongPullback) {
+          const eligSetup1 = this.isSetupEligibleForConditions("setup_1_pullback_retest", "LONG");
+          if (!eligSetup1.eligible) {
+            return {
+              confirmed: false,
+              message: `Range LONG Pullback Blocked: Setup 1 (Pullback & Retest) is prohibited in ${this.currentRegime} (${eligSetup1.reason}).`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
             return {
               confirmed: false,
@@ -6903,15 +7004,252 @@ class TradingEngine {
             swingLow: rangeLow
           };
         } else {
+          // --- Check Ranging / Mean Reversion Setups Permitted in RANGE_BOUND Regime ---
+          // 1. Setup 3: Liquidity Sweep Reversal
+          const eligSetup3 = this.isSetupEligibleForConditions("setup_3_liquidity_sweep", "LONG");
+          if (eligSetup3.eligible) {
+            const sweepResult = this.detectLiquiditySweep("LONG");
+            if (sweepResult.isSweep) {
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_3_liquidity_sweep",
+                setupName: "Setup 3: Liquidity Sweep Reversal",
+                isValid: true,
+                direction: "LONG",
+                entryPrice: currentPrice,
+                stopLoss: sweepResult.stopLoss,
+                takeProfit: sweepResult.takeProfit,
+                description: `[Setup 3 - Range Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`,
+                sub_conditions: [
+                  { name: "Liquidity Sweep Level Breach", status: "PASS", reason: `Liquidity sweep confirmed at level $${sweepResult.sweptLevel.toFixed(2)}` },
+                  { name: "Reclaim Wick Reversal", status: "PASS", reason: `Reclaimed with ${sweepResult.wickRatio.toFixed(0)}% rejection wick` },
+                  { name: "Sweep Volume Expansion", status: "PASS", reason: `Confirmed volume expansion (${sweepResult.volumeMult.toFixed(1)}x)` },
+                  { name: "Dynamic Invalidation Boundary", status: "PASS", reason: `Reclamation intact (SL: $${sweepResult.stopLoss.toFixed(2)}, TP: $${sweepResult.takeProfit.toFixed(2)})` },
+                ],
+                metrics: {
+                  sweptLevel: sweepResult.sweptLevel,
+                  wickRatio: sweepResult.wickRatio,
+                  volumeMult: sweepResult.volumeMult,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
+          // 2. Setup 11: EQH / EQL Double Touch Rejection
+          const eligSetup11 = this.isSetupEligibleForConditions("setup_11_eqh_eql_double_touch", "LONG");
+          if (eligSetup11.eligible) {
+            const eqhEqlResult = this.evaluateEqhEqlDoubleTouchSetup("LONG");
+            if (eqhEqlResult.isValid) {
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_11_eqh_eql_double_touch",
+                setupName: "Setup 11: EQH/EQL Double Touch Rejection",
+                isValid: true,
+                direction: "LONG",
+                entryPrice: currentPrice,
+                stopLoss: eqhEqlResult.stopLoss,
+                takeProfit: eqhEqlResult.takeProfit,
+                description: `[Setup 11 - Range EQL Double Touch Rejection Confirmed]: ${eqhEqlResult.description}`,
+                sub_conditions: [
+                  { name: "Equal Lows Level Proximity", status: "PASS", reason: `Equal Lows (EQL) level at $${eqhEqlResult.levelPrice.toFixed(2)}` },
+                  { name: "2nd Touch Rejection Wick", status: "PASS", reason: "2nd touch rejection wick confirmed" },
+                  { name: "Volume Decay & Divergence", status: "PASS", reason: "Volume decay & divergence valid" },
+                  { name: "Dynamic Invalidation Floor", status: "PASS", reason: `SL at $${eqhEqlResult.stopLoss.toFixed(2)} | TP at $${eqhEqlResult.takeProfit.toFixed(2)}` },
+                ],
+                metrics: {
+                  levelPrice: eqhEqlResult.levelPrice,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
+          // 3. Setup 10: VWAP Outer Band Rejection
+          const eligSetup10 = this.isSetupEligibleForConditions("setup_10_vwap_band_rejection", "LONG");
+          if (eligSetup10.eligible) {
+            const vwapBandResult = this.evaluateVwapBandRejectionSetup("LONG");
+            if (vwapBandResult.isValid) {
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_10_vwap_band_rejection",
+                setupName: "Setup 10: VWAP Band Rejection",
+                isValid: true,
+                direction: "LONG",
+                entryPrice: currentPrice,
+                stopLoss: vwapBandResult.stopLoss,
+                takeProfit: vwapBandResult.takeProfit,
+                description: `[Setup 10 - Range VWAP Band Rejection Confirmed]: ${vwapBandResult.description}`,
+                sub_conditions: [
+                  { name: "VWAP Lower Band Extension", status: "PASS", reason: `VWAP Lower Band rejection at $${vwapBandResult.bandPrice.toFixed(2)}` },
+                  { name: "Reversal Rejection Candlestick", status: "PASS", reason: "Reversal rejection candle confirmed off band" },
+                  { name: "Band Rejection Volume", status: "PASS", reason: "Band rejection volume valid" },
+                  { name: "Dynamic Invalidation to Basis", status: "PASS", reason: `SL at $${vwapBandResult.stopLoss.toFixed(2)} | TP at $${vwapBandResult.takeProfit.toFixed(2)}` },
+                ],
+                metrics: {
+                  bandPrice: vwapBandResult.bandPrice,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
+          // 4. Setup 12: CVD Absorption & Delta Divergence
+          const eligSetup12 = this.isSetupEligibleForConditions("setup_12_cvd_absorption", "LONG");
+          if (eligSetup12.eligible) {
+            const cvdAbsorptionResult = this.evaluateCvdAbsorptionDivergenceSetup("LONG");
+            if (cvdAbsorptionResult.isValid) {
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_12_cvd_absorption",
+                setupName: "Setup 12: CVD Absorption & Delta Divergence",
+                isValid: true,
+                direction: "LONG",
+                entryPrice: currentPrice,
+                stopLoss: cvdAbsorptionResult.stopLoss,
+                takeProfit: cvdAbsorptionResult.takeProfit,
+                description: `[Setup 12 - Range CVD Absorption Confirmed]: ${cvdAbsorptionResult.description}`,
+                sub_conditions: [
+                  { name: "Structural Extreme Location", status: "PASS", reason: `Structural extreme absorption at $${cvdAbsorptionResult.extremePrice.toFixed(2)}` },
+                  { name: "Absorption Rejection Wick", status: "PASS", reason: `Absorption rejection wick confirmed (${cvdAbsorptionResult.rejectionWickPct.toFixed(0)}%)` },
+                  { name: "Order Flow Delta Absorption", status: "PASS", reason: `Delta imbalance & absorption validated (Taker Buy Ratio: ${(cvdAbsorptionResult.takerBuyRatio * 100).toFixed(1)}%)` },
+                  { name: "Dynamic Invalidation Floor", status: "PASS", reason: `SL at $${cvdAbsorptionResult.stopLoss.toFixed(2)} | TP at $${cvdAbsorptionResult.takeProfit.toFixed(2)}` },
+                ],
+                metrics: {
+                  extremePrice: cvdAbsorptionResult.extremePrice,
+                  rejectionWickPct: cvdAbsorptionResult.rejectionWickPct,
+                  takerBuyRatio: cvdAbsorptionResult.takerBuyRatio,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
+          // 5. Setup 13: OI Flush & Cascade Fade
+          const eligSetup13 = this.isSetupEligibleForConditions("setup_13_oi_flush_cascade", "LONG");
+          if (eligSetup13.eligible) {
+            const oiFlushResult = this.evaluateOiFlushCascadeFadeSetup("LONG");
+            if (oiFlushResult.isValid) {
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_13_oi_flush_cascade",
+                setupName: "Setup 13: OI Flush & Cascade Fade",
+                isValid: true,
+                direction: "LONG",
+                entryPrice: currentPrice,
+                stopLoss: oiFlushResult.stopLoss,
+                takeProfit: oiFlushResult.takeProfit,
+                description: `[Setup 13 - Range OI Flush & Cascade Fade Confirmed]: ${oiFlushResult.description}`,
+                sub_conditions: [
+                  { name: "Liquidation Cascade Extreme", status: "PASS", reason: `Liquidation cascade extreme at $${oiFlushResult.flushExtreme.toFixed(2)}` },
+                  { name: "Exhaustion Reversal Wick", status: "PASS", reason: `Exhaustion wick confirmed (${oiFlushResult.reversalWickPct.toFixed(0)}%)` },
+                  { name: "Volume Surge & OI Contraction", status: "PASS", reason: `Volume surge (${oiFlushResult.volumeMult.toFixed(1)}x) & OI drop (${oiFlushResult.oiContractionPct.toFixed(1)}%) validated` },
+                  { name: "Strict Dynamic Invalidation", status: "PASS", reason: `Strict SL at $${oiFlushResult.stopLoss.toFixed(2)} | TP at $${oiFlushResult.takeProfit.toFixed(2)}` },
+                ],
+                metrics: {
+                  flushExtreme: oiFlushResult.flushExtreme,
+                  reversalWickPct: oiFlushResult.reversalWickPct,
+                  volumeMult: oiFlushResult.volumeMult,
+                  oiContractionPct: oiFlushResult.oiContractionPct,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
+          // 6. Setup 4: Fair Value Gap Retest
+          const eligSetup4 = this.isSetupEligibleForConditions("setup_4_fvg_retest", "LONG");
+          if (eligSetup4.eligible) {
+            const fvgResult = this.evaluateFairValueGapSetup("LONG");
+            if (fvgResult.isValid) {
+              const fvgRiskReward = Math.abs(fvgResult.takeProfit - currentPrice) / Math.max(1, Math.abs(currentPrice - fvgResult.stopLoss));
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_4_fvg_retest",
+                setupName: "Setup 4: Fair Value Gap Retest",
+                isValid: true,
+                direction: "LONG",
+                entryPrice: currentPrice,
+                stopLoss: fvgResult.stopLoss,
+                takeProfit: fvgResult.takeProfit,
+                riskReward: fvgRiskReward,
+                description: `[Setup 4 - Range FVG Retest Confirmed]: ${fvgResult.description}`,
+                sub_conditions: [
+                  { name: "FVG Mitigation Level", status: "PASS", reason: `FVG mitigation zone at $${((fvgResult as any).fvgMitigationPrice ?? fvgResult.consequentEncroachment).toFixed(2)}` },
+                  { name: "Mitigation Rejection Reaction", status: "PASS", reason: `Rejection reaction confirmed (${(fvgResult as any).rejectionType ?? "Reversal Pattern"})` },
+                  { name: "Mitigation Retrace Volume", status: "PASS", reason: "FVG mitigation retrace on healthy volume" },
+                  { name: "Dynamic Invalidation Floor", status: "PASS", reason: `SL at $${fvgResult.stopLoss.toFixed(2)} | TP at $${fvgResult.takeProfit.toFixed(2)}` },
+                ],
+                metrics: {
+                  fvgMitigationPrice: (fvgResult as any).fvgMitigationPrice ?? fvgResult.consequentEncroachment,
+                  rejectionType: (fvgResult as any).rejectionType ?? "Reversal Pattern",
+                  riskReward: fvgRiskReward,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
           return {
             confirmed: false,
-            message: `Range-bound Reversal Filter: Price ($${currentPrice.toFixed(2)}) is inside the range [$${rangeLow.toFixed(2)} - $${rangeHigh.toFixed(2)}] without a valid reversal, breakout, or pullback.`,
+            message: `Range-bound Reversal Filter: Price ($${currentPrice.toFixed(2)}) is inside the range [$${rangeLow.toFixed(2)} - $${rangeHigh.toFixed(2)}] without a valid reversal, breakout, or tactical setup.`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
         }
       } else if (signalDirection === "SHORT") {
         if (isRangeShortReversal) {
+          const eligSetup9 = this.isSetupEligibleForConditions("setup_9_range_failed_auction", "SHORT");
+          if (!eligSetup9.eligible) {
+            return {
+              confirmed: false,
+              message: `Range SHORT Reversal Blocked: Setup 9 (Range Reversal) is prohibited in ${this.currentRegime} (${eligSetup9.reason}).`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
             return {
               confirmed: false,
@@ -6952,10 +7290,11 @@ class TradingEngine {
             sub_conditions: active_setup.sub_conditions,
           };
         } else if (isRangeShortBreakdown) {
-          if (ms.fresh_momentum_strategy_enabled === false) {
+          const eligSetup14 = this.isSetupEligibleForConditions("setup_14_fresh_momentum_impulse", "SHORT");
+          if (!eligSetup14.eligible) {
             return {
               confirmed: false,
-              message: `Range SHORT Breakdown Blocked: Setup 14 (Fresh Momentum Impulse) is disabled. Waiting for range breakdown pullback.`,
+              message: `Range SHORT Breakdown Blocked: Setup 14 (Fresh Momentum Impulse) is prohibited in ${this.currentRegime} (${eligSetup14.reason}). Waiting for range breakdown pullback.`,
               swingHigh: rangeHigh,
               swingLow: rangeLow
             };
@@ -7012,6 +7351,15 @@ class TradingEngine {
             sub_conditions: active_setup.sub_conditions,
           };
         } else if (isRangeShortPullback) {
+          const eligSetup1 = this.isSetupEligibleForConditions("setup_1_pullback_retest", "SHORT");
+          if (!eligSetup1.eligible) {
+            return {
+              confirmed: false,
+              message: `Range SHORT Pullback Blocked: Setup 1 (Pullback & Retest) is prohibited in ${this.currentRegime} (${eligSetup1.reason}).`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
           if (ms.micro_trend_alignment_enabled !== false && !microTrendAligned) {
             return {
               confirmed: false,
@@ -7058,9 +7406,237 @@ class TradingEngine {
             swingLow: rangeLow
           };
         } else {
+          // --- Check Ranging / Mean Reversion Setups Permitted in RANGE_BOUND Regime ---
+          // 1. Setup 3: Liquidity Sweep Reversal
+          const eligSetup3 = this.isSetupEligibleForConditions("setup_3_liquidity_sweep", "SHORT");
+          if (eligSetup3.eligible) {
+            const sweepResult = this.detectLiquiditySweep("SHORT");
+            if (sweepResult.isSweep) {
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_3_liquidity_sweep",
+                setupName: "Setup 3: Liquidity Sweep Reversal",
+                isValid: true,
+                direction: "SHORT",
+                entryPrice: currentPrice,
+                stopLoss: sweepResult.stopLoss,
+                takeProfit: sweepResult.takeProfit,
+                description: `[Setup 3 - Range Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`,
+                sub_conditions: [
+                  { name: "Liquidity Sweep Level Breach", status: "PASS", reason: `Liquidity sweep confirmed at level $${sweepResult.sweptLevel.toFixed(2)}` },
+                  { name: "Reclaim Wick Reversal", status: "PASS", reason: `Reclaimed with ${sweepResult.wickRatio.toFixed(0)}% rejection wick` },
+                  { name: "Sweep Volume Expansion", status: "PASS", reason: `Confirmed volume expansion (${sweepResult.volumeMult.toFixed(1)}x)` },
+                  { name: "Dynamic Invalidation Boundary", status: "PASS", reason: `Reclamation intact (SL: $${sweepResult.stopLoss.toFixed(2)}, TP: $${sweepResult.takeProfit.toFixed(2)})` },
+                ],
+                metrics: {
+                  sweptLevel: sweepResult.sweptLevel,
+                  wickRatio: sweepResult.wickRatio,
+                  volumeMult: sweepResult.volumeMult,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
+          // 2. Setup 11: EQH / EQL Double Touch Rejection
+          const eligSetup11 = this.isSetupEligibleForConditions("setup_11_eqh_eql_double_touch", "SHORT");
+          if (eligSetup11.eligible) {
+            const eqhEqlResult = this.evaluateEqhEqlDoubleTouchSetup("SHORT");
+            if (eqhEqlResult.isValid) {
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_11_eqh_eql_double_touch",
+                setupName: "Setup 11: EQH/EQL Double Touch Rejection",
+                isValid: true,
+                direction: "SHORT",
+                entryPrice: currentPrice,
+                stopLoss: eqhEqlResult.stopLoss,
+                takeProfit: eqhEqlResult.takeProfit,
+                description: `[Setup 11 - Range EQH Double Touch Rejection Confirmed]: ${eqhEqlResult.description}`,
+                sub_conditions: [
+                  { name: "Equal Highs Level Proximity", status: "PASS", reason: `Equal Highs (EQH) level at $${eqhEqlResult.levelPrice.toFixed(2)}` },
+                  { name: "2nd Touch Rejection Wick", status: "PASS", reason: "2nd touch rejection wick confirmed" },
+                  { name: "Volume Decay & Divergence", status: "PASS", reason: "Volume decay & divergence valid" },
+                  { name: "Dynamic Invalidation Ceiling", status: "PASS", reason: `SL at $${eqhEqlResult.stopLoss.toFixed(2)} | TP at $${eqhEqlResult.takeProfit.toFixed(2)}` },
+                ],
+                metrics: {
+                  levelPrice: eqhEqlResult.levelPrice,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
+          // 3. Setup 10: VWAP Outer Band Rejection
+          const eligSetup10 = this.isSetupEligibleForConditions("setup_10_vwap_band_rejection", "SHORT");
+          if (eligSetup10.eligible) {
+            const vwapBandResult = this.evaluateVwapBandRejectionSetup("SHORT");
+            if (vwapBandResult.isValid) {
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_10_vwap_band_rejection",
+                setupName: "Setup 10: VWAP Band Rejection",
+                isValid: true,
+                direction: "SHORT",
+                entryPrice: currentPrice,
+                stopLoss: vwapBandResult.stopLoss,
+                takeProfit: vwapBandResult.takeProfit,
+                description: `[Setup 10 - Range VWAP Band Rejection Confirmed]: ${vwapBandResult.description}`,
+                sub_conditions: [
+                  { name: "VWAP Upper Band Extension", status: "PASS", reason: `VWAP Upper Band rejection at $${vwapBandResult.bandPrice.toFixed(2)}` },
+                  { name: "Reversal Rejection Candlestick", status: "PASS", reason: "Reversal rejection candle confirmed off band" },
+                  { name: "Band Rejection Volume", status: "PASS", reason: "Band rejection volume valid" },
+                  { name: "Dynamic Invalidation to Basis", status: "PASS", reason: `SL at $${vwapBandResult.stopLoss.toFixed(2)} | TP at $${vwapBandResult.takeProfit.toFixed(2)}` },
+                ],
+                metrics: {
+                  bandPrice: vwapBandResult.bandPrice,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
+          // 4. Setup 12: CVD Absorption & Delta Divergence
+          const eligSetup12 = this.isSetupEligibleForConditions("setup_12_cvd_absorption", "SHORT");
+          if (eligSetup12.eligible) {
+            const cvdAbsorptionResult = this.evaluateCvdAbsorptionDivergenceSetup("SHORT");
+            if (cvdAbsorptionResult.isValid) {
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_12_cvd_absorption",
+                setupName: "Setup 12: CVD Absorption & Delta Divergence",
+                isValid: true,
+                direction: "SHORT",
+                entryPrice: currentPrice,
+                stopLoss: cvdAbsorptionResult.stopLoss,
+                takeProfit: cvdAbsorptionResult.takeProfit,
+                description: `[Setup 12 - Range CVD Absorption Confirmed]: ${cvdAbsorptionResult.description}`,
+                sub_conditions: [
+                  { name: "Structural Extreme Location", status: "PASS", reason: `Structural extreme absorption at $${cvdAbsorptionResult.extremePrice.toFixed(2)}` },
+                  { name: "Absorption Rejection Wick", status: "PASS", reason: `Absorption rejection wick confirmed (${cvdAbsorptionResult.rejectionWickPct.toFixed(0)}%)` },
+                  { name: "Order Flow Delta Absorption", status: "PASS", reason: `Delta imbalance & absorption validated (Taker Buy Ratio: ${(cvdAbsorptionResult.takerBuyRatio * 100).toFixed(1)}%)` },
+                  { name: "Dynamic Invalidation Ceiling", status: "PASS", reason: `SL at $${cvdAbsorptionResult.stopLoss.toFixed(2)} | TP at $${cvdAbsorptionResult.takeProfit.toFixed(2)}` },
+                ],
+                metrics: {
+                  extremePrice: cvdAbsorptionResult.extremePrice,
+                  rejectionWickPct: cvdAbsorptionResult.rejectionWickPct,
+                  takerBuyRatio: cvdAbsorptionResult.takerBuyRatio,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
+          // 5. Setup 13: OI Flush & Cascade Fade
+          const eligSetup13 = this.isSetupEligibleForConditions("setup_13_oi_flush_cascade", "SHORT");
+          if (eligSetup13.eligible) {
+            const oiFlushResult = this.evaluateOiFlushCascadeFadeSetup("SHORT");
+            if (oiFlushResult.isValid) {
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_13_oi_flush_cascade",
+                setupName: "Setup 13: OI Flush & Cascade Fade",
+                isValid: true,
+                direction: "SHORT",
+                entryPrice: currentPrice,
+                stopLoss: oiFlushResult.stopLoss,
+                takeProfit: oiFlushResult.takeProfit,
+                description: `[Setup 13 - Range OI Flush & Cascade Fade Confirmed]: ${oiFlushResult.description}`,
+                sub_conditions: [
+                  { name: "Liquidation Cascade Extreme", status: "PASS", reason: `Liquidation cascade extreme at $${oiFlushResult.flushExtreme.toFixed(2)}` },
+                  { name: "Exhaustion Reversal Wick", status: "PASS", reason: `Exhaustion wick confirmed (${oiFlushResult.reversalWickPct.toFixed(0)}%)` },
+                  { name: "Volume Surge & OI Contraction", status: "PASS", reason: `Volume surge (${oiFlushResult.volumeMult.toFixed(1)}x) & OI drop (${oiFlushResult.oiContractionPct.toFixed(1)}%) validated` },
+                  { name: "Strict Dynamic Invalidation", status: "PASS", reason: `Strict SL at $${oiFlushResult.stopLoss.toFixed(2)} | TP at $${oiFlushResult.takeProfit.toFixed(2)}` },
+                ],
+                metrics: {
+                  flushExtreme: oiFlushResult.flushExtreme,
+                  reversalWickPct: oiFlushResult.reversalWickPct,
+                  volumeMult: oiFlushResult.volumeMult,
+                  oiContractionPct: oiFlushResult.oiContractionPct,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
+          // 6. Setup 4: Fair Value Gap Retest
+          const eligSetup4 = this.isSetupEligibleForConditions("setup_4_fvg_retest", "SHORT");
+          if (eligSetup4.eligible) {
+            const fvgResult = this.evaluateFairValueGapSetup("SHORT");
+            if (fvgResult.isValid) {
+              const fvgRiskReward = Math.abs(currentPrice - fvgResult.takeProfit) / Math.max(1, Math.abs(fvgResult.stopLoss - currentPrice));
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_4_fvg_retest",
+                setupName: "Setup 4: Fair Value Gap Retest",
+                isValid: true,
+                direction: "SHORT",
+                entryPrice: currentPrice,
+                stopLoss: fvgResult.stopLoss,
+                takeProfit: fvgResult.takeProfit,
+                riskReward: fvgRiskReward,
+                description: `[Setup 4 - Range FVG Retest Confirmed]: ${fvgResult.description}`,
+                sub_conditions: [
+                  { name: "FVG Mitigation Level", status: "PASS", reason: `FVG mitigation zone at $${((fvgResult as any).fvgMitigationPrice ?? fvgResult.consequentEncroachment).toFixed(2)}` },
+                  { name: "Mitigation Rejection Reaction", status: "PASS", reason: `Rejection reaction confirmed (${(fvgResult as any).rejectionType ?? "Reversal Pattern"})` },
+                  { name: "Mitigation Retrace Volume", status: "PASS", reason: "FVG mitigation retrace on healthy volume" },
+                  { name: "Dynamic Invalidation Ceiling", status: "PASS", reason: `SL at $${fvgResult.stopLoss.toFixed(2)} | TP at $${fvgResult.takeProfit.toFixed(2)}` },
+                ],
+                metrics: {
+                  fvgMitigationPrice: (fvgResult as any).fvgMitigationPrice ?? fvgResult.consequentEncroachment,
+                  rejectionType: (fvgResult as any).rejectionType ?? "Reversal Pattern",
+                  riskReward: fvgRiskReward,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
           return {
             confirmed: false,
-            message: `Range-bound Reversal Filter: Price ($${currentPrice.toFixed(2)}) is inside the range [$${rangeLow.toFixed(2)} - $${rangeHigh.toFixed(2)}] without a valid reversal, breakdown, or pullback.`,
+            message: `Range-bound Reversal Filter: Price ($${currentPrice.toFixed(2)}) is inside the range [$${rangeLow.toFixed(2)} - $${rangeHigh.toFixed(2)}] without a valid reversal, breakdown, or tactical setup.`,
             swingHigh: rangeHigh,
             swingLow: rangeLow
           };
@@ -8245,7 +8821,7 @@ class TradingEngine {
       max_adverse_atr_pct: 0,
       hold_duration_seconds: 0,
       is_win: null,
-      setup_triggered: triggeredSetup || "Setup 1: Pullback & Retest",
+      setup_triggered: triggeredSetup || "Market Structure Validated",
       order_execution: defaultExec,
       slippage_usdt: totalSlippageUsdt,
       feature_snapshot: {
@@ -8258,7 +8834,7 @@ class TradingEngine {
         inverted_from_signal: isInverted ? direction : undefined,
         adx_quick_scalp: isQuickScalpActive,
         structural_sl_applied: structuralSlDistance > stopLossDistance,
-        setup_triggered: triggeredSetup || "Setup 1: Pullback & Retest",
+        setup_triggered: triggeredSetup || "Market Structure Validated",
         order_execution: defaultExec,
         slippage_usdt: totalSlippageUsdt,
         ofi_score: this.orderFlowStats.ofiScore,

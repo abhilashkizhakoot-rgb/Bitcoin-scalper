@@ -4216,11 +4216,14 @@ class TradingEngine {
           { name: "Mitigation Rejection Reaction", status: "PASS", reason: `Rejection reaction confirmed (${(fvgResult as any).rejectionType ?? "Reversal Pattern"})` },
           { name: "Mitigation Retrace Volume", status: "PASS", reason: "FVG mitigation retrace on healthy volume" },
           { name: "Dynamic Invalidation Floor/Ceiling", status: "PASS", reason: `SL at $${fvgResult.stopLoss.toFixed(2)} | TP at $${fvgResult.takeProfit.toFixed(2)}` },
+          { name: "200 EMA Extension Guard", status: "PASS", reason: (fvgResult as any).ema200DistanceAtr !== undefined ? `200 EMA at $${(fvgResult as any).ema200Price?.toFixed(2)} (${(fvgResult as any).ema200DistanceAtr.toFixed(2)}x ATR stretch within limit)` : "200 EMA extension valid" },
         ],
         metrics: {
           fvgMitigationPrice: (fvgResult as any).fvgMitigationPrice ?? fvgResult.consequentEncroachment,
           rejectionType: (fvgResult as any).rejectionType ?? "Reversal Pattern",
           riskReward: fvgRiskReward,
+          ema200Price: (fvgResult as any).ema200Price,
+          ema200DistanceAtr: (fvgResult as any).ema200DistanceAtr,
         }
       };
 
@@ -7225,11 +7228,14 @@ class TradingEngine {
                   { name: "Mitigation Rejection Reaction", status: "PASS", reason: `Rejection reaction confirmed (${(fvgResult as any).rejectionType ?? "Reversal Pattern"})` },
                   { name: "Mitigation Retrace Volume", status: "PASS", reason: "FVG mitigation retrace on healthy volume" },
                   { name: "Dynamic Invalidation Floor", status: "PASS", reason: `SL at $${fvgResult.stopLoss.toFixed(2)} | TP at $${fvgResult.takeProfit.toFixed(2)}` },
+                  { name: "200 EMA Extension Guard", status: "PASS", reason: (fvgResult as any).ema200DistanceAtr !== undefined ? `200 EMA at $${(fvgResult as any).ema200Price?.toFixed(2)} (${(fvgResult as any).ema200DistanceAtr.toFixed(2)}x ATR stretch within limit)` : "200 EMA extension valid" },
                 ],
                 metrics: {
                   fvgMitigationPrice: (fvgResult as any).fvgMitigationPrice ?? fvgResult.consequentEncroachment,
                   rejectionType: (fvgResult as any).rejectionType ?? "Reversal Pattern",
                   riskReward: fvgRiskReward,
+                  ema200Price: (fvgResult as any).ema200Price,
+                  ema200DistanceAtr: (fvgResult as any).ema200DistanceAtr,
                 }
               };
               return {
@@ -7627,11 +7633,14 @@ class TradingEngine {
                   { name: "Mitigation Rejection Reaction", status: "PASS", reason: `Rejection reaction confirmed (${(fvgResult as any).rejectionType ?? "Reversal Pattern"})` },
                   { name: "Mitigation Retrace Volume", status: "PASS", reason: "FVG mitigation retrace on healthy volume" },
                   { name: "Dynamic Invalidation Ceiling", status: "PASS", reason: `SL at $${fvgResult.stopLoss.toFixed(2)} | TP at $${fvgResult.takeProfit.toFixed(2)}` },
+                  { name: "200 EMA Extension Guard", status: "PASS", reason: (fvgResult as any).ema200DistanceAtr !== undefined ? `200 EMA at $${(fvgResult as any).ema200Price?.toFixed(2)} (${(fvgResult as any).ema200DistanceAtr.toFixed(2)}x ATR stretch within limit)` : "200 EMA extension valid" },
                 ],
                 metrics: {
                   fvgMitigationPrice: (fvgResult as any).fvgMitigationPrice ?? fvgResult.consequentEncroachment,
                   rejectionType: (fvgResult as any).rejectionType ?? "Reversal Pattern",
                   riskReward: fvgRiskReward,
+                  ema200Price: (fvgResult as any).ema200Price,
+                  ema200DistanceAtr: (fvgResult as any).ema200DistanceAtr,
                 }
               };
               return {

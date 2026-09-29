@@ -13,6 +13,9 @@ export interface FairValueGapResult {
   stopLoss: number;
   takeProfit: number;
   description: string;
+  ema200Price?: number;
+  ema200DistanceAtr?: number;
+  ema200SlopeAngle?: number;
 }
 
 /**
@@ -22,6 +25,7 @@ export interface FairValueGapResult {
  * 2. Consequent Encroachment (50% CE) Invalidation Rule (no candle body closes past 50% CE)
  * 3. Two-Step Tap & Rejection Confirmation (reversal close or >= 35% wick rejection)
  * 4. Micro-Trend & Anti-Knife-Catching Guard (EMA 50 / VWAP alignment and cascade rejection check)
+ * 5. 200 EMA Macro Overextension & Proximity Guard (prevents buying/selling at extreme mean-reversion stretch or directly into adverse 200 EMA)
  */
 export function evaluateFairValueGapSetup(
   direction: "LONG" | "SHORT" | "NEUTRAL",
@@ -76,6 +80,10 @@ export function evaluateFairValueGapSetup(
   const minBodyRatio = ms.fvg_min_body_ratio !== undefined ? ms.fvg_min_body_ratio : 0.60;
   const ceInvalidationRule = ms.fvg_ce_invalidation_rule !== false;
   const trendFilterEnabled = ms.fvg_trend_filter_enabled !== false;
+  const respectEma200Overextension = ms.fvg_respect_ema200_overextension !== false;
+  const maxEma200ExtensionAtr = ms.fvg_max_ema200_extension_atr !== undefined ? ms.fvg_max_ema200_extension_atr : 2.5;
+  const ema200ProximityBlock = ms.fvg_ema200_proximity_block !== false;
+  const slowEmaPeriod = ms.slow_ema_period || 200;
 
   // Moving average volume calculation (20 periods)
   const volumes = candles1m.map((c) => c.volume);
@@ -88,6 +96,39 @@ export function evaluateFairValueGapSetup(
   const currentEma50 = ema50Series[lastIdx] || currentPrice;
   indicators.calculateVWAP(candles1m);
   const currentVwap = currentCandle.vwap !== undefined ? currentCandle.vwap : currentPrice;
+
+  // 200 EMA Macro Mean and Extension Calculation
+  const ema200Series = indicators.calculateEMA(closes, Math.min(closes.length, slowEmaPeriod));
+  const currentEma200 = ema200Series[lastIdx] || currentPrice;
+  const distFromEma200 = currentPrice - currentEma200;
+  const distFromEma200Atr = currentAtr > 0 ? Math.abs(distFromEma200) / currentAtr : 0;
+
+  // Calculate 200 EMA Angle / Slope
+  const slopeLookback = Math.min(20, ema200Series.length);
+  let rawSlope200 = 0;
+  if (slopeLookback >= 5) {
+    let sumX = 0;
+    let sumY = 0;
+    let sumXY = 0;
+    let sumXX = 0;
+    const startIndex = ema200Series.length - slopeLookback;
+    for (let k = 0; k < slopeLookback; k++) {
+      const x = k;
+      const y = ema200Series[startIndex + k];
+      sumX += x;
+      sumY += y;
+      sumXY += x * y;
+      sumXX += x * x;
+    }
+    const denom = slopeLookback * sumXX - sumX * sumX;
+    if (Math.abs(denom) > 1e-8) {
+      rawSlope200 = (slopeLookback * sumXY - sumX * sumY) / denom;
+    }
+  } else if (ema200Series.length > 1) {
+    rawSlope200 = (ema200Series[ema200Series.length - 1] - ema200Series[0]) / ema200Series.length;
+  }
+  const normalizedSlope200 = currentAtr > 0 ? (rawSlope200 / currentAtr) * 100 : 0;
+  const ema200Angle = Math.atan(normalizedSlope200 / 10) * (180 / Math.PI);
 
   // Micro-Trend Guard: Block counter-trend scalp attempts during strong opposing momentum
   if (trendFilterEnabled) {
@@ -104,6 +145,9 @@ export function evaluateFairValueGapSetup(
           gapSizeAtr: 0,
           stopLoss: 0,
           takeProfit: 0,
+          ema200Price: currentEma200,
+          ema200DistanceAtr: distFromEma200Atr,
+          ema200SlopeAngle: ema200Angle,
           description: "Bullish FVG blocked: strong downtrend regime active (anti-knife-catching filter).",
         };
       }
@@ -120,6 +164,9 @@ export function evaluateFairValueGapSetup(
           gapSizeAtr: 0,
           stopLoss: 0,
           takeProfit: 0,
+          ema200Price: currentEma200,
+          ema200DistanceAtr: distFromEma200Atr,
+          ema200SlopeAngle: ema200Angle,
           description: "Bullish FVG blocked: price too deeply depressed below EMA50 & VWAP.",
         };
       }
@@ -136,6 +183,9 @@ export function evaluateFairValueGapSetup(
           gapSizeAtr: 0,
           stopLoss: 0,
           takeProfit: 0,
+          ema200Price: currentEma200,
+          ema200DistanceAtr: distFromEma200Atr,
+          ema200SlopeAngle: ema200Angle,
           description: "Bearish FVG blocked: strong uptrend regime active (anti-knife-catching filter).",
         };
       }
@@ -152,7 +202,136 @@ export function evaluateFairValueGapSetup(
           gapSizeAtr: 0,
           stopLoss: 0,
           takeProfit: 0,
+          ema200Price: currentEma200,
+          ema200DistanceAtr: distFromEma200Atr,
+          ema200SlopeAngle: ema200Angle,
           description: "Bearish FVG blocked: price too far elevated above EMA50 & VWAP.",
+        };
+      }
+    }
+  }
+
+  // 200 EMA Overextension Guard: Prevent chasing FVG retests at macro exhaustion extremes
+  if (respectEma200Overextension) {
+    if (direction === "LONG") {
+      // Long: Block if price is stretched excessively ABOVE 200 EMA
+      if (distFromEma200 > maxEma200ExtensionAtr * currentAtr) {
+        return {
+          isValid: false,
+          direction,
+          fvgTop: 0,
+          fvgBottom: 0,
+          consequentEncroachment: 0,
+          fvgMitigationPrice: 0,
+          rejectionType: "",
+          gapSizeAtr: 0,
+          stopLoss: 0,
+          takeProfit: 0,
+          ema200Price: currentEma200,
+          ema200DistanceAtr: distFromEma200Atr,
+          ema200SlopeAngle: ema200Angle,
+          description: `Bullish FVG blocked: price overextended +$${distFromEma200.toFixed(1)} (${distFromEma200Atr.toFixed(2)}x ATR) above 200 EMA ($${currentEma200.toFixed(2)}) exceeding max ${maxEma200ExtensionAtr.toFixed(1)}x ATR ceiling.`,
+        };
+      }
+    } else if (direction === "SHORT") {
+      // Short: Block if price is stretched excessively BELOW 200 EMA
+      if (-distFromEma200 > maxEma200ExtensionAtr * currentAtr) {
+        return {
+          isValid: false,
+          direction,
+          fvgTop: 0,
+          fvgBottom: 0,
+          consequentEncroachment: 0,
+          fvgMitigationPrice: 0,
+          rejectionType: "",
+          gapSizeAtr: 0,
+          stopLoss: 0,
+          takeProfit: 0,
+          ema200Price: currentEma200,
+          ema200DistanceAtr: distFromEma200Atr,
+          ema200SlopeAngle: ema200Angle,
+          description: `Bearish FVG blocked: price overextended -$${(-distFromEma200).toFixed(1)} (${distFromEma200Atr.toFixed(2)}x ATR) below 200 EMA ($${currentEma200.toFixed(2)}) exceeding max ${maxEma200ExtensionAtr.toFixed(1)}x ATR floor.`,
+        };
+      }
+    }
+  }
+
+  // 200 EMA Adverse Barrier Proximity Guard: Prevent taking trades directly into an adverse 200 EMA ceiling/floor
+  if (ema200ProximityBlock) {
+    if (direction === "LONG") {
+      const distToOverhead = currentEma200 - currentPrice;
+      if (distToOverhead > 0 && distToOverhead < 1.2 * currentAtr) {
+        return {
+          isValid: false,
+          direction,
+          fvgTop: 0,
+          fvgBottom: 0,
+          consequentEncroachment: 0,
+          fvgMitigationPrice: 0,
+          rejectionType: "",
+          gapSizeAtr: 0,
+          stopLoss: 0,
+          takeProfit: 0,
+          ema200Price: currentEma200,
+          ema200DistanceAtr: distFromEma200Atr,
+          ema200SlopeAngle: ema200Angle,
+          description: `Bullish FVG blocked: 200 EMA ($${currentEma200.toFixed(2)}) is immediate overhead resistance ($${distToOverhead.toFixed(1)} away, < 1.2x ATR).`,
+        };
+      }
+      if (currentPrice < currentEma200 && ema200Angle < -15) {
+        return {
+          isValid: false,
+          direction,
+          fvgTop: 0,
+          fvgBottom: 0,
+          consequentEncroachment: 0,
+          fvgMitigationPrice: 0,
+          rejectionType: "",
+          gapSizeAtr: 0,
+          stopLoss: 0,
+          takeProfit: 0,
+          ema200Price: currentEma200,
+          ema200DistanceAtr: distFromEma200Atr,
+          ema200SlopeAngle: ema200Angle,
+          description: `Bullish FVG blocked: 200 EMA is downward-sloping (Angle: ${ema200Angle.toFixed(1)} deg) presenting high overhead rejection risk.`,
+        };
+      }
+    } else if (direction === "SHORT") {
+      const distToFloor = currentPrice - currentEma200;
+      if (distToFloor > 0 && distToFloor < 1.2 * currentAtr) {
+        return {
+          isValid: false,
+          direction,
+          fvgTop: 0,
+          fvgBottom: 0,
+          consequentEncroachment: 0,
+          fvgMitigationPrice: 0,
+          rejectionType: "",
+          gapSizeAtr: 0,
+          stopLoss: 0,
+          takeProfit: 0,
+          ema200Price: currentEma200,
+          ema200DistanceAtr: distFromEma200Atr,
+          ema200SlopeAngle: ema200Angle,
+          description: `Bearish FVG blocked: 200 EMA ($${currentEma200.toFixed(2)}) is immediate dynamic support ($${distToFloor.toFixed(1)} away, < 1.2x ATR).`,
+        };
+      }
+      if (currentPrice > currentEma200 && ema200Angle > 15) {
+        return {
+          isValid: false,
+          direction,
+          fvgTop: 0,
+          fvgBottom: 0,
+          consequentEncroachment: 0,
+          fvgMitigationPrice: 0,
+          rejectionType: "",
+          gapSizeAtr: 0,
+          stopLoss: 0,
+          takeProfit: 0,
+          ema200Price: currentEma200,
+          ema200DistanceAtr: distFromEma200Atr,
+          ema200SlopeAngle: ema200Angle,
+          description: `Bearish FVG blocked: 200 EMA is upward-sloping (Angle: ${ema200Angle.toFixed(1)} deg) presenting high dynamic support bounce risk.`,
         };
       }
     }
@@ -285,6 +464,9 @@ export function evaluateFairValueGapSetup(
         gapSizeAtr: gapSize / currentAtr,
         stopLoss,
         takeProfit,
+        ema200Price: currentEma200,
+        ema200DistanceAtr: distFromEma200Atr,
+        ema200SlopeAngle: ema200Angle,
         description: `Bullish FVG [$${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}] (CE: $${ce.toFixed(2)}) mitigated & defended with ${lowerWickRatio >= 0.35 ? (lowerWickRatio * 100).toFixed(0) + '% wick rejection' : 'green reversal close'}.`,
       };
     }
@@ -412,6 +594,9 @@ export function evaluateFairValueGapSetup(
         gapSizeAtr: gapSize / currentAtr,
         stopLoss,
         takeProfit,
+        ema200Price: currentEma200,
+        ema200DistanceAtr: distFromEma200Atr,
+        ema200SlopeAngle: ema200Angle,
         description: `Bearish FVG [$${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}] (CE: $${ce.toFixed(2)}) mitigated & defended with ${upperWickRatio >= 0.35 ? (upperWickRatio * 100).toFixed(0) + '% wick rejection' : 'red reversal close'}.`,
       };
     }
@@ -428,6 +613,9 @@ export function evaluateFairValueGapSetup(
     gapSizeAtr: 0,
     stopLoss: 0,
     takeProfit: 0,
+    ema200Price: currentEma200,
+    ema200DistanceAtr: distFromEma200Atr,
+    ema200SlopeAngle: ema200Angle,
     description: "No active unmitigated Fair Value Gap (FVG) retest setup detected.",
   };
 }

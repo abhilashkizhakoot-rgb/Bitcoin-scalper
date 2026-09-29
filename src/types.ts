@@ -371,6 +371,9 @@ export interface StrategyConfig {
     fvg_min_body_ratio?: number; // Minimum body-to-range ratio on displacement candle to avoid indecision gaps (default: 0.60)
     fvg_ce_invalidation_rule?: boolean; // Invalidate FVG if candle body closes past 50% Consequent Encroachment (default: true)
     fvg_trend_filter_enabled?: boolean; // Enforce micro-trend & EMA50/VWAP alignment to avoid knife-catching (default: true)
+    fvg_respect_ema200_overextension?: boolean; // Respect 200 EMA overextension filter to avoid trading into macro exhaustion (default: true)
+    fvg_max_ema200_extension_atr?: number; // Maximum allowed ATR extension from 200 EMA before FVG is blocked (default: 2.5)
+    fvg_ema200_proximity_block?: boolean; // Block FVG entry if 200 EMA is an immediate adverse barrier in trade path (default: true)
     choch_confirmation_enabled?: boolean; // Require Change of Character (CHoCH) post-sweep confirmation
     eqh_eql_detection_enabled?: boolean; // Enable Equal Highs / Equal Lows Liquidity Pool Detector
     eqh_eql_tolerance_pct?: number; // Tolerance % for EQH/EQL touches (default 0.08%)

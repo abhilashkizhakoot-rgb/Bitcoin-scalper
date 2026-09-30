@@ -415,6 +415,22 @@ export interface StrategyConfig {
     fresh_momentum_respect_ema200_overextension?: boolean; // Respect 200 EMA overextension filter to avoid entering into macro exhaustion (default: true)
     fresh_momentum_max_ema200_extension_atr?: number; // Maximum allowed ATR extension from 200 EMA before Fresh Momentum is blocked (default: 2.5)
     fresh_momentum_ema200_proximity_block?: boolean; // Block Fresh Momentum entry if 200 EMA sits as an immediate adverse barrier in trade path (default: true)
+    // Setup 15: Dynamic Trendline Bounce & Retest Strategy (Pro Trading School Pullback Framework)
+    trendline_bounce_strategy_enabled?: boolean; // Enable Dynamic Trendline Bounce & Retest Strategy (Setup 15) (default: true)
+    trendline_bounce_min_touches?: number; // Minimum confirmed touches to validate trendline (default: 2)
+    trendline_bounce_require_3rd_touch?: boolean; // Prioritize or enforce 3rd touch golden confirmation (Rule of 3 Touches) (default: false)
+    trendline_bounce_min_slope_angle?: number; // Minimum trendline angle in degrees to avoid flat ranges (default: 15)
+    trendline_bounce_max_slope_angle?: number; // Maximum trendline angle in degrees to filter unsustainable parabolic moves (default: 60)
+    trendline_bounce_max_penetration_atr?: number; // Max candle body penetration of trendline in ATR multiples (default: 0.25)
+    trendline_bounce_allow_liquidity_sweep?: boolean; // Allow wick liquidity sweep beyond trendline if reclaimed inside (default: true)
+    trendline_bounce_max_sweep_atr?: number; // Maximum permitted wick sweep depth in ATR multiples (default: 0.85)
+    trendline_bounce_fib_confluence_enabled?: boolean; // Enable Fibonacci 50%-61.8% Golden Pocket confluence check (default: true)
+    trendline_bounce_horizontal_sr_confluence_enabled?: boolean; // Enable horizontal swing S/R confluence check (default: true)
+    trendline_bounce_require_volume_contraction?: boolean; // Require contracting volume during pullback to trendline (default: true)
+    trendline_bounce_require_candlestick_reversal?: boolean; // Require reversal candlestick confirmation on trendline test (default: true)
+    trendline_bounce_require_bounce_volume_expansion?: boolean; // Require volume expansion or positive delta on the bounce rejection candle (default: false)
+    trendline_bounce_require_micro_breakout?: boolean; // Require break of short-term counter-trendline for entry timing (default: false)
+    trendline_bounce_confluence_boost_enabled?: boolean; // Enable confidence boost when trendline aligns with horizontal S/R, Fib, or major EMA (default: true)
     // Dynamic Market Condition & Regime Gating Matrix
     dynamic_regime_setup_matrix_enabled?: boolean; // Dynamically enable/disable setups based on active Market Regime (default: true)
     setup_regime_matrix?: Record<string, MarketRegime[]>; // Map of setupId -> allowed MarketRegime[]
@@ -553,7 +569,8 @@ export type SetupId =
   | "setup_11_eqh_eql_double_touch"
   | "setup_12_cvd_absorption"
   | "setup_13_oi_flush_cascade"
-  | "setup_14_fresh_momentum_impulse";
+  | "setup_14_fresh_momentum_impulse"
+  | "setup_15_trendline_bounce";
 
 export interface TradingSetupResult {
   setupId: SetupId;

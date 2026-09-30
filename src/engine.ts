@@ -49,6 +49,8 @@ import {
   evaluateCvdAbsorptionSetup as evaluateCvdAbsorptionSetupFn,
   evaluateOiFlushCascadeFadeSetup as evaluateOiFlushCascadeFadeSetupFn,
   evaluateFreshMomentumImpulseSetup as evaluateFreshMomentumImpulseSetupFn,
+  evaluateTrendlineBounceSetup as evaluateTrendlineBounceSetupFn,
+  TrendlineBounceResult,
 } from "./engine/setups/index.js";
 import { evaluateContextAwareVolume as evaluateContextAwareVolumeFn } from "./engine/volume.js";
 
@@ -1670,12 +1672,16 @@ class TradingEngine {
       const oiFlushShort = this.evaluateOiFlushCascadeFadeSetup("SHORT");
       const freshMomentumLong = this.evaluateFreshMomentumImpulseSetup("LONG");
       const freshMomentumShort = this.evaluateFreshMomentumImpulseSetup("SHORT");
+      const trendlineBounceLong = this.evaluateTrendlineBounceSetup("LONG");
+      const trendlineBounceShort = this.evaluateTrendlineBounceSetup("SHORT");
 
       const exhaustionLong = this.evaluateExhaustionReversalCondition("LONG", currentPrice, closes, lastIdx);
       const exhaustionShort = this.evaluateExhaustionReversalCondition("SHORT", currentPrice, closes, lastIdx);
 
       const eligFreshLong = this.isSetupEligibleForConditions("setup_14_fresh_momentum_impulse", "LONG");
       const eligFreshShort = this.isSetupEligibleForConditions("setup_14_fresh_momentum_impulse", "SHORT");
+      const eligTrendlineLong = this.isSetupEligibleForConditions("setup_15_trendline_bounce", "LONG");
+      const eligTrendlineShort = this.isSetupEligibleForConditions("setup_15_trendline_bounce", "SHORT");
       const eligFvgLong = this.isSetupEligibleForConditions("setup_4_fvg_retest", "LONG");
       const eligFvgShort = this.isSetupEligibleForConditions("setup_4_fvg_retest", "SHORT");
       const eligOiLong = this.isSetupEligibleForConditions("setup_13_oi_flush_cascade", "LONG");
@@ -1702,6 +1708,7 @@ class TradingEngine {
       } else if (eligFreshLong.eligible && isRangeLongBreakout) {
         signalDirection = "LONG";
       } else if (
+        (eligTrendlineLong.eligible && trendlineBounceLong.isValid) ||
         (eligFvgLong.eligible && fvgLong.isValid) ||
         (eligOiLong.eligible && oiFlushLong.isValid) ||
         (eligCvdLong.eligible && cvdAbsorptionLong.isValid) ||
@@ -1712,6 +1719,7 @@ class TradingEngine {
       ) {
         signalDirection = "LONG";
       } else if (
+        (eligTrendlineShort.eligible && trendlineBounceShort.isValid) ||
         (eligFvgShort.eligible && fvgShort.isValid) ||
         (eligOiShort.eligible && oiFlushShort.isValid) ||
         (eligCvdShort.eligible && cvdAbsorptionShort.isValid) ||
@@ -1925,10 +1933,15 @@ class TradingEngine {
       (signalDirection === "LONG" && this.evaluateFreshMomentumImpulseSetup("LONG").isValid) ||
       (signalDirection === "SHORT" && this.evaluateFreshMomentumImpulseSetup("SHORT").isValid)
     );
+    const eligTrendlineDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_15_trendline_bounce", signalDirection).eligible;
+    const smcTrendlineActive = eligTrendlineDir && (
+      (signalDirection === "LONG" && this.evaluateTrendlineBounceSetup("LONG").isValid) ||
+      (signalDirection === "SHORT" && this.evaluateTrendlineBounceSetup("SHORT").isValid)
+    );
     const eligSweepDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_3_liquidity_sweep", signalDirection).eligible;
     const eligFailedAuctionDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_9_range_failed_auction", signalDirection).eligible;
-    const isSmcActive = (signalDirection === "LONG" && ((eligSweepDir && this.detectLiquiditySweep("LONG").isSweep) || (eligFailedAuctionDir && this.evaluateFailedAuctionSetup("LONG").isValid) || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive)) ||
-                        (signalDirection === "SHORT" && ((eligSweepDir && this.detectLiquiditySweep("SHORT").isSweep) || (eligFailedAuctionDir && this.evaluateFailedAuctionSetup("SHORT").isValid) || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive));
+    const isSmcActive = (signalDirection === "LONG" && ((eligSweepDir && this.detectLiquiditySweep("LONG").isSweep) || (eligFailedAuctionDir && this.evaluateFailedAuctionSetup("LONG").isValid) || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive || smcTrendlineActive)) ||
+                        (signalDirection === "SHORT" && ((eligSweepDir && this.detectLiquiditySweep("SHORT").isSweep) || (eligFailedAuctionDir && this.evaluateFailedAuctionSetup("SHORT").isValid) || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive || smcTrendlineActive));
 
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY && !isSmcActive) {
       const earlyConds: Checkpoint[] = [
@@ -3997,6 +4010,35 @@ class TradingEngine {
           description: eligSetup14.reason,
         };
 
+    // Trendline Bounce & Retest Check (Setup 15 - Pro Trading School Pullback Framework) with Dynamic Gating
+    const eligSetup15 = this.isSetupEligibleForConditions("setup_15_trendline_bounce", direction);
+    const trendlineBounceResult = eligSetup15.eligible
+      ? this.evaluateTrendlineBounceSetup(direction)
+      : {
+          isValid: false,
+          direction,
+          trendlinePrice: 0,
+          trendlineSlope: 0,
+          trendlineAngleDegrees: 0,
+          touchesCount: 0,
+          touchIndices: [],
+          isGoldenThirdTouch: false,
+          isLiquiditySweepReclaim: false,
+          liquiditySweepWickAtr: 0,
+          rejectionPattern: "",
+          volumeContractionRatio: 1.0,
+          bounceVolumeExpansionRatio: 1.0,
+          isConfluenceWithHorizontal: false,
+          isConfluenceWithFib: false,
+          isConfluenceWithEma: false,
+          confluenceFactors: [],
+          confluenceScore: 0,
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: eligSetup15.reason,
+        };
+
     // 2. Evaluate Multi-Timeframe (5m) Trend Alignment Up-Front
     const candles5m = this.aggregateCandles(this.candles1m, 5);
     const closes5m = candles5m.map(c => c.close);
@@ -4141,6 +4183,15 @@ class TradingEngine {
       condDict["Fresh Momentum Impulse (Setup 14)"] = { status: "FAIL", reason: freshMomentumResult.description };
     } else {
       condDict["Fresh Momentum Impulse (Setup 14)"] = { status: "SKIP", reason: freshMomentumResult.description || "No active fresh momentum impulse setup" };
+    }
+
+    // 13. Setup 15: Trendline Bounce & Retest (Pro Trading School Pullback Framework)
+    if (trendlineBounceResult.isValid) {
+      condDict["Trendline Bounce & Retest (Setup 15)"] = { status: "PASS", reason: trendlineBounceResult.description };
+    } else if (trendlineBounceResult.description && !trendlineBounceResult.description.includes("No active") && !trendlineBounceResult.description.includes("disabled") && !trendlineBounceResult.description.includes("Dynamically gated")) {
+      condDict["Trendline Bounce & Retest (Setup 15)"] = { status: "FAIL", reason: trendlineBounceResult.description };
+    } else {
+      condDict["Trendline Bounce & Retest (Setup 15)"] = { status: "SKIP", reason: trendlineBounceResult.description || "No active trendline bounce setup" };
     }
 
     // --- PRIORITY DISPATCH FOR SMC / SPECIALIZED SETUPS ---
@@ -4729,8 +4780,9 @@ class TradingEngine {
             { name: "Breakout Level Confirmation", status: "PASS", reason: `Breakout of $${breakoutLevel.toFixed(2)} confirmed` },
             { name: "Breakout Candle Body Ratio", status: "PASS", reason: `Body ratio ${(boBodyRatio * 100).toFixed(0)}% meets threshold` },
             { name: "Pullback Retest Zone Touch", status: "PASS", reason: isShallowConsolidationHolding ? "Shallow high-ADX consolidation held" : "Pullback touched retest zone" },
+            { name: "Structure Polarity Flip", status: "PASS", reason: `Prior resistance $${breakoutLevel.toFixed(2)} held cleanly as new support` },
             { name: "Reversal Candlestick Rejection", status: "PASS", reason: `Rejection pattern: ${longRejectionType}` },
-            { name: "Pullback Volume Health", status: "PASS", reason: pullbackVolDetails },
+            { name: "Pullback Volume Contraction", status: "PASS", reason: `Volume contracted on retest (${pullbackVolDetails})` },
             { name: "Dynamic Invalidation Floor", status: "PASS", reason: `Price stayed above retest floor $${reclaimThreshold.toFixed(2)}` },
             { name: "Chasing Lookback Limit", status: "PASS", reason: `Elapsed ${postBreakoutCandles.length} candles <= limit ${maxPostBreakoutCandles}` },
           ],
@@ -4766,6 +4818,49 @@ class TradingEngine {
           }
         };
         return getReturnObj(true, emaPushbackMessage, setupResult.setupName, setupResult, setupResult.sub_conditions);
+      } else if (trendlineBounceResult.isValid && !trendlineBounceResult.description.startsWith("Blocked")) {
+        const setupResult: TradingSetupResult = {
+          setupId: "setup_15_trendline_bounce",
+          setupName: "Setup 15: Trendline Bounce & Retest",
+          isValid: true,
+          direction: "LONG",
+          entryPrice: currentPrice,
+          stopLoss: trendlineBounceResult.stopLoss,
+          takeProfit: trendlineBounceResult.takeProfit,
+          riskReward: trendlineBounceResult.riskReward,
+          description: trendlineBounceResult.description,
+          sub_conditions: [
+            { name: "5m MTF Alignment", status: "PASS", reason: "5m trend aligned" },
+            { name: "Dynamic Trendline Structure", status: "PASS", reason: `Ascending trendline confirmed (${trendlineBounceResult.touchesCount} touches, angle: ${trendlineBounceResult.trendlineAngleDegrees}°, slope: +${trendlineBounceResult.trendlineSlope.toFixed(3)})` },
+            { name: "The 3 Touches Rule", status: "PASS", reason: trendlineBounceResult.isGoldenThirdTouch ? "Golden 3rd Touch (highest win-rate trendline setup)" : `Touch #${trendlineBounceResult.touchesCount} test` },
+            { name: "Trendline Zone Retest", status: "PASS", reason: `Price tested dynamic trendline at $${trendlineBounceResult.trendlinePrice.toFixed(2)}` },
+            { name: "Reversal Candlestick Rejection", status: "PASS", reason: `Rejection pattern: ${trendlineBounceResult.rejectionPattern}` },
+            { name: "Trendline Liquidity Sweep", status: trendlineBounceResult.isLiquiditySweepReclaim ? "PASS" : "SKIP", reason: trendlineBounceResult.isLiquiditySweepReclaim ? `Smart money liquidity sweep reclaim (-${trendlineBounceResult.liquiditySweepWickAtr}x ATR wick below line)` : "Clean bounce without sweep" },
+            { name: "Pullback Volume Contraction", status: "PASS", reason: `Pullback volume contracted to ${trendlineBounceResult.volumeContractionRatio.toFixed(2)}x SMA20 (seller exhaustion)` },
+            { name: "Multi-Factor Confluence", status: trendlineBounceResult.confluenceFactors.length > 0 ? "PASS" : "SKIP", reason: trendlineBounceResult.confluenceFactors.length > 0 ? `Active: ${trendlineBounceResult.confluenceFactors.join(" + ")} (Score: ${trendlineBounceResult.confluenceScore}/100)` : "Standard dynamic trendline alignment" },
+            { name: "Dynamic Invalidation Floor", status: "PASS", reason: `SL at $${trendlineBounceResult.stopLoss.toFixed(2)} | TP at $${trendlineBounceResult.takeProfit.toFixed(2)} (${trendlineBounceResult.riskReward.toFixed(1)}R)` },
+          ],
+          metrics: {
+            trendlinePrice: trendlineBounceResult.trendlinePrice,
+            trendlineSlope: trendlineBounceResult.trendlineSlope,
+            trendlineAngleDegrees: trendlineBounceResult.trendlineAngleDegrees,
+            touchesCount: trendlineBounceResult.touchesCount,
+            isGoldenThirdTouch: trendlineBounceResult.isGoldenThirdTouch,
+            isLiquiditySweepReclaim: trendlineBounceResult.isLiquiditySweepReclaim,
+            liquiditySweepWickAtr: trendlineBounceResult.liquiditySweepWickAtr,
+            volumeContractionRatio: trendlineBounceResult.volumeContractionRatio,
+            bounceVolumeExpansionRatio: trendlineBounceResult.bounceVolumeExpansionRatio,
+            rejectionPattern: trendlineBounceResult.rejectionPattern,
+            isConfluenceWithHorizontal: trendlineBounceResult.isConfluenceWithHorizontal,
+            isConfluenceWithFib: trendlineBounceResult.isConfluenceWithFib,
+            isConfluenceWithEma: trendlineBounceResult.isConfluenceWithEma,
+            confluenceFactors: trendlineBounceResult.confluenceFactors,
+            confluenceScore: trendlineBounceResult.confluenceScore,
+            confluenceLevel: trendlineBounceResult.confluenceLevel,
+            riskReward: trendlineBounceResult.riskReward,
+          }
+        };
+        return getReturnObj(true, trendlineBounceResult.description, setupResult.setupName, setupResult, setupResult.sub_conditions);
       } else {
         if (!isVolumeHealthyForPullback) {
           return getReturnObj(false, "Pullback volume is abnormally high (distribution risk); waiting for volume to dry up before confirming a safe entry.");
@@ -5147,8 +5242,9 @@ class TradingEngine {
             { name: "Breakout Level Confirmation", status: "PASS", reason: `Breakdown of $${breakoutLevel.toFixed(2)} confirmed` },
             { name: "Breakout Candle Body Ratio", status: "PASS", reason: `Body ratio ${(boBodyRatio * 100).toFixed(0)}% meets threshold` },
             { name: "Pullback Retest Zone Touch", status: "PASS", reason: isShallowConsolidationHolding ? "Shallow high-ADX consolidation held" : "Pullback touched retest zone" },
+            { name: "Structure Polarity Flip", status: "PASS", reason: `Prior support $${breakoutLevel.toFixed(2)} held cleanly as new resistance` },
             { name: "Reversal Candlestick Rejection", status: "PASS", reason: `Rejection pattern: ${shortRejectionType}` },
-            { name: "Pullback Volume Health", status: "PASS", reason: pullbackVolDetails },
+            { name: "Pullback Volume Contraction", status: "PASS", reason: `Volume contracted on retest (${pullbackVolDetails})` },
             { name: "Dynamic Invalidation Ceiling", status: "PASS", reason: `Price stayed below retest ceiling $${reclaimThreshold.toFixed(2)}` },
             { name: "Chasing Lookback Limit", status: "PASS", reason: `Elapsed ${postBreakoutCandles.length} candles <= limit ${maxPostBreakoutCandles}` },
           ],
@@ -5184,6 +5280,49 @@ class TradingEngine {
           }
         };
         return getReturnObj(true, emaPushbackMessage, setupResult.setupName, setupResult, setupResult.sub_conditions);
+      } else if (trendlineBounceResult.isValid && !trendlineBounceResult.description.startsWith("Blocked")) {
+        const setupResult: TradingSetupResult = {
+          setupId: "setup_15_trendline_bounce",
+          setupName: "Setup 15: Trendline Bounce & Retest",
+          isValid: true,
+          direction: "SHORT",
+          entryPrice: currentPrice,
+          stopLoss: trendlineBounceResult.stopLoss,
+          takeProfit: trendlineBounceResult.takeProfit,
+          riskReward: trendlineBounceResult.riskReward,
+          description: trendlineBounceResult.description,
+          sub_conditions: [
+            { name: "5m MTF Alignment", status: "PASS", reason: "5m trend aligned" },
+            { name: "Dynamic Trendline Structure", status: "PASS", reason: `Descending trendline confirmed (${trendlineBounceResult.touchesCount} touches, angle: ${trendlineBounceResult.trendlineAngleDegrees}°, slope: ${trendlineBounceResult.trendlineSlope.toFixed(3)})` },
+            { name: "The 3 Touches Rule", status: "PASS", reason: trendlineBounceResult.isGoldenThirdTouch ? "Golden 3rd Touch (highest win-rate trendline setup)" : `Touch #${trendlineBounceResult.touchesCount} test` },
+            { name: "Trendline Zone Retest", status: "PASS", reason: `Price tested dynamic trendline at $${trendlineBounceResult.trendlinePrice.toFixed(2)}` },
+            { name: "Reversal Candlestick Rejection", status: "PASS", reason: `Rejection pattern: ${trendlineBounceResult.rejectionPattern}` },
+            { name: "Trendline Liquidity Sweep", status: trendlineBounceResult.isLiquiditySweepReclaim ? "PASS" : "SKIP", reason: trendlineBounceResult.isLiquiditySweepReclaim ? `Smart money liquidity sweep reclaim (+${trendlineBounceResult.liquiditySweepWickAtr}x ATR wick above line)` : "Clean bounce without sweep" },
+            { name: "Pullback Volume Contraction", status: "PASS", reason: `Pullback volume contracted to ${trendlineBounceResult.volumeContractionRatio.toFixed(2)}x SMA20 (buyer exhaustion)` },
+            { name: "Multi-Factor Confluence", status: trendlineBounceResult.confluenceFactors.length > 0 ? "PASS" : "SKIP", reason: trendlineBounceResult.confluenceFactors.length > 0 ? `Active: ${trendlineBounceResult.confluenceFactors.join(" + ")} (Score: ${trendlineBounceResult.confluenceScore}/100)` : "Standard dynamic trendline alignment" },
+            { name: "Dynamic Invalidation Ceiling", status: "PASS", reason: `SL at $${trendlineBounceResult.stopLoss.toFixed(2)} | TP at $${trendlineBounceResult.takeProfit.toFixed(2)} (${trendlineBounceResult.riskReward.toFixed(1)}R)` },
+          ],
+          metrics: {
+            trendlinePrice: trendlineBounceResult.trendlinePrice,
+            trendlineSlope: trendlineBounceResult.trendlineSlope,
+            trendlineAngleDegrees: trendlineBounceResult.trendlineAngleDegrees,
+            touchesCount: trendlineBounceResult.touchesCount,
+            isGoldenThirdTouch: trendlineBounceResult.isGoldenThirdTouch,
+            isLiquiditySweepReclaim: trendlineBounceResult.isLiquiditySweepReclaim,
+            liquiditySweepWickAtr: trendlineBounceResult.liquiditySweepWickAtr,
+            volumeContractionRatio: trendlineBounceResult.volumeContractionRatio,
+            bounceVolumeExpansionRatio: trendlineBounceResult.bounceVolumeExpansionRatio,
+            rejectionPattern: trendlineBounceResult.rejectionPattern,
+            isConfluenceWithHorizontal: trendlineBounceResult.isConfluenceWithHorizontal,
+            isConfluenceWithFib: trendlineBounceResult.isConfluenceWithFib,
+            isConfluenceWithEma: trendlineBounceResult.isConfluenceWithEma,
+            confluenceFactors: trendlineBounceResult.confluenceFactors,
+            confluenceScore: trendlineBounceResult.confluenceScore,
+            confluenceLevel: trendlineBounceResult.confluenceLevel,
+            riskReward: trendlineBounceResult.riskReward,
+          }
+        };
+        return getReturnObj(true, trendlineBounceResult.description, setupResult.setupName, setupResult, setupResult.sub_conditions);
       } else {
         if (!isVolumeHealthyForPullback) {
           return getReturnObj(false, "Pullback volume is abnormally high (accumulation risk); waiting for volume to dry up before confirming a safe entry.");
@@ -6223,6 +6362,10 @@ class TradingEngine {
     return evaluateFreshMomentumImpulseSetupFn(direction, this.getSetupContext());
   }
 
+  public evaluateTrendlineBounceSetup(direction: "LONG" | "SHORT" | "NEUTRAL") {
+    return evaluateTrendlineBounceSetupFn(direction, this.getSetupContext());
+  }
+
   /**
    * Evaluates dynamic regime matrix and real-time market condition rules for any setup.
    * Dynamically enables or disables setups based on:
@@ -6231,7 +6374,7 @@ class TradingEngine {
    * 3. Counter-trend direction safeguards (e.g. mean-reversion blocked in strong runaway trends)
    * 4. Indicator-based auto-gates:
    *    - Mean Reversion (Setups 3, 9, 10, 11): ADX ceiling check (avoids catching falling knives when ADX > max_adx)
-   *    - Trend Continuation (Setups 1, 2): Min ADX floor + Max Choppiness Index (avoids fakeouts in dead/choppy markets)
+   *    - Trend Continuation (Setups 1, 2, 15): Min ADX floor + Max Choppiness Index (avoids fakeouts in dead/choppy markets)
    *    - Breakout Expansion (Setup 14): Min ATR volatility floor
    */
   public isSetupEligibleForConditions(
@@ -6259,6 +6402,7 @@ class TradingEngine {
       setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
       setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
       setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+      setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
     };
 
     // 1. Master toggle check
@@ -6293,6 +6437,9 @@ class TradingEngine {
         break;
       case "setup_14_fresh_momentum_impulse":
         master_enabled = ms.fresh_momentum_strategy_enabled !== false;
+        break;
+      case "setup_15_trendline_bounce":
+        master_enabled = ms.trendline_bounce_strategy_enabled !== false;
         break;
     }
 
@@ -6368,7 +6515,7 @@ class TradingEngine {
           conditions_allowed = false;
           conditionReason = `Dynamically gated: ADX (${currentAdx.toFixed(1)}) exceeds mean-reversion ceiling (${maxAdx}). Strong runaway trend detected.`;
         }
-      } else if (["setup_1_pullback_retest", "setup_2_dynamic_ema_pushback", "setup_4_fvg_retest", "setup_14_fresh_momentum_impulse"].includes(setupId)) {
+      } else if (["setup_1_pullback_retest", "setup_2_dynamic_ema_pushback", "setup_4_fvg_retest", "setup_14_fresh_momentum_impulse", "setup_15_trendline_bounce"].includes(setupId)) {
         const minAdx = ms.dynamic_trend_min_adx || 20;
         const maxChop = ms.dynamic_trend_max_chop_index || 58;
         const minEfficiency = config.general.min_allowed_efficiency_ratio || 0.20;
@@ -6432,6 +6579,7 @@ class TradingEngine {
       { setupId: "setup_12_cvd_absorption", setupName: "Setup 12: CVD Absorption & Delta Divergence", category: "ORDERFLOW" },
       { setupId: "setup_13_oi_flush_cascade", setupName: "Setup 13: OI Flush & Cascade Fade", category: "ORDERFLOW" },
       { setupId: "setup_14_fresh_momentum_impulse", setupName: "Setup 14: Fresh Momentum Impulse", category: "BREAKOUT" },
+      { setupId: "setup_15_trendline_bounce", setupName: "Setup 15: Trendline Bounce & Retest", category: "TREND" },
     ];
 
     return setupDefs.map(def => {
@@ -7253,6 +7401,63 @@ class TradingEngine {
             }
           }
 
+          // 7. Setup 15: Trendline Bounce & Retest
+          const eligSetup15 = this.isSetupEligibleForConditions("setup_15_trendline_bounce", "LONG");
+          if (eligSetup15.eligible) {
+            const trendlineResult = this.evaluateTrendlineBounceSetup("LONG");
+            if (trendlineResult.isValid) {
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_15_trendline_bounce",
+                setupName: "Setup 15: Trendline Bounce & Retest",
+                isValid: true,
+                direction: "LONG",
+                entryPrice: currentPrice,
+                stopLoss: trendlineResult.stopLoss,
+                takeProfit: trendlineResult.takeProfit,
+                riskReward: trendlineResult.riskReward,
+                description: `[Setup 15 - Range Trendline Bounce Confirmed]: ${trendlineResult.description}`,
+                sub_conditions: [
+                  { name: "Dynamic Trendline Structure", status: "PASS", reason: `Ascending trendline confirmed (${trendlineResult.touchesCount} touches, angle: ${trendlineResult.trendlineAngleDegrees}°, slope: +${trendlineResult.trendlineSlope.toFixed(3)})` },
+                  { name: "The 3 Touches Rule", status: "PASS", reason: trendlineResult.isGoldenThirdTouch ? "Golden 3rd Touch (highest win-rate trendline setup)" : `Touch #${trendlineResult.touchesCount} test` },
+                  { name: "Trendline Zone Retest", status: "PASS", reason: `Tested dynamic trendline at $${trendlineResult.trendlinePrice.toFixed(2)}` },
+                  { name: "Reversal Candlestick Rejection", status: "PASS", reason: `Rejection pattern: ${trendlineResult.rejectionPattern}` },
+                  { name: "Trendline Liquidity Sweep", status: trendlineResult.isLiquiditySweepReclaim ? "PASS" : "SKIP", reason: trendlineResult.isLiquiditySweepReclaim ? `Smart money liquidity sweep reclaim (-${trendlineResult.liquiditySweepWickAtr}x ATR wick below line)` : "Clean bounce without sweep" },
+                  { name: "Pullback Volume Contraction", status: "PASS", reason: `Volume contracted (${trendlineResult.volumeContractionRatio.toFixed(2)}x SMA20)` },
+                  { name: "Multi-Factor Confluence", status: trendlineResult.confluenceFactors.length > 0 ? "PASS" : "SKIP", reason: trendlineResult.confluenceFactors.length > 0 ? `Active: ${trendlineResult.confluenceFactors.join(" + ")} (Score: ${trendlineResult.confluenceScore}/100)` : "Standard dynamic trendline alignment" },
+                  { name: "Dynamic Invalidation Floor", status: "PASS", reason: `SL at $${trendlineResult.stopLoss.toFixed(2)} | TP at $${trendlineResult.takeProfit.toFixed(2)} (${trendlineResult.riskReward.toFixed(1)}R)` },
+                ],
+                metrics: {
+                  trendlinePrice: trendlineResult.trendlinePrice,
+                  trendlineSlope: trendlineResult.trendlineSlope,
+                  trendlineAngleDegrees: trendlineResult.trendlineAngleDegrees,
+                  touchesCount: trendlineResult.touchesCount,
+                  isGoldenThirdTouch: trendlineResult.isGoldenThirdTouch,
+                  isLiquiditySweepReclaim: trendlineResult.isLiquiditySweepReclaim,
+                  liquiditySweepWickAtr: trendlineResult.liquiditySweepWickAtr,
+                  volumeContractionRatio: trendlineResult.volumeContractionRatio,
+                  bounceVolumeExpansionRatio: trendlineResult.bounceVolumeExpansionRatio,
+                  rejectionPattern: trendlineResult.rejectionPattern,
+                  isConfluenceWithHorizontal: trendlineResult.isConfluenceWithHorizontal,
+                  isConfluenceWithFib: trendlineResult.isConfluenceWithFib,
+                  isConfluenceWithEma: trendlineResult.isConfluenceWithEma,
+                  confluenceFactors: trendlineResult.confluenceFactors,
+                  confluenceScore: trendlineResult.confluenceScore,
+                  confluenceLevel: trendlineResult.confluenceLevel,
+                  riskReward: trendlineResult.riskReward,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
           return {
             confirmed: false,
             message: `Range-bound Reversal Filter: Price ($${currentPrice.toFixed(2)}) is inside the range [$${rangeLow.toFixed(2)} - $${rangeHigh.toFixed(2)}] without a valid reversal, breakout, or tactical setup.`,
@@ -7644,6 +7849,63 @@ class TradingEngine {
                   riskReward: fvgRiskReward,
                   ema200Price: (fvgResult as any).ema200Price,
                   ema200DistanceAtr: (fvgResult as any).ema200DistanceAtr,
+                }
+              };
+              return {
+                confirmed: true,
+                message: active_setup.description,
+                setup_triggered: active_setup.setupName,
+                active_setup,
+                swingHigh: rangeHigh,
+                swingLow: rangeLow,
+                sub_conditions: active_setup.sub_conditions,
+              };
+            }
+          }
+
+          // 7. Setup 15: Trendline Bounce & Retest
+          const eligSetup15 = this.isSetupEligibleForConditions("setup_15_trendline_bounce", "SHORT");
+          if (eligSetup15.eligible) {
+            const trendlineResult = this.evaluateTrendlineBounceSetup("SHORT");
+            if (trendlineResult.isValid) {
+              const active_setup: TradingSetupResult = {
+                setupId: "setup_15_trendline_bounce",
+                setupName: "Setup 15: Trendline Bounce & Retest",
+                isValid: true,
+                direction: "SHORT",
+                entryPrice: currentPrice,
+                stopLoss: trendlineResult.stopLoss,
+                takeProfit: trendlineResult.takeProfit,
+                riskReward: trendlineResult.riskReward,
+                description: `[Setup 15 - Range Trendline Bounce Confirmed]: ${trendlineResult.description}`,
+                sub_conditions: [
+                  { name: "Dynamic Trendline Structure", status: "PASS", reason: `Descending trendline confirmed (${trendlineResult.touchesCount} touches, angle: ${trendlineResult.trendlineAngleDegrees}°, slope: ${trendlineResult.trendlineSlope.toFixed(3)})` },
+                  { name: "The 3 Touches Rule", status: "PASS", reason: trendlineResult.isGoldenThirdTouch ? "Golden 3rd Touch (highest win-rate trendline setup)" : `Touch #${trendlineResult.touchesCount} test` },
+                  { name: "Trendline Zone Retest", status: "PASS", reason: `Tested dynamic trendline at $${trendlineResult.trendlinePrice.toFixed(2)}` },
+                  { name: "Reversal Candlestick Rejection", status: "PASS", reason: `Rejection pattern: ${trendlineResult.rejectionPattern}` },
+                  { name: "Trendline Liquidity Sweep", status: trendlineResult.isLiquiditySweepReclaim ? "PASS" : "SKIP", reason: trendlineResult.isLiquiditySweepReclaim ? `Smart money liquidity sweep reclaim (+${trendlineResult.liquiditySweepWickAtr}x ATR wick above line)` : "Clean bounce without sweep" },
+                  { name: "Pullback Volume Contraction", status: "PASS", reason: `Volume contracted (${trendlineResult.volumeContractionRatio.toFixed(2)}x SMA20)` },
+                  { name: "Multi-Factor Confluence", status: trendlineResult.confluenceFactors.length > 0 ? "PASS" : "SKIP", reason: trendlineResult.confluenceFactors.length > 0 ? `Active: ${trendlineResult.confluenceFactors.join(" + ")} (Score: ${trendlineResult.confluenceScore}/100)` : "Standard dynamic trendline alignment" },
+                  { name: "Dynamic Invalidation Ceiling", status: "PASS", reason: `SL at $${trendlineResult.stopLoss.toFixed(2)} | TP at $${trendlineResult.takeProfit.toFixed(2)} (${trendlineResult.riskReward.toFixed(1)}R)` },
+                ],
+                metrics: {
+                  trendlinePrice: trendlineResult.trendlinePrice,
+                  trendlineSlope: trendlineResult.trendlineSlope,
+                  trendlineAngleDegrees: trendlineResult.trendlineAngleDegrees,
+                  touchesCount: trendlineResult.touchesCount,
+                  isGoldenThirdTouch: trendlineResult.isGoldenThirdTouch,
+                  isLiquiditySweepReclaim: trendlineResult.isLiquiditySweepReclaim,
+                  liquiditySweepWickAtr: trendlineResult.liquiditySweepWickAtr,
+                  volumeContractionRatio: trendlineResult.volumeContractionRatio,
+                  bounceVolumeExpansionRatio: trendlineResult.bounceVolumeExpansionRatio,
+                  rejectionPattern: trendlineResult.rejectionPattern,
+                  isConfluenceWithHorizontal: trendlineResult.isConfluenceWithHorizontal,
+                  isConfluenceWithFib: trendlineResult.isConfluenceWithFib,
+                  isConfluenceWithEma: trendlineResult.isConfluenceWithEma,
+                  confluenceFactors: trendlineResult.confluenceFactors,
+                  confluenceScore: trendlineResult.confluenceScore,
+                  confluenceLevel: trendlineResult.confluenceLevel,
+                  riskReward: trendlineResult.riskReward,
                 }
               };
               return {

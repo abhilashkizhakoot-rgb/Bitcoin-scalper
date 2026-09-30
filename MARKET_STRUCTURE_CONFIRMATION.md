@@ -274,6 +274,25 @@ $$\text{Angle} = \arctan\left(\frac{\text{Normalized Slope}}{10}\right) \times \
 
 ---
 
+## 9. Setup 15: Dynamic Trendline Bounce & Retest (Pro Trading School Framework)
+
+Incorporated from **Pro Trading School's** institutional pullback methodology:
+1. **Dynamic Trendline Fitting**:
+   - Detects structural fractal swing lows (Uptrend) or swing highs (Downtrend) across a 50-candle window.
+   - Fits linear trendlines with positive slope ($m > 0.05$) for support or negative slope ($m < -0.05$) for resistance with $\ge 2$ confirmed touches.
+2. **Retest Acceptance vs Penetration Guard**:
+   - Price must pull back into the dynamic trendline zone within $0.38 \times \text{ATR}_{14}$.
+   - Candle body closes may not penetrate past the trendline by more than $0.25 \times \text{ATR}_{14}$ (wick probes permitted).
+3. **Volume Contraction (Exhaustion)**:
+   - Volume on the pullback candles approaching the trendline must be contracting ($\le 1.25 \times \text{SMA}_{20}(\text{Volume})$), proving exhaustion of counter-trend participants.
+4. **Candlestick Rejection Confirmation**:
+   - Verified Pin Bar, Hammer, Bullish Engulfing (for LONG) or Shooting Star, Bearish Engulfing (for SHORT) bouncing off the line.
+5. **Structural Risk-Reward**:
+   - Stop Loss placed structurally beyond the bounce low/high and dynamic trendline buffer.
+   - Take profit targeted at adaptive $2.0 \times \text{Risk}$ or prior structural swing.
+
+---
+
 ## Summary Decision Matrix
 
 ```

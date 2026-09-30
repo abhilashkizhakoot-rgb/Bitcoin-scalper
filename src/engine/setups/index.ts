@@ -6,3 +6,4 @@ export * from "./doubleTouch.js";
 export * from "./cvdAbsorption.js";
 export * from "./oiFlush.js";
 export * from "./freshMomentum.js";
+export * from "./trendlineBounce.js";

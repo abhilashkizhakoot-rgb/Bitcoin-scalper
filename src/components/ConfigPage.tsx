@@ -3672,6 +3672,16 @@ export default function ConfigPage({
                     desc: "Instant high-velocity volume expansion and structural breakout",
                     enabled: msConfig.fresh_momentum_strategy_enabled !== false,
                   },
+                  {
+                    id: "setup_15_trendline_bounce",
+                    key: "trendline_bounce_strategy_enabled",
+                    num: "15",
+                    name: "Trendline Bounce",
+                    category: "Trend Retest",
+                    color: "emerald",
+                    desc: "Pro Trading School dynamic trendline retest with contracting volume exhaustion",
+                    enabled: msConfig.trendline_bounce_strategy_enabled !== false,
+                  },
                 ].map((s) => (
                   <div
                     key={s.id}
@@ -3904,6 +3914,7 @@ export default function ConfigPage({
                         setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
                         setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
                         setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+                        setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
                       };
                       const activeMatrix = msConfig.setup_regime_matrix || defaultMatrix;
 
@@ -3918,6 +3929,7 @@ export default function ConfigPage({
                         { id: "setup_12_cvd_absorption", num: "12", name: "CVD Absorption", key: "cvd_divergence_strategy_enabled", category: "Order Flow" },
                         { id: "setup_13_oi_flush_cascade", num: "13", name: "OI Flush Fade", key: "oi_flush_strategy_enabled", category: "Order Flow" },
                         { id: "setup_14_fresh_momentum_impulse", num: "14", name: "Fresh Momentum Impulse", key: "fresh_momentum_strategy_enabled", category: "Breakout" },
+                        { id: "setup_15_trendline_bounce", num: "15", name: "Trendline Bounce & Retest", key: "trendline_bounce_strategy_enabled", category: "Trend Retest" },
                       ];
 
                       return setupsList.map((setup) => {
@@ -5483,6 +5495,274 @@ export default function ConfigPage({
                       <span
                         className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
                           msConfig.fresh_momentum_ema200_proximity_block !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Setup 15: Dynamic Trendline Bounce & Retest (Pro Trading School Pullback Framework) */}
+              <div id="setup-15-trendline-bounce" className="bg-slate-50/50 border border-slate-200 rounded-xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <span className="inline-flex items-center justify-center px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-100 text-emerald-700">
+                      SETUP 15
+                    </span>
+                    <h4 className="font-sans font-semibold text-xs text-slate-700">
+                      Dynamic Trendline Bounce & Retest Strategy
+                    </h4>
+                    <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-medium">
+                      Pro Trading School Framework
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMsConfig({
+                        ...msConfig,
+                        trendline_bounce_strategy_enabled:
+                          msConfig.trendline_bounce_strategy_enabled === false ? true : false,
+                      })
+                    }
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                      msConfig.trendline_bounce_strategy_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.trendline_bounce_strategy_enabled !== false ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-500 font-sans">
+                  Implements the flagship pullback & trendline system from Pro Trading School: algorithmic identification of structural trendlines with dynamic slope angle filtering (15°–60°), the <strong>"3 Touches Rule"</strong> (identifying prime 3rd-touch golden rebounds), <strong>Trendline Liquidity Sweeps</strong> (smart money stop runs wicking past the line and violently reclaiming inside), <strong>Multi-Factor Confluence</strong> (Fibonacci 50%–61.8% Golden Pocket, horizontal S/R, and 20/50/200 EMAs), contracting pullback volume, and structural risk management.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Touches</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="2"
+                      max="5"
+                      disabled={msConfig.trendline_bounce_strategy_enabled === false}
+                      value={msConfig.trendline_bounce_min_touches || 2}
+                      onChange={(e) => setMsConfig({ ...msConfig, trendline_bounce_min_touches: parseInputNumber(e.target.value, false) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Minimum confirmed fractal pivot touches to validate line (Default: 2).</p>
+                  </div>
+
+                  <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Strict 3rd Touch Golden Rule</span>
+                      <p className="text-[10px] text-slate-400">Enforces Pro Trading School rule: trade only the golden 3rd touch setup.</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={msConfig.trendline_bounce_strategy_enabled === false}
+                      onClick={() => setMsConfig({ ...msConfig, trendline_bounce_require_3rd_touch: msConfig.trendline_bounce_require_3rd_touch === true ? false : true })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 ${
+                        msConfig.trendline_bounce_require_3rd_touch === true ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.trendline_bounce_require_3rd_touch === true ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Min Slope Angle (°)</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="5"
+                      max="30"
+                      disabled={msConfig.trendline_bounce_strategy_enabled === false}
+                      value={msConfig.trendline_bounce_min_slope_angle || 15}
+                      onChange={(e) => setMsConfig({ ...msConfig, trendline_bounce_min_slope_angle: parseInputNumber(e.target.value, false) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Filters out flat choppy sideways lines (Standard: 15°).</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Max Slope Angle (°)</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="40"
+                      max="80"
+                      disabled={msConfig.trendline_bounce_strategy_enabled === false}
+                      value={msConfig.trendline_bounce_max_slope_angle || 60}
+                      onChange={(e) => setMsConfig({ ...msConfig, trendline_bounce_max_slope_angle: parseInputNumber(e.target.value, false) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Filters out parabolic unsustainable climax lines (Standard: 60°).</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2">
+                  <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Liquidity Sweep & Reclaim</span>
+                      <p className="text-[10px] text-slate-400">Allows wick fakeouts through trendline that sweep stops and reclaim inside.</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={msConfig.trendline_bounce_strategy_enabled === false}
+                      onClick={() => setMsConfig({ ...msConfig, trendline_bounce_allow_liquidity_sweep: msConfig.trendline_bounce_allow_liquidity_sweep === false ? true : false })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 ${
+                        msConfig.trendline_bounce_allow_liquidity_sweep !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.trendline_bounce_allow_liquidity_sweep !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Max Sweep Depth (ATR)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.20"
+                      max="1.50"
+                      disabled={msConfig.trendline_bounce_strategy_enabled === false}
+                      value={msConfig.trendline_bounce_max_sweep_atr || 0.85}
+                      onChange={(e) => setMsConfig({ ...msConfig, trendline_bounce_max_sweep_atr: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Max allowed wick penetration for institutional sweeps (Default: 0.85 ATR).</p>
+                  </div>
+
+                  <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Fib Golden Pocket Confluence</span>
+                      <p className="text-[10px] text-slate-400">Checks 50% - 61.8% Fibonacci retracement confluence with trendline zone.</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={msConfig.trendline_bounce_strategy_enabled === false}
+                      onClick={() => setMsConfig({ ...msConfig, trendline_bounce_fib_confluence_enabled: msConfig.trendline_bounce_fib_confluence_enabled === false ? true : false })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 ${
+                        msConfig.trendline_bounce_fib_confluence_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.trendline_bounce_fib_confluence_enabled !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Horizontal S/R Confluence</span>
+                      <p className="text-[10px] text-slate-400">Identifies polarity flip confluence (prior swing highs/lows aligned with line).</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={msConfig.trendline_bounce_strategy_enabled === false}
+                      onClick={() => setMsConfig({ ...msConfig, trendline_bounce_horizontal_sr_confluence_enabled: msConfig.trendline_bounce_horizontal_sr_confluence_enabled === false ? true : false })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 ${
+                        msConfig.trendline_bounce_horizontal_sr_confluence_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.trendline_bounce_horizontal_sr_confluence_enabled !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Max Penetration (ATR)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.10"
+                      max="0.80"
+                      disabled={msConfig.trendline_bounce_strategy_enabled === false}
+                      value={msConfig.trendline_bounce_max_penetration_atr || 0.25}
+                      onChange={(e) => setMsConfig({ ...msConfig, trendline_bounce_max_penetration_atr: parseInputNumber(e.target.value, true) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                    />
+                    <p className="text-[10px] text-slate-400">Max candle body violation allowed through trendline (Default: 0.25 ATR).</p>
+                  </div>
+
+                  <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Require Volume Contraction</span>
+                      <p className="text-[10px] text-slate-400">Demands contracting volume on pullback approaching trendline (exhaustion proof).</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={msConfig.trendline_bounce_strategy_enabled === false}
+                      onClick={() => setMsConfig({ ...msConfig, trendline_bounce_require_volume_contraction: msConfig.trendline_bounce_require_volume_contraction === false ? true : false })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 ${
+                        msConfig.trendline_bounce_require_volume_contraction !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.trendline_bounce_require_volume_contraction !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Candlestick Rejection</span>
+                      <p className="text-[10px] text-slate-400">Requires verified Hammer/Pin Bar/Engulfing pattern off trendline touch.</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={msConfig.trendline_bounce_strategy_enabled === false}
+                      onClick={() => setMsConfig({ ...msConfig, trendline_bounce_require_candlestick_reversal: msConfig.trendline_bounce_require_candlestick_reversal === false ? true : false })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 ${
+                        msConfig.trendline_bounce_require_candlestick_reversal !== false ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.trendline_bounce_require_candlestick_reversal !== false ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-sans font-semibold text-slate-800">Bounce Volume Expansion</span>
+                      <p className="text-[10px] text-slate-400">Requires volume expansion on rejection candle confirming buyer/seller absorption.</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={msConfig.trendline_bounce_strategy_enabled === false}
+                      onClick={() => setMsConfig({ ...msConfig, trendline_bounce_require_bounce_volume_expansion: msConfig.trendline_bounce_require_bounce_volume_expansion === true ? false : true })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 ${
+                        msConfig.trendline_bounce_require_bounce_volume_expansion === true ? "bg-indigo-600" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          msConfig.trendline_bounce_require_bounce_volume_expansion === true ? "translate-x-4" : "translate-x-0"
                         }`}
                       />
                     </button>

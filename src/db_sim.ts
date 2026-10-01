@@ -307,6 +307,11 @@ const DEFAULT_CONFIG: StrategyConfig = {
     liquidity_sweep_lookback_candles: 20,
     liquidity_sweep_min_wick_ratio: 0.35,
     liquidity_sweep_volume_mult: 1.0,
+    liquidity_sweep_mtf_enabled: true,
+    liquidity_sweep_microstructure_filter: true,
+    liquidity_sweep_require_fvg_retest: true,
+    liquidity_sweep_anti_inducement_filter: true,
+    liquidity_sweep_min_rr_ratio: 2.0,
     fvg_strategy_enabled: true,
     fvg_min_gap_atr_ratio: 0.25,
     fvg_lookback_candles: 20,
@@ -1467,6 +1472,11 @@ class DatabaseManager {
       if (ms.liquidity_sweep_lookback_candles === undefined) { ms.liquidity_sweep_lookback_candles = def.liquidity_sweep_lookback_candles || 20; changed = true; }
       if (ms.liquidity_sweep_min_wick_ratio === undefined) { ms.liquidity_sweep_min_wick_ratio = def.liquidity_sweep_min_wick_ratio || 0.35; changed = true; }
       if (ms.liquidity_sweep_volume_mult === undefined) { ms.liquidity_sweep_volume_mult = def.liquidity_sweep_volume_mult || 1.0; changed = true; }
+      if (ms.liquidity_sweep_mtf_enabled === undefined) { ms.liquidity_sweep_mtf_enabled = true; changed = true; }
+      if (ms.liquidity_sweep_microstructure_filter === undefined) { ms.liquidity_sweep_microstructure_filter = true; changed = true; }
+      if (ms.liquidity_sweep_require_fvg_retest === undefined) { ms.liquidity_sweep_require_fvg_retest = true; changed = true; }
+      if (ms.liquidity_sweep_anti_inducement_filter === undefined) { ms.liquidity_sweep_anti_inducement_filter = true; changed = true; }
+      if (ms.liquidity_sweep_min_rr_ratio === undefined) { ms.liquidity_sweep_min_rr_ratio = 2.0; changed = true; }
       if (ms.fvg_strategy_enabled === undefined) { ms.fvg_strategy_enabled = def.fvg_strategy_enabled !== false; changed = true; }
       if (ms.fvg_min_gap_atr_ratio === undefined) { ms.fvg_min_gap_atr_ratio = def.fvg_min_gap_atr_ratio || 0.25; changed = true; }
       if (ms.fvg_lookback_candles === undefined) { ms.fvg_lookback_candles = def.fvg_lookback_candles || 20; changed = true; }

@@ -4739,6 +4739,105 @@ export default function ConfigPage({
                   />
                   <p className="text-[10px] text-slate-400">Minimum percentage of the sweep candle's total height that must be rejection wick (Standard: 0.35 / 35%).</p>
                 </div>
+
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Multi-Timeframe (MTF) Topography</span>
+                    <p className="text-[10px] text-slate-400">Filters 1m stochastic noise (-0.01R) by mapping institutional 15m/5m EQH/EQL, Session Highs/Lows, and PDH/PDL pools.</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={msConfig.liquidity_sweep_enabled === false}
+                    onClick={() => setMsConfig({ ...msConfig, liquidity_sweep_mtf_enabled: msConfig.liquidity_sweep_mtf_enabled === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 ${
+                      msConfig.liquidity_sweep_mtf_enabled !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.liquidity_sweep_mtf_enabled !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Microstructure & Delta Absorption Filter</span>
+                    <p className="text-[10px] text-slate-400">Requires CVD Delta Divergence and footprint limit absorption at sweep extreme to confirm institutional defense.</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={msConfig.liquidity_sweep_enabled === false}
+                    onClick={() => setMsConfig({ ...msConfig, liquidity_sweep_microstructure_filter: msConfig.liquidity_sweep_microstructure_filter === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 ${
+                      msConfig.liquidity_sweep_microstructure_filter !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.liquidity_sweep_microstructure_filter !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">FVG Consequent Encroachment (50% CE) Retest</span>
+                    <p className="text-[10px] text-slate-400">Targets displacement gap midpoint limit entry instead of apex chasing, preserving Maker execution and fee efficiency.</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={msConfig.liquidity_sweep_enabled === false}
+                    onClick={() => setMsConfig({ ...msConfig, liquidity_sweep_require_fvg_retest: msConfig.liquidity_sweep_require_fvg_retest === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 ${
+                      msConfig.liquidity_sweep_require_fvg_retest !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.liquidity_sweep_require_fvg_retest !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 flex items-center justify-between bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-sans font-semibold text-slate-800">Anti-Inducement (Double-Sweep) Filter</span>
+                    <p className="text-[10px] text-slate-400">Mitigates premature retail traps by verifying secondary liquidity purges or requiring structural displacement.</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={msConfig.liquidity_sweep_enabled === false}
+                    onClick={() => setMsConfig({ ...msConfig, liquidity_sweep_anti_inducement_filter: msConfig.liquidity_sweep_anti_inducement_filter === false ? true : false })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 ${
+                      msConfig.liquidity_sweep_anti_inducement_filter !== false ? "bg-indigo-600" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.liquidity_sweep_anti_inducement_filter !== false ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Min Risk-to-Reward Ratio (R:R)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="1.0"
+                    max="5.0"
+                    disabled={msConfig.liquidity_sweep_enabled === false}
+                    value={msConfig.liquidity_sweep_min_rr_ratio || 2.0}
+                    onChange={(e) => setMsConfig({ ...msConfig, liquidity_sweep_min_rr_ratio: parseInputNumber(e.target.value, true) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono disabled:opacity-50"
+                  />
+                  <p className="text-[10px] text-slate-400">Strictly enforces positive mathematical expectancy (+0.35R benchmark requires &gt;= 2.0:1 R:R).</p>
+                </div>
               </div>
 
               {/* Grid: Fair Value Gap (FVG) Retest Setup (Setup 4) */}

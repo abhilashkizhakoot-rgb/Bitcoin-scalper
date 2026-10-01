@@ -24,7 +24,8 @@ export function evaluateContextAwareVolume(
   const msg = (structCheck?.message || "").toLowerCase();
   const isFreshMomentum = msg.includes("fresh momentum") || msg.includes("setup 14");
   const isBreakout = msg.includes("breakout") || msg.includes("super strong") || msg.includes("immediate breakout");
-  const isPullbackRetest = msg.includes("pullback") || msg.includes("retest") || msg.includes("mitigation");
+  const isTrendlineBounce = msg.includes("trendline") || msg.includes("setup 15");
+  const isPullbackRetest = msg.includes("pullback") || msg.includes("retest") || msg.includes("mitigation") || isTrendlineBounce;
   const isEmaRetrace = msg.includes("ema") || msg.includes("pushback") || msg.includes("bounce");
   const isLiquiditySweep = msg.includes("liquidity sweep") || msg.includes("setup 3");
   const isFailedAuction = msg.includes("failed auction") || msg.includes("sfp") || msg.includes("setup 9");

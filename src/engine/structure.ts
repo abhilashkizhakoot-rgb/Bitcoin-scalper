@@ -6,6 +6,7 @@
 
 import { Candlestick, MarketRegime } from "../types.js";
 import { IndicatorCalculator } from "./indicators.js";
+import { evaluateLiquiditySweepSetup, LiquiditySweepSetupResult } from "./setups/liquiditySweep.js";
 
 export interface SwingPoint {
   price: number;
@@ -558,171 +559,47 @@ export class StructureEngine {
     currentPrice: number,
     currentRegime: MarketRegime,
     ms: any = {},
-    indicators: IndicatorCalculator
-  ): {
-    isSweep: boolean;
-    sweptLevel: number;
-    reclaimPrice: number;
-    wickRatio: number;
-    volumeMult: number;
-    stopLoss: number;
-    takeProfit: number;
-    description: string;
-  } {
-    if (direction === "NEUTRAL") {
-      return { isSweep: false, sweptLevel: 0, reclaimPrice: 0, wickRatio: 0, volumeMult: 0, stopLoss: 0, takeProfit: 0, description: "Neutral direction" };
-    }
-
-    if (direction === "LONG" && currentRegime === MarketRegime.STRONG_DOWNTREND) {
-      return { isSweep: false, sweptLevel: 0, reclaimPrice: 0, wickRatio: 0, volumeMult: 0, stopLoss: 0, takeProfit: 0, description: "Blocked: Bullish Liquidity Sweep prohibited in STRONG_DOWNTREND regime." };
-    }
-    if (direction === "SHORT" && currentRegime === MarketRegime.STRONG_UPTREND) {
-      return { isSweep: false, sweptLevel: 0, reclaimPrice: 0, wickRatio: 0, volumeMult: 0, stopLoss: 0, takeProfit: 0, description: "Blocked: Bearish Liquidity Sweep prohibited in STRONG_UPTREND regime." };
-    }
-
-    if (ms.liquidity_sweep_enabled === false) {
-      return { isSweep: false, sweptLevel: 0, reclaimPrice: 0, wickRatio: 0, volumeMult: 0, stopLoss: 0, takeProfit: 0, description: "Liquidity sweep strategy disabled in config" };
-    }
-
-    const lookback = ms.liquidity_sweep_lookback_candles || 20;
-    const minWickRatio = ms.liquidity_sweep_min_wick_ratio || 0.35;
-    const reqVolMult = ms.liquidity_sweep_volume_mult || 1.0;
-
-    if (candles1m.length < lookback + 2) {
-      return { isSweep: false, sweptLevel: 0, reclaimPrice: 0, wickRatio: 0, volumeMult: 0, stopLoss: 0, takeProfit: 0, description: "Insufficient candle history" };
-    }
-
-    const lastIdx = candles1m.length - 1;
-    const currentCandle = candles1m[lastIdx];
-    const struct = this.getTrendMarketStructure(candles1m, currentRegime, ms, indicators);
-    const atr14 = indicators.calculateATR(candles1m, 14);
-    const currentAtr = Math.max(10, atr14[lastIdx] || 50);
-
-    const volumes = candles1m.map(c => c.volume);
-    const sumVol = volumes.slice(-20).reduce((a, b) => a + b, 0);
-    const avgVol = volumes.length >= 20 ? sumVol / 20 : 1.0;
-
-    const recentCandles = candles1m.slice(-3);
-    const eqLevels = this.detectEqualHighsLows(candles1m, ms, indicators);
-    const asianRange = ms.asian_session_sweep_enabled ? this.detectAsianSessionRange(candles1m) : { asianHigh: null, asianLow: null };
-
-    if (direction === "LONG") {
-      const rangeCandles = candles1m.slice(-lookback - 1, -1);
-      const rangeLow = rangeCandles.length > 0 ? Math.min(...rangeCandles.map(c => c.low)) : struct.swingLow;
-
-      const eqlPrices = eqLevels.eqlLevels.map(e => e.price);
-      const levelsToTest = Array.from(new Set([
-        struct.swingLow,
-        struct.prev_LL ? struct.prev_LL.price : 0,
-        struct.current_LL ? struct.current_LL.price : 0,
-        struct.current_HL ? struct.current_HL.price : 0,
-        rangeLow,
-        asianRange.asianLow || 0,
-        ...eqlPrices,
-      ])).filter(p => p > 0);
-
-      for (const level of levelsToTest) {
-        const sweepCandle = recentCandles.find(c => c.low < level - 0.05 * currentAtr);
-        if (sweepCandle) {
-          const isReclaimed = currentCandle.close >= level - 0.05 * currentAtr;
-          const isCascadeHalted = currentCandle.low >= sweepCandle.low - 0.05 * currentAtr;
-
-          if (isReclaimed && isCascadeHalted) {
-            const range = sweepCandle.high - sweepCandle.low;
-            const lowerWick = Math.min(sweepCandle.open, sweepCandle.close) - sweepCandle.low;
-            const wickRatio = range > 0 ? lowerWick / range : 0;
-            const volMult = avgVol > 0 ? sweepCandle.volume / avgVol : 1.0;
-
-            const hasReversalForm = wickRatio >= minWickRatio || (currentCandle.close > currentCandle.open && currentCandle.close >= sweepCandle.high);
-
-            if (hasReversalForm && volMult >= reqVolMult * 0.8) {
-              const chochResult = this.detectCHoCH("LONG", candles1m, ms);
-              if (!chochResult.hasChoch && ms.choch_confirmation_enabled !== false) {
-                return { isSweep: false, sweptLevel: level, reclaimPrice: currentCandle.close, wickRatio: wickRatio * 100, volumeMult: volMult, stopLoss: 0, takeProfit: 0, description: `Sweep detected at $${level.toFixed(2)}, but awaiting CHoCH confirmation (${chochResult.description})` };
-              }
-
-              const poolType = eqlPrices.includes(level)
-                ? "Equal Lows (EQL) Sell-Side Liquidity Pool"
-                : (asianRange.asianLow && Math.abs(level - asianRange.asianLow) < 1 ? "Asian Session Low" : "Support Level");
-
-              const stopLoss = sweepCandle.low - Math.max(25, 0.45 * currentAtr);
-              const risk = Math.max(10, currentCandle.close - stopLoss);
-              const takeProfit = currentCandle.close + Math.max(risk * 2.0, 1.8 * currentAtr);
-
-              return {
-                isSweep: true,
-                sweptLevel: level,
-                reclaimPrice: currentCandle.close,
-                wickRatio: wickRatio * 100,
-                volumeMult: volMult,
-                stopLoss,
-                takeProfit,
-                description: `Bullish Liquidity Sweep: Price pierced ${poolType} $${level.toFixed(2)} (low $${sweepCandle.low.toFixed(2)}), then reclaimed $${currentCandle.close.toFixed(2)} with ${(wickRatio * 100).toFixed(0)}% lower wick and ${volMult.toFixed(1)}x volume. ${chochResult.description} (SL: $${stopLoss.toFixed(2)}, TP: $${takeProfit.toFixed(2)})`,
-              };
-            }
-          }
-        }
-      }
-    } else if (direction === "SHORT") {
-      const rangeCandles = candles1m.slice(-lookback - 1, -1);
-      const rangeHigh = rangeCandles.length > 0 ? Math.max(...rangeCandles.map(c => c.high)) : struct.swingHigh;
-
-      const eqhPrices = eqLevels.eqhLevels.map(e => e.price);
-      const levelsToTest = Array.from(new Set([
-        struct.swingHigh,
-        struct.prev_HH ? struct.prev_HH.price : 0,
-        struct.current_HH ? struct.current_HH.price : 0,
-        struct.current_LH ? struct.current_LH.price : 0,
-        rangeHigh,
-        asianRange.asianHigh || 0,
-        ...eqhPrices,
-      ])).filter(p => p > 0);
-
-      for (const level of levelsToTest) {
-        const sweepCandle = recentCandles.find(c => c.high > level + 0.05 * currentAtr);
-        if (sweepCandle) {
-          const isReclaimed = currentCandle.close <= level + 0.05 * currentAtr;
-          const isCascadeHalted = currentCandle.high <= sweepCandle.high + 0.05 * currentAtr;
-
-          if (isReclaimed && isCascadeHalted) {
-            const range = sweepCandle.high - sweepCandle.low;
-            const upperWick = sweepCandle.high - Math.max(sweepCandle.open, sweepCandle.close);
-            const wickRatio = range > 0 ? upperWick / range : 0;
-            const volMult = avgVol > 0 ? sweepCandle.volume / avgVol : 1.0;
-
-            const hasReversalForm = wickRatio >= minWickRatio || (currentCandle.close < currentCandle.open && currentCandle.close <= sweepCandle.low);
-
-            if (hasReversalForm && volMult >= reqVolMult * 0.8) {
-              const chochResult = this.detectCHoCH("SHORT", candles1m, ms);
-              if (!chochResult.hasChoch && ms.choch_confirmation_enabled !== false) {
-                return { isSweep: false, sweptLevel: level, reclaimPrice: currentCandle.close, wickRatio: wickRatio * 100, volumeMult: volMult, stopLoss: 0, takeProfit: 0, description: `Sweep detected at $${level.toFixed(2)}, but awaiting CHoCH confirmation (${chochResult.description})` };
-              }
-
-              const poolType = eqhPrices.includes(level)
-                ? "Equal Highs (EQH) Buy-Side Liquidity Pool"
-                : (asianRange.asianHigh && Math.abs(level - asianRange.asianHigh) < 1 ? "Asian Session High" : "Resistance Level");
-
-              const stopLoss = sweepCandle.high + Math.max(25, 0.45 * currentAtr);
-              const risk = Math.max(10, stopLoss - currentCandle.close);
-              const takeProfit = currentCandle.close - Math.max(risk * 2.0, 1.8 * currentAtr);
-
-              return {
-                isSweep: true,
-                sweptLevel: level,
-                reclaimPrice: currentCandle.close,
-                wickRatio: wickRatio * 100,
-                volumeMult: volMult,
-                stopLoss,
-                takeProfit,
-                description: `Bearish Liquidity Sweep: Price pierced ${poolType} $${level.toFixed(2)} (high $${sweepCandle.high.toFixed(2)}), then reclaimed $${currentCandle.close.toFixed(2)} with ${(wickRatio * 100).toFixed(0)}% upper wick and ${volMult.toFixed(1)}x volume. ${chochResult.description} (SL: $${stopLoss.toFixed(2)}, TP: $${takeProfit.toFixed(2)})`,
-              };
-            }
-          }
-        }
-      }
-    }
-
-    return { isSweep: false, sweptLevel: 0, reclaimPrice: 0, wickRatio: 0, volumeMult: 0, stopLoss: 0, takeProfit: 0, description: "No liquidity sweep detected" };
+    indicators: IndicatorCalculator,
+    orderFlowStats?: any,
+    orderBookStats?: any
+  ): LiquiditySweepSetupResult {
+    const config: any = { market_structure: ms };
+    return evaluateLiquiditySweepSetup(direction, {
+      candles1m,
+      currentPrice,
+      currentRegime,
+      orderFlowStats: orderFlowStats || {
+        netCVD: 0,
+        takerBuyRatio: 0.50,
+        historicalCVD: [],
+        takerBuyVolume: 0,
+        takerSellVolume: 0,
+        cvdSlope: 0,
+        largeTradesBuyVolume: 0,
+        largeTradesSellVolume: 0,
+        largeTradeDelta: 0,
+      },
+      orderBookStats: orderBookStats || {
+        imbalanceRatio: 0,
+        bidDepth: 10,
+        askDepth: 10,
+        spread: 0.5,
+        weightedMidPrice: currentPrice,
+        microPrice: currentPrice,
+      },
+      openInterestStats: {
+        currentOI: 0,
+        prevOI_1m: 0,
+        prevOI_5m: 0,
+        oiChange1m: 0,
+        oiChangePct1m: 0,
+        oiChange5m: 0,
+        oiChangePct5m: 0,
+        lastUpdateSecs: Date.now() / 1000,
+      },
+      indicators,
+      config,
+    });
   }
 }
 

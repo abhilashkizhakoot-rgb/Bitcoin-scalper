@@ -51,6 +51,8 @@ import {
   evaluateFreshMomentumImpulseSetup as evaluateFreshMomentumImpulseSetupFn,
   evaluateTrendlineBounceSetup as evaluateTrendlineBounceSetupFn,
   TrendlineBounceResult,
+  evaluateLiquiditySweepSetup as evaluateLiquiditySweepSetupFn,
+  LiquiditySweepSetupResult,
 } from "./engine/setups/index.js";
 import { evaluateContextAwareVolume as evaluateContextAwareVolumeFn } from "./engine/volume.js";
 
@@ -4087,9 +4089,29 @@ class TradingEngine {
     // --- PRE-EVALUATE ALL SMC / SPECIALIZED SETUPS UPFRONT WITH DYNAMIC REGIME GATING ---
     // 1. Setup 3: Liquidity Sweep
     const eligSetup3 = this.isSetupEligibleForConditions("setup_3_liquidity_sweep", direction);
-    const sweepResult = eligSetup3.eligible
+    const sweepResult: LiquiditySweepSetupResult = eligSetup3.eligible
       ? this.detectLiquiditySweep(direction)
-      : { isSweep: false, sweptLevel: 0, reclaimPrice: 0, wickRatio: 0, volumeMult: 0, stopLoss: 0, takeProfit: 0, description: eligSetup3.reason };
+      : {
+          isValid: false,
+          isSweep: false,
+          direction,
+          sweptLevel: 0,
+          reclaimPrice: 0,
+          wickRatio: 0,
+          volumeMult: 0,
+          stopLoss: 0,
+          takeProfit: 0,
+          riskReward: 0,
+          description: eligSetup3.reason,
+          poolType: "None",
+          timeframeTier: "1M_INTERNAL",
+          hasCvdDivergence: false,
+          hasAbsorption: false,
+          microstructureScore: 50,
+          isSecondarySweep: false,
+          mssConfirmed: false,
+          chochLevel: 0,
+        };
     if (sweepResult.isSweep) {
       condDict["Liquidity Sweep Setup (Setup 3)"] = { status: "PASS", reason: sweepResult.description };
     } else if (sweepResult.description && sweepResult.description.includes("awaiting CHoCH")) {
@@ -4233,20 +4255,30 @@ class TradingEngine {
         setupName: "Setup 3: Liquidity Sweep Reversal",
         isValid: true,
         direction,
-        entryPrice: currentPrice,
+        entryPrice: sweepResult.optimalLimitEntry || currentPrice,
         stopLoss: sweepResult.stopLoss,
         takeProfit: sweepResult.takeProfit,
+        riskReward: sweepResult.riskReward || 2.0,
         description: `[Setup 3 - Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`,
         sub_conditions: [
-          { name: "Liquidity Sweep Level Breach", status: "PASS", reason: `Liquidity sweep confirmed at level $${sweepResult.sweptLevel.toFixed(2)}` },
-          { name: "Reclaim Wick Reversal", status: "PASS", reason: `Reclaimed with ${sweepResult.wickRatio.toFixed(0)}% rejection wick` },
-          { name: "Sweep Volume Expansion", status: "PASS", reason: `Confirmed volume expansion (${sweepResult.volumeMult.toFixed(1)}x)` },
-          { name: "Dynamic Invalidation Boundary", status: "PASS", reason: `Reclamation intact (SL: $${sweepResult.stopLoss.toFixed(2)}, TP: $${sweepResult.takeProfit.toFixed(2)})` },
+          { name: "Liquidity Sweep Level Breach", status: "PASS", reason: `${sweepResult.poolType || "Liquidity Pool"} swept at level $${sweepResult.sweptLevel.toFixed(2)} [${sweepResult.timeframeTier || "MTF"}]` },
+          { name: "Reclaim Wick Reversal & MSS", status: "PASS", reason: `Reclaimed with ${sweepResult.wickRatio.toFixed(0)}% rejection wick and MSS confirmed above $${(sweepResult.chochLevel || sweepResult.sweptLevel).toFixed(2)}` },
+          { name: "Microstructure Delta Absorption", status: "PASS", reason: `Confirmed absorption (Score: ${sweepResult.microstructureScore || 70}/100, CVD: ${sweepResult.hasCvdDivergence ? "Divergence Active" : "Neutral"}, Vol: ${sweepResult.volumeMult.toFixed(1)}x)` },
+          { name: "FVG CE Retest / Invalidation Boundary", status: "PASS", reason: `${sweepResult.fvgConsequentEncroachment ? `FVG Consequent Encroachment (50% CE) at $${sweepResult.fvgConsequentEncroachment.toFixed(2)}` : "Direct Reclaim Execution"} (SL: $${sweepResult.stopLoss.toFixed(2)}, TP: $${sweepResult.takeProfit.toFixed(2)}, R:R ${sweepResult.riskReward || 2.0}:1)` },
         ],
         metrics: {
           sweptLevel: sweepResult.sweptLevel,
           wickRatio: sweepResult.wickRatio,
           volumeMult: sweepResult.volumeMult,
+          poolType: sweepResult.poolType,
+          timeframeTier: sweepResult.timeframeTier,
+          hasCvdDivergence: sweepResult.hasCvdDivergence,
+          hasAbsorption: sweepResult.hasAbsorption,
+          microstructureScore: sweepResult.microstructureScore,
+          optimalLimitEntry: sweepResult.optimalLimitEntry,
+          fvgConsequentEncroachment: sweepResult.fvgConsequentEncroachment,
+          isSecondarySweep: sweepResult.isSecondarySweep,
+          riskReward: sweepResult.riskReward,
         }
       };
 
@@ -5367,16 +5399,7 @@ class TradingEngine {
     return structureEngine.detectCHoCH(direction, this.candles1m, config.market_structure);
   }
 
-  public detectLiquiditySweep(direction: "LONG" | "SHORT" | "NEUTRAL"): {
-    isSweep: boolean;
-    sweptLevel: number;
-    reclaimPrice: number;
-    wickRatio: number;
-    volumeMult: number;
-    stopLoss: number;
-    takeProfit: number;
-    description: string;
-  } {
+  public detectLiquiditySweep(direction: "LONG" | "SHORT" | "NEUTRAL"): LiquiditySweepSetupResult {
     const config = dbManager.getConfig();
     return structureEngine.detectLiquiditySweep(
       direction,
@@ -5384,7 +5407,9 @@ class TradingEngine {
       this.currentPrice,
       this.currentRegime,
       config.market_structure,
-      indicators
+      indicators,
+      this.orderFlowStats,
+      this.orderBookStats
     );
   }
 
@@ -7181,20 +7206,30 @@ class TradingEngine {
                 setupName: "Setup 3: Liquidity Sweep Reversal",
                 isValid: true,
                 direction: "LONG",
-                entryPrice: currentPrice,
+                entryPrice: sweepResult.optimalLimitEntry || currentPrice,
                 stopLoss: sweepResult.stopLoss,
                 takeProfit: sweepResult.takeProfit,
+                riskReward: sweepResult.riskReward || 2.0,
                 description: `[Setup 3 - Range Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`,
                 sub_conditions: [
-                  { name: "Liquidity Sweep Level Breach", status: "PASS", reason: `Liquidity sweep confirmed at level $${sweepResult.sweptLevel.toFixed(2)}` },
-                  { name: "Reclaim Wick Reversal", status: "PASS", reason: `Reclaimed with ${sweepResult.wickRatio.toFixed(0)}% rejection wick` },
-                  { name: "Sweep Volume Expansion", status: "PASS", reason: `Confirmed volume expansion (${sweepResult.volumeMult.toFixed(1)}x)` },
-                  { name: "Dynamic Invalidation Boundary", status: "PASS", reason: `Reclamation intact (SL: $${sweepResult.stopLoss.toFixed(2)}, TP: $${sweepResult.takeProfit.toFixed(2)})` },
+                  { name: "Liquidity Sweep Level Breach", status: "PASS", reason: `${sweepResult.poolType || "Liquidity Pool"} swept at level $${sweepResult.sweptLevel.toFixed(2)} [${sweepResult.timeframeTier || "MTF"}]` },
+                  { name: "Reclaim Wick Reversal & MSS", status: "PASS", reason: `Reclaimed with ${sweepResult.wickRatio.toFixed(0)}% rejection wick and MSS confirmed above $${(sweepResult.chochLevel || sweepResult.sweptLevel).toFixed(2)}` },
+                  { name: "Microstructure Delta Absorption", status: "PASS", reason: `Confirmed absorption (Score: ${sweepResult.microstructureScore || 70}/100, CVD: ${sweepResult.hasCvdDivergence ? "Divergence Active" : "Neutral"}, Vol: ${sweepResult.volumeMult.toFixed(1)}x)` },
+                  { name: "FVG CE Retest / Invalidation Boundary", status: "PASS", reason: `${sweepResult.fvgConsequentEncroachment ? `FVG Consequent Encroachment (50% CE) at $${sweepResult.fvgConsequentEncroachment.toFixed(2)}` : "Direct Reclaim Execution"} (SL: $${sweepResult.stopLoss.toFixed(2)}, TP: $${sweepResult.takeProfit.toFixed(2)}, R:R ${sweepResult.riskReward || 2.0}:1)` },
                 ],
                 metrics: {
                   sweptLevel: sweepResult.sweptLevel,
                   wickRatio: sweepResult.wickRatio,
                   volumeMult: sweepResult.volumeMult,
+                  poolType: sweepResult.poolType,
+                  timeframeTier: sweepResult.timeframeTier,
+                  hasCvdDivergence: sweepResult.hasCvdDivergence,
+                  hasAbsorption: sweepResult.hasAbsorption,
+                  microstructureScore: sweepResult.microstructureScore,
+                  optimalLimitEntry: sweepResult.optimalLimitEntry,
+                  fvgConsequentEncroachment: sweepResult.fvgConsequentEncroachment,
+                  isSecondarySweep: sweepResult.isSecondarySweep,
+                  riskReward: sweepResult.riskReward,
                 }
               };
               return {
@@ -7643,20 +7678,30 @@ class TradingEngine {
                 setupName: "Setup 3: Liquidity Sweep Reversal",
                 isValid: true,
                 direction: "SHORT",
-                entryPrice: currentPrice,
+                entryPrice: sweepResult.optimalLimitEntry || currentPrice,
                 stopLoss: sweepResult.stopLoss,
                 takeProfit: sweepResult.takeProfit,
+                riskReward: sweepResult.riskReward || 2.0,
                 description: `[Setup 3 - Range Liquidity Sweep Reversal Confirmed] ${sweepResult.description}`,
                 sub_conditions: [
-                  { name: "Liquidity Sweep Level Breach", status: "PASS", reason: `Liquidity sweep confirmed at level $${sweepResult.sweptLevel.toFixed(2)}` },
-                  { name: "Reclaim Wick Reversal", status: "PASS", reason: `Reclaimed with ${sweepResult.wickRatio.toFixed(0)}% rejection wick` },
-                  { name: "Sweep Volume Expansion", status: "PASS", reason: `Confirmed volume expansion (${sweepResult.volumeMult.toFixed(1)}x)` },
-                  { name: "Dynamic Invalidation Boundary", status: "PASS", reason: `Reclamation intact (SL: $${sweepResult.stopLoss.toFixed(2)}, TP: $${sweepResult.takeProfit.toFixed(2)})` },
+                  { name: "Liquidity Sweep Level Breach", status: "PASS", reason: `${sweepResult.poolType || "Liquidity Pool"} swept at level $${sweepResult.sweptLevel.toFixed(2)} [${sweepResult.timeframeTier || "MTF"}]` },
+                  { name: "Reclaim Wick Reversal & MSS", status: "PASS", reason: `Reclaimed with ${sweepResult.wickRatio.toFixed(0)}% rejection wick and MSS confirmed below $${(sweepResult.chochLevel || sweepResult.sweptLevel).toFixed(2)}` },
+                  { name: "Microstructure Delta Absorption", status: "PASS", reason: `Confirmed absorption (Score: ${sweepResult.microstructureScore || 70}/100, CVD: ${sweepResult.hasCvdDivergence ? "Divergence Active" : "Neutral"}, Vol: ${sweepResult.volumeMult.toFixed(1)}x)` },
+                  { name: "FVG CE Retest / Invalidation Boundary", status: "PASS", reason: `${sweepResult.fvgConsequentEncroachment ? `FVG Consequent Encroachment (50% CE) at $${sweepResult.fvgConsequentEncroachment.toFixed(2)}` : "Direct Reclaim Execution"} (SL: $${sweepResult.stopLoss.toFixed(2)}, TP: $${sweepResult.takeProfit.toFixed(2)}, R:R ${sweepResult.riskReward || 2.0}:1)` },
                 ],
                 metrics: {
                   sweptLevel: sweepResult.sweptLevel,
                   wickRatio: sweepResult.wickRatio,
                   volumeMult: sweepResult.volumeMult,
+                  poolType: sweepResult.poolType,
+                  timeframeTier: sweepResult.timeframeTier,
+                  hasCvdDivergence: sweepResult.hasCvdDivergence,
+                  hasAbsorption: sweepResult.hasAbsorption,
+                  microstructureScore: sweepResult.microstructureScore,
+                  optimalLimitEntry: sweepResult.optimalLimitEntry,
+                  fvgConsequentEncroachment: sweepResult.fvgConsequentEncroachment,
+                  isSecondarySweep: sweepResult.isSecondarySweep,
+                  riskReward: sweepResult.riskReward,
                 }
               };
               return {

@@ -64,8 +64,6 @@ export function evaluateFreshMomentumImpulseSetup(
   const minBodyRatio = ms.fresh_momentum_min_body_ratio !== undefined ? ms.fresh_momentum_min_body_ratio : 0.48;
   const minVolMult = ms.fresh_momentum_min_vol_mult !== undefined ? ms.fresh_momentum_min_vol_mult : 1.15;
   const maxChaseAtr = ms.fresh_momentum_max_chase_atr !== undefined ? ms.fresh_momentum_max_chase_atr : 4.5;
-  const respectEma200Overextension = ms.fresh_momentum_respect_ema200_overextension !== false;
-  const maxEma200ExtensionAtr = ms.fresh_momentum_max_ema200_extension_atr !== undefined ? ms.fresh_momentum_max_ema200_extension_atr : 2.5;
   const ema200ProximityBlock = ms.fresh_momentum_ema200_proximity_block !== false;
   const slowEmaPeriod = ms.slow_ema_period || 200;
 
@@ -130,24 +128,7 @@ export function evaluateFreshMomentumImpulseSetup(
   const currentRelVol = indicators.calculateAccurateRelativeVolume(candles1m);
 
   if (direction === "SHORT") {
-    // 200 EMA Overextension Guard for SHORT
-    if (respectEma200Overextension && -distFromEma200 > maxEma200ExtensionAtr * currentAtr) {
-      return {
-        isValid: false,
-        direction,
-        impulsePrice: 0,
-        impulseOrigin: 0,
-        volumeMult: 0,
-        bodyRatio: 0,
-        stopLoss: 0,
-        takeProfit: 0,
-        riskReward: 0,
-        ema200Price: currentEma200,
-        ema200DistanceAtr: distFromEma200Atr,
-        ema200SlopeAngle: ema200Angle,
-        description: `Fresh Bearish Momentum blocked: price overextended -$${(-distFromEma200).toFixed(1)} (${distFromEma200Atr.toFixed(2)}x ATR) below 200 EMA ($${currentEma200.toFixed(2)}) exceeding max ${maxEma200ExtensionAtr.toFixed(1)}x ATR floor (exhaustion risk).`
-      };
-    }
+    // Note: Macro value extension is strictly enforced globally by the Unified Value Extension Anchor Gate.
 
     // 200 EMA Adverse Floor Barrier Guard for SHORT
     if (ema200ProximityBlock) {
@@ -274,24 +255,7 @@ export function evaluateFreshMomentumImpulseSetup(
       };
     }
   } else if (direction === "LONG") {
-    // 200 EMA Overextension Guard for LONG
-    if (respectEma200Overextension && distFromEma200 > maxEma200ExtensionAtr * currentAtr) {
-      return {
-        isValid: false,
-        direction,
-        impulsePrice: 0,
-        impulseOrigin: 0,
-        volumeMult: 0,
-        bodyRatio: 0,
-        stopLoss: 0,
-        takeProfit: 0,
-        riskReward: 0,
-        ema200Price: currentEma200,
-        ema200DistanceAtr: distFromEma200Atr,
-        ema200SlopeAngle: ema200Angle,
-        description: `Fresh Bullish Momentum blocked: price overextended +$${distFromEma200.toFixed(1)} (${distFromEma200Atr.toFixed(2)}x ATR) above 200 EMA ($${currentEma200.toFixed(2)}) exceeding max ${maxEma200ExtensionAtr.toFixed(1)}x ATR ceiling (exhaustion risk).`
-      };
-    }
+    // Note: Macro value extension is strictly enforced globally by the Unified Value Extension Anchor Gate.
 
     // 200 EMA Adverse Overhead Barrier Guard for LONG
     if (ema200ProximityBlock) {

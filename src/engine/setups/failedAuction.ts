@@ -113,10 +113,97 @@ export function evaluateFailedAuctionSetup(
   const rangeLow = Math.min(...rangeSlice.map(c => c.low));
   const rangeMedian = (rangeHigh + rangeLow) / 2;
 
+  // --- HARD VELOCITY GUARD: Avoid fading explosive directional momentum sprints ---
+  const recent5 = candles1m.slice(Math.max(0, lastIdx - 4), lastIdx + 1);
+  const minLowIn5 = Math.min(...recent5.map(c => c.low));
+  const maxHighIn5 = Math.max(...recent5.map(c => c.high));
+  const bullSprintAtr = (currentPrice - minLowIn5) / currentAtr;
+  const bearSprintAtr = (maxHighIn5 - currentPrice) / currentAtr;
+
+  if (direction === "SHORT" && bullSprintAtr > 1.5) {
+    return {
+      isValid: false,
+      direction: "SHORT",
+      rangeBoundary: rangeHigh,
+      reclaimPrice: 0,
+      deviationAtr: 0,
+      candlesOutside: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      description: `Blocked: Explosive bullish sprint (+${bullSprintAtr.toFixed(2)}x ATR in 5c) into range high - active breakout velocity.`
+    };
+  }
+  if (direction === "LONG" && bearSprintAtr > 1.5) {
+    return {
+      isValid: false,
+      direction: "LONG",
+      rangeBoundary: rangeLow,
+      reclaimPrice: 0,
+      deviationAtr: 0,
+      candlesOutside: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      description: `Blocked: Explosive bearish dump (-${bearSprintAtr.toFixed(2)}x ATR in 5c) into range low - active breakdown velocity.`
+    };
+  }
+
+  // --- CANDLE FORM & REJECTION INTEGRITY ---
+  const candleRange = currentCandle.high - currentCandle.low;
+  const upperWick = currentCandle.high - Math.max(currentCandle.open, currentCandle.close);
+  const lowerWick = Math.min(currentCandle.open, currentCandle.close) - currentCandle.low;
+  const isUpperWickRejection = candleRange > 0 && (upperWick / candleRange) >= 0.35;
+  const isLowerWickRejection = candleRange > 0 && (lowerWick / candleRange) >= 0.35;
+  const isBearishCandle = currentCandle.close < currentCandle.open || isUpperWickRejection;
+  const isBullishCandle = currentCandle.close > currentCandle.open || isLowerWickRejection;
+
+  // Prevent shorting on a strong green candle closing near high (e.g. 0-wick marubozu)
+  if (direction === "SHORT" && currentCandle.close > currentCandle.open && upperWick < 0.20 * candleRange) {
+    return {
+      isValid: false,
+      direction: "SHORT",
+      rangeBoundary: rangeHigh,
+      reclaimPrice: 0,
+      deviationAtr: 0,
+      candlesOutside: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      description: "Blocked: Current candle is actively expanding green with zero upper rejection wick."
+    };
+  }
+  // Prevent longing on a strong red candle closing near low (e.g. 0-wick marubozu)
+  if (direction === "LONG" && currentCandle.close < currentCandle.open && lowerWick < 0.20 * candleRange) {
+    return {
+      isValid: false,
+      direction: "LONG",
+      rangeBoundary: rangeLow,
+      reclaimPrice: 0,
+      deviationAtr: 0,
+      candlesOutside: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      description: "Blocked: Current candle is actively dumping red with zero lower rejection wick."
+    };
+  }
+
   const absorption = detectOrderFlowAbsorption(direction, candles1m, currentPrice, orderFlowStats, orderBookStats);
 
   if (direction === "LONG") {
     // Bullish Failed Auction / SFP at Range Low
+    // Strict order flow requirement: market sellers must NOT be aggressively slamming the bid
+    if (orderFlowStats.takerBuyRatio < 0.48) {
+      return {
+        isValid: false,
+        direction: "LONG",
+        rangeBoundary: rangeLow,
+        reclaimPrice: 0,
+        deviationAtr: 0,
+        candlesOutside: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        description: `Blocked: Aggressive taker selling (${((1 - orderFlowStats.takerBuyRatio) * 100).toFixed(1)}%) dominates the tape - no bid defense.`
+      };
+    }
+
     let pokeLowest = rangeLow;
     let pokeCount = 0;
     let pokeStartIndex = -1;
@@ -144,8 +231,8 @@ export function evaluateFailedAuctionSetup(
 
       if (deviationAtrRatio <= maxDeviationAtr && deviationAmount > 0.02 * currentAtr) {
         const isReclaimed = currentCandle.close >= rangeLow - 0.05 * currentAtr;
-        const isBullishCandle = currentCandle.close > currentCandle.open || (currentCandle.close - currentCandle.low) > (currentCandle.high - currentCandle.close) * 1.5;
-        const isOrderFlowSupported = absorption.isAbsorption || orderFlowStats.takerBuyRatio >= 0.45 || orderBookStats.imbalanceRatio >= -0.15;
+        const isOrderFlowSupported = (absorption.isAbsorption && orderFlowStats.takerBuyRatio >= 0.48) ||
+          (orderFlowStats.takerBuyRatio >= 0.50 && orderBookStats.imbalanceRatio >= -0.05);
 
         if (isReclaimed && isBullishCandle && isOrderFlowSupported) {
           const stopLoss = pokeLowest - Math.max(25, 0.45 * currentAtr);
@@ -179,6 +266,21 @@ export function evaluateFailedAuctionSetup(
     };
   } else {
     // SHORT: Bearish Failed Auction / SFP at Range High
+    // Strict order flow requirement: market buyers must NOT be aggressively lifting the ask
+    if (orderFlowStats.takerBuyRatio > 0.52) {
+      return {
+        isValid: false,
+        direction: "SHORT",
+        rangeBoundary: rangeHigh,
+        reclaimPrice: 0,
+        deviationAtr: 0,
+        candlesOutside: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        description: `Blocked: Aggressive taker buying (${(orderFlowStats.takerBuyRatio * 100).toFixed(1)}%) dominates the tape - cannot short into buyer momentum.`
+      };
+    }
+
     let pokeHighest = rangeHigh;
     let pokeCount = 0;
 
@@ -204,8 +306,8 @@ export function evaluateFailedAuctionSetup(
 
       if (deviationAtrRatio <= maxDeviationAtr && deviationAmount > 0.02 * currentAtr) {
         const isReclaimed = currentCandle.close <= rangeHigh + 0.05 * currentAtr;
-        const isBearishCandle = currentCandle.close < currentCandle.open || (currentCandle.high - currentCandle.close) > (currentCandle.close - currentCandle.low) * 1.5;
-        const isOrderFlowSupported = absorption.isAbsorption || orderFlowStats.takerBuyRatio <= 0.55 || orderBookStats.imbalanceRatio <= 0.15;
+        const isOrderFlowSupported = (absorption.isAbsorption && orderFlowStats.takerBuyRatio <= 0.52) ||
+          (orderFlowStats.takerBuyRatio <= 0.50 && orderBookStats.imbalanceRatio <= 0.05);
 
         if (isReclaimed && isBearishCandle && isOrderFlowSupported) {
           const stopLoss = pokeHighest + Math.max(25, 0.45 * currentAtr);

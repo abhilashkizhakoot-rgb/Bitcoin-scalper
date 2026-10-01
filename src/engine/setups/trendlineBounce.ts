@@ -197,7 +197,8 @@ export function evaluateTrendlineBounceSetup(
         const p1 = swingLows[i];
         const p2 = swingLows[j];
         const dx = p2.index - p1.index;
-        if (dx < 4) continue; // Minimum spacing between pivots
+        const minPivotSpacing = currentAtr > 120 ? 6 : 4; // Higher spacing in extreme volatility to filter noise wicks
+        if (dx < minPivotSpacing) continue;
 
         const slope = (p2.price - p1.price) / dx;
         if (slope <= 0.02) continue; // Must be upward sloping
@@ -257,10 +258,11 @@ export function evaluateTrendlineBounceSetup(
       }
     }
 
-    if (!bestLine || bestLine.touches.length < minTouches) {
+    const effectiveMinTouches = currentAtr > 120 ? Math.max(minTouches, 3) : minTouches;
+    if (!bestLine || bestLine.touches.length < effectiveMinTouches) {
       return {
         ...defaultResult,
-        description: `No valid ascending trendline found with >= ${minTouches} touches and slope angle ${minSlopeAngle}°-${maxSlopeAngle}°`
+        description: `No valid ascending trendline found with >= ${effectiveMinTouches} touches and slope angle ${minSlopeAngle}°-${maxSlopeAngle}°`
       };
     }
 
@@ -269,6 +271,39 @@ export function evaluateTrendlineBounceSetup(
     const recentCandles = candles1m.slice(-3);
     const touchTolerance = 0.38 * currentAtr;
     const recentLow = Math.min(...recentCandles.map(c => c.low));
+
+    // --- DESCENDING TRIANGLE COMPRESSION COIL GUARD ---
+    // If recent candles are printing lower highs into dynamic support with seller delta, do not catch a breakdown
+    if (candles1m.length >= 4) {
+      const recent4Highs = candles1m.slice(-4).map(c => c.high);
+      const isDescendingCompression = recent4Highs[3] < recent4Highs[2] && recent4Highs[2] < recent4Highs[1] && orderFlowStats.takerBuyRatio < 0.50;
+      if (isDescendingCompression) {
+        return {
+          ...defaultResult,
+          trendlinePrice: trendlineAtCurrent,
+          description: `Blocked: Descending triangle compression detected (consecutive lower highs into support with ${((1 - orderFlowStats.takerBuyRatio) * 100).toFixed(1)}% taker sell) - high breakdown risk.`
+        };
+      }
+    }
+
+    // --- LIVE CANDLE & ORDER FLOW GATE ---
+    if (orderFlowStats.takerBuyRatio < 0.48) {
+      return {
+        ...defaultResult,
+        trendlinePrice: trendlineAtCurrent,
+        description: `Blocked: Aggressive taker selling (${((1 - orderFlowStats.takerBuyRatio) * 100).toFixed(1)}%) dominates the tape - no bid defense at trendline.`
+      };
+    }
+    const activeCandle = candles1m[lastIdx];
+    const activeRange = activeCandle.high - activeCandle.low;
+    const activeLowerWick = Math.min(activeCandle.open, activeCandle.close) - activeCandle.low;
+    if (activeCandle.close < activeCandle.open && (activeLowerWick < 0.25 * activeRange)) {
+      return {
+        ...defaultResult,
+        trendlinePrice: trendlineAtCurrent,
+        description: "Blocked: Active candle is expanding red with zero lower rejection wick into support."
+      };
+    }
 
     // Check if price tested the trendline zone recently
     const hasTestedTrendline = recentCandles.some(c => {
@@ -435,13 +470,13 @@ export function evaluateTrendlineBounceSetup(
     if (confluenceFactors.length > 0) confluenceScore += Math.min(25, confluenceFactors.length * 10);
     confluenceScore = Math.min(100, confluenceScore);
 
-    // 9. Targets & Risk Management
-    const recentSwingHigh = Math.max(...highs.slice(bestLine.startIndex, lastIdx));
+    // 9. Targets & Risk Management (Globally Normalized)
     const bounceExtremeLow = Math.min(recentLow, trendlineAtCurrent - (isLiquiditySweepReclaim ? liquiditySweepWickAtr * currentAtr : 0));
     const stopLoss = bounceExtremeLow - 0.35 * currentAtr;
     const riskDistance = Math.max(1, currentPrice - stopLoss);
 
-    const takeProfit = Math.max(currentPrice + Math.max(2.0 * riskDistance, 2.0 * currentAtr), recentSwingHigh);
+    // Global alignment: Standard 1.5x R:R target (covering at least 1.5x ATR)
+    const takeProfit = currentPrice + Math.max(1.5 * riskDistance, 1.5 * currentAtr);
     const riskReward = Math.round(((takeProfit - currentPrice) / riskDistance) * 100) / 100;
 
     // Formatting description
@@ -517,7 +552,8 @@ export function evaluateTrendlineBounceSetup(
         const p1 = swingHighs[i];
         const p2 = swingHighs[j];
         const dx = p2.index - p1.index;
-        if (dx < 4) continue;
+        const minPivotSpacing = currentAtr > 120 ? 6 : 4; // Higher spacing in extreme volatility to filter noise wicks
+        if (dx < minPivotSpacing) continue;
 
         const slope = (p2.price - p1.price) / dx;
         if (slope >= -0.02) continue; // Must be downward sloping
@@ -574,10 +610,11 @@ export function evaluateTrendlineBounceSetup(
       }
     }
 
-    if (!bestLine || bestLine.touches.length < minTouches) {
+    const effectiveMinTouches = currentAtr > 120 ? Math.max(minTouches, 3) : minTouches;
+    if (!bestLine || bestLine.touches.length < effectiveMinTouches) {
       return {
         ...defaultResult,
-        description: `No valid descending trendline found with >= ${minTouches} touches and slope angle ${minSlopeAngle}°-${maxSlopeAngle}°`
+        description: `No valid descending trendline found with >= ${effectiveMinTouches} touches and slope angle ${minSlopeAngle}°-${maxSlopeAngle}°`
       };
     }
 
@@ -586,6 +623,39 @@ export function evaluateTrendlineBounceSetup(
     const recentCandles = candles1m.slice(-3);
     const touchTolerance = 0.38 * currentAtr;
     const recentHigh = Math.max(...recentCandles.map(c => c.high));
+
+    // --- ASCENDING TRIANGLE COMPRESSION COIL GUARD ---
+    // If recent candles are printing higher lows into dynamic resistance with buyer delta, do not short into breakout
+    if (candles1m.length >= 4) {
+      const recent4Lows = candles1m.slice(-4).map(c => c.low);
+      const isAscendingCompression = recent4Lows[3] > recent4Lows[2] && recent4Lows[2] > recent4Lows[1] && orderFlowStats.takerBuyRatio > 0.50;
+      if (isAscendingCompression) {
+        return {
+          ...defaultResult,
+          trendlinePrice: trendlineAtCurrent,
+          description: `Blocked: Ascending triangle compression detected (consecutive higher lows into resistance with ${(orderFlowStats.takerBuyRatio * 100).toFixed(1)}% taker buy) - high breakout risk.`
+        };
+      }
+    }
+
+    // --- LIVE CANDLE & ORDER FLOW GATE ---
+    if (orderFlowStats.takerBuyRatio > 0.52) {
+      return {
+        ...defaultResult,
+        trendlinePrice: trendlineAtCurrent,
+        description: `Blocked: Aggressive taker buying (${(orderFlowStats.takerBuyRatio * 100).toFixed(1)}%) dominates the tape - cannot short into buyer momentum.`
+      };
+    }
+    const activeCandle = candles1m[lastIdx];
+    const activeRange = activeCandle.high - activeCandle.low;
+    const activeUpperWick = activeCandle.high - Math.max(activeCandle.open, activeCandle.close);
+    if (activeCandle.close > activeCandle.open && (activeUpperWick < 0.25 * activeRange)) {
+      return {
+        ...defaultResult,
+        trendlinePrice: trendlineAtCurrent,
+        description: "Blocked: Active candle is expanding green with zero upper rejection wick into resistance."
+      };
+    }
 
     const hasTestedTrendline = recentCandles.some(c => {
       const cIdx = candles1m.indexOf(c);
@@ -749,13 +819,13 @@ export function evaluateTrendlineBounceSetup(
     if (confluenceFactors.length > 0) confluenceScore += Math.min(25, confluenceFactors.length * 10);
     confluenceScore = Math.min(100, confluenceScore);
 
-    // 9. Targets & Risk Management
-    const recentSwingLow = Math.min(...lows.slice(bestLine.startIndex, lastIdx));
+    // 9. Targets & Risk Management (Globally Normalized)
     const bounceExtremeHigh = Math.max(recentHigh, trendlineAtCurrent + (isLiquiditySweepReclaim ? liquiditySweepWickAtr * currentAtr : 0));
     const stopLoss = bounceExtremeHigh + 0.35 * currentAtr;
     const riskDistance = Math.max(1, stopLoss - currentPrice);
 
-    const takeProfit = Math.min(currentPrice - Math.max(2.0 * riskDistance, 2.0 * currentAtr), recentSwingLow);
+    // Global alignment: Standard 1.5x R:R target (covering at least 1.5x ATR)
+    const takeProfit = currentPrice - Math.max(1.5 * riskDistance, 1.5 * currentAtr);
     const riskReward = Math.round(((currentPrice - takeProfit) / riskDistance) * 100) / 100;
 
     const touchLabel = isGoldenThirdTouch ? " [GOLDEN 3RD TOUCH]" : ` (Touch #${totalEffectiveTouches})`;

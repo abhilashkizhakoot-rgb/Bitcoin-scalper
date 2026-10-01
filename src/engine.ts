@@ -6201,13 +6201,29 @@ class TradingEngine {
     const isBearishEmaStructure = ema20Val < ema50Val;
     const isBullishEmaStructure = ema20Val > ema50Val;
 
-    // Waterfall guard: 3 consecutive solid red candles without an EMA 9 reclaim
+    // --- HARD VELOCITY & MOMENTUM EXPANSION GUARD ---
+    const recent5Candles = this.candles1m.slice(Math.max(0, lastIdx - 4), lastIdx + 1);
+    const minLowIn5 = Math.min(...recent5Candles.map(c => c.low));
+    const maxHighIn5 = Math.max(...recent5Candles.map(c => c.high));
+    const bullSprintAtr = (currentPrice - minLowIn5) / currentAtr;
+    const bearSprintAtr = (maxHighIn5 - currentPrice) / currentAtr;
+
+    const isBullSprint = bullSprintAtr > 1.5;
+    const isBearSprint = bearSprintAtr > 1.5;
+
+    const currentTakerBuy = this.orderFlowStats.takerBuyRatio;
+    const liveCandleRange = currentCandle.high - currentCandle.low;
+    const liveUpperWick = currentCandle.high - Math.max(currentCandle.open, currentCandle.close);
+    const liveLowerWick = Math.min(currentCandle.open, currentCandle.close) - currentCandle.low;
+
+    // Waterfall guard: 3 consecutive solid red candles without an EMA 9 reclaim, or aggressive breakdown velocity / taker dump
     const recent3Candles = this.candles1m.slice(Math.max(0, closedIdx - 2), closedIdx + 1);
     const consecutiveRedCount = recent3Candles.filter(c => c.close < c.open && Math.abs(c.close - c.open) >= 0.30 * (c.high - c.low)).length;
-    const isWaterfallDump = consecutiveRedCount >= 3 && currentPrice < ema9Val;
+    const isWaterfallDump = (consecutiveRedCount >= 3 && currentPrice < ema9Val) || isBearSprint || currentTakerBuy < 0.48 || (currentCandle.close < currentCandle.open && liveLowerWick < 0.20 * liveCandleRange);
 
+    // Blowoff pump guard: 3 consecutive green candles, or aggressive bull expansion sprint / taker buy flow
     const consecutiveGreenCount = recent3Candles.filter(c => c.close > c.open && (c.close - c.open) >= 0.30 * (c.high - c.low)).length;
-    const isBlowoffPump = consecutiveGreenCount >= 3 && currentPrice > ema9Val;
+    const isBlowoffPump = (consecutiveGreenCount >= 3 && currentPrice > ema9Val) || isBullSprint || currentTakerBuy > 0.52 || (currentCandle.close > currentCandle.open && liveUpperWick < 0.20 * liveCandleRange);
     
     // --- 3. Evaluate Long Reversal ---
     let isLongReversal = false;
@@ -7019,12 +7035,14 @@ class TradingEngine {
         const isFastEmaHookingDown = emaFastVal < prevEmaFastVal;
 
         if (signalDirection === "LONG") {
-          // LONG reversal/breakout requires bullish micro-trend, price above fast/slow EMA, or fast EMA hooking up off support
-          microTrendAligned = isMicroTrendBullish || (currentPrice >= emaSlowVal) || (currentPrice >= emaFastVal && isFastEmaHookingUp);
+          // LONG reversal/breakout: if micro-trend is established bearish, price must genuinely reclaim slow EMA or crossover
+          const isFirmlyBearish = emaSlowVal > emaFastVal + 0.10 * currentAtrForPullback;
+          microTrendAligned = isMicroTrendBullish || (currentPrice >= emaSlowVal) || (!isFirmlyBearish && currentPrice >= emaFastVal && isFastEmaHookingUp);
           microTrendDetails = `(Micro-Trend [EMA ${microFastPeriod}/${microSlowPeriod}]: Fast $${emaFastVal.toFixed(2)} vs Slow $${emaSlowVal.toFixed(2)} - ${isMicroTrendBullish ? "BULLISH" : "BEARISH"}${microTrendAligned ? " [ALIGNED]" : " [BLOCKED]"})`;
         } else if (signalDirection === "SHORT") {
-          // SHORT reversal/breakdown requires bearish micro-trend, price below fast/slow EMA, or fast EMA hooking down off resistance
-          microTrendAligned = isMicroTrendBearish || (currentPrice <= emaSlowVal) || (currentPrice <= emaFastVal && isFastEmaHookingDown);
+          // SHORT reversal/breakdown: if micro-trend is established bullish, price must genuinely break below slow EMA or crossover
+          const isFirmlyBullish = emaFastVal > emaSlowVal + 0.10 * currentAtrForPullback;
+          microTrendAligned = isMicroTrendBearish || (currentPrice <= emaSlowVal) || (!isFirmlyBullish && currentPrice <= emaFastVal && isFastEmaHookingDown);
           microTrendDetails = `(Micro-Trend [EMA ${microFastPeriod}/${microSlowPeriod}]: Fast $${emaFastVal.toFixed(2)} vs Slow $${emaSlowVal.toFixed(2)} - ${isMicroTrendBearish ? "BEARISH" : "BULLISH"}${microTrendAligned ? " [ALIGNED]" : " [BLOCKED]"})`;
         }
       }
@@ -7044,6 +7062,15 @@ class TradingEngine {
             return {
               confirmed: false,
               message: `Range LONG Reversal Blocked: Micro-Trend is strongly bearish and does not support entry. ${microTrendDetails}`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
+          const currentTakerForLong = this.orderFlowStats.takerBuyRatio;
+          if (currentTakerForLong < 0.48) {
+            return {
+              confirmed: false,
+              message: `Range LONG Reversal Blocked: Aggressive taker selling (${((1 - currentTakerForLong) * 100).toFixed(1)}%) dominates the tape - no bid absorption.`,
               swingHigh: rangeHigh,
               swingLow: rangeLow
             };
@@ -7515,6 +7542,15 @@ class TradingEngine {
             return {
               confirmed: false,
               message: `Range SHORT Reversal Blocked: Micro-Trend is strongly bullish and does not support entry. ${microTrendDetails}`,
+              swingHigh: rangeHigh,
+              swingLow: rangeLow
+            };
+          }
+          const currentTakerForShort = this.orderFlowStats.takerBuyRatio;
+          if (currentTakerForShort > 0.52) {
+            return {
+              confirmed: false,
+              message: `Range SHORT Reversal Blocked: Aggressive taker buying (${(currentTakerForShort * 100).toFixed(1)}%) dominates the tape - cannot short into buyer momentum.`,
               swingHigh: rangeHigh,
               swingLow: rangeLow
             };

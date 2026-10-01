@@ -80,8 +80,6 @@ export function evaluateFairValueGapSetup(
   const minBodyRatio = ms.fvg_min_body_ratio !== undefined ? ms.fvg_min_body_ratio : 0.60;
   const ceInvalidationRule = ms.fvg_ce_invalidation_rule !== false;
   const trendFilterEnabled = ms.fvg_trend_filter_enabled !== false;
-  const respectEma200Overextension = ms.fvg_respect_ema200_overextension !== false;
-  const maxEma200ExtensionAtr = ms.fvg_max_ema200_extension_atr !== undefined ? ms.fvg_max_ema200_extension_atr : 2.5;
   const ema200ProximityBlock = ms.fvg_ema200_proximity_block !== false;
   const slowEmaPeriod = ms.slow_ema_period || 200;
 
@@ -211,50 +209,7 @@ export function evaluateFairValueGapSetup(
     }
   }
 
-  // 200 EMA Overextension Guard: Prevent chasing FVG retests at macro exhaustion extremes
-  if (respectEma200Overextension) {
-    if (direction === "LONG") {
-      // Long: Block if price is stretched excessively ABOVE 200 EMA
-      if (distFromEma200 > maxEma200ExtensionAtr * currentAtr) {
-        return {
-          isValid: false,
-          direction,
-          fvgTop: 0,
-          fvgBottom: 0,
-          consequentEncroachment: 0,
-          fvgMitigationPrice: 0,
-          rejectionType: "",
-          gapSizeAtr: 0,
-          stopLoss: 0,
-          takeProfit: 0,
-          ema200Price: currentEma200,
-          ema200DistanceAtr: distFromEma200Atr,
-          ema200SlopeAngle: ema200Angle,
-          description: `Bullish FVG blocked: price overextended +$${distFromEma200.toFixed(1)} (${distFromEma200Atr.toFixed(2)}x ATR) above 200 EMA ($${currentEma200.toFixed(2)}) exceeding max ${maxEma200ExtensionAtr.toFixed(1)}x ATR ceiling.`,
-        };
-      }
-    } else if (direction === "SHORT") {
-      // Short: Block if price is stretched excessively BELOW 200 EMA
-      if (-distFromEma200 > maxEma200ExtensionAtr * currentAtr) {
-        return {
-          isValid: false,
-          direction,
-          fvgTop: 0,
-          fvgBottom: 0,
-          consequentEncroachment: 0,
-          fvgMitigationPrice: 0,
-          rejectionType: "",
-          gapSizeAtr: 0,
-          stopLoss: 0,
-          takeProfit: 0,
-          ema200Price: currentEma200,
-          ema200DistanceAtr: distFromEma200Atr,
-          ema200SlopeAngle: ema200Angle,
-          description: `Bearish FVG blocked: price overextended -$${(-distFromEma200).toFixed(1)} (${distFromEma200Atr.toFixed(2)}x ATR) below 200 EMA ($${currentEma200.toFixed(2)}) exceeding max ${maxEma200ExtensionAtr.toFixed(1)}x ATR floor.`,
-        };
-      }
-    }
-  }
+  // Note: Macro value extension is strictly enforced globally by the Unified Value Extension Anchor Gate.
 
   // 200 EMA Adverse Barrier Proximity Guard: Prevent taking trades directly into an adverse 200 EMA ceiling/floor
   if (ema200ProximityBlock) {

@@ -12,6 +12,8 @@ import { dbManager } from "./src/db_sim.js";
 import { tradingEngine } from "./src/engine.js";
 import { ConnectionStatus, MarketRegime } from "./src/types.js";
 import { GoogleGenAI, Type } from "@google/genai";
+import { AVAILABLE_SETUPS, runIsolatedBacktest } from "./src/backtester/backtestRunner.js";
+import { rollingBufferManager } from "./src/backtester/rollingBuffer.js";
 
 function getRequestBaseUrl(req: express.Request): string {
   const url = getRawRequestBaseUrl(req);
@@ -548,6 +550,64 @@ async function startServer() {
   });
 
   // ----------------------------------------------------
+  // REST API: Isolated Backtest Lab
+  // ----------------------------------------------------
+
+  const backtestHistoryCache: any[] = [];
+
+  app.get("/api/backtest/setups", (req, res) => {
+    res.json({ setups: AVAILABLE_SETUPS });
+  });
+
+  app.post("/api/backtest/run", async (req, res) => {
+    try {
+      const payload = req.body || {};
+      const result = await runIsolatedBacktest(payload);
+      
+      backtestHistoryCache.unshift({
+        runId: result.runId,
+        setupId: result.setupId,
+        setupName: result.setupName,
+        days: result.days,
+        totalTrades: result.totalTrades,
+        winRate: result.winRate,
+        netPnlUsd: result.netPnlUsd,
+        profitFactor: result.profitFactor,
+        timestamp: new Date().toISOString(),
+      });
+      if (backtestHistoryCache.length > 15) backtestHistoryCache.pop();
+
+      res.json({ success: true, result });
+    } catch (err: any) {
+      console.error("[BacktestAPI] Execution error:", err);
+      res.status(500).json({ success: false, error: err.message || "Backtest execution failed" });
+    }
+  });
+
+  app.get("/api/backtest/history", (req, res) => {
+    res.json({ history: backtestHistoryCache });
+  });
+
+  app.get("/api/backtest/buffer-status", (req, res) => {
+    res.json(rollingBufferManager.getStatus());
+  });
+
+  app.post("/api/backtest/buffer-sync", async (req, res) => {
+    try {
+      await rollingBufferManager.syncBuffer();
+      res.json({ success: true, status: rollingBufferManager.getStatus() });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post("/api/backtest/toggle-weekend-exclusion", (req, res) => {
+    const { exclude } = req.body || {};
+    rollingBufferManager.setExcludeWeekends(exclude !== false);
+    res.json({ success: true, status: rollingBufferManager.getStatus() });
+  });
+
+  // ----------------------------------------------------
   // REST API: Status & Live Feeds
   // ----------------------------------------------------
 
@@ -1061,6 +1121,10 @@ Provide a confidence score (0-100) for each recommendation based on how strongly
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`AI Scalper Bot backend server is running on http://localhost:${PORT}`);
+    // Start isolated continuous 7-day historical rolling buffer ingestion
+    rollingBufferManager.startContinuousIngestion().catch((err) => {
+      console.warn("[RollingBuffer] Failed to start continuous buffer ingestion:", err);
+    });
   });
 }
 

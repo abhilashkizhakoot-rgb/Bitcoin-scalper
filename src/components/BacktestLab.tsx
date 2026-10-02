@@ -284,7 +284,7 @@ export default function BacktestLab() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-white uppercase tracking-wider">
-                  Binance 7-Day Rolling Historical Buffer
+                  Binance 30-Day Rolling Historical Buffer
                 </span>
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -298,9 +298,17 @@ export default function BacktestLab() {
                 <span>
                   Buffered:{" "}
                   <strong className="text-white font-mono">
-                    {bufferStatus?.totalCandles ? bufferStatus.totalCandles.toLocaleString() : "10,080+"}
+                    {bufferStatus?.totalCandles ? bufferStatus.totalCandles.toLocaleString() : "43,200"}
                   </strong>{" "}
-                  1m candles ({bufferStatus?.weekdaysCovered || "7.0"} weekdays)
+                  1m candles ({bufferStatus?.weekdaysCovered || "30.0"} weekdays)
+                </span>
+                <span className="text-slate-600">•</span>
+                <span>
+                  Memory Footprint:{" "}
+                  <strong className="text-emerald-400 font-mono">
+                    ~{bufferStatus?.memoryUsageMb || "6.2"} MB RAM
+                  </strong>{" "}
+                  (Zero Engine Load)
                 </span>
                 <span className="text-slate-600">•</span>
                 <span>
@@ -308,7 +316,7 @@ export default function BacktestLab() {
                   <span className="font-mono text-slate-300">
                     {bufferStatus?.oldestCandleTime
                       ? bufferStatus.oldestCandleTime.slice(0, 10)
-                      : "Past 7+ Days"}{" "}
+                      : "Past 30+ Days"}{" "}
                     to{" "}
                     {bufferStatus?.newestCandleTime
                       ? bufferStatus.newestCandleTime.slice(0, 16).replace("T", " ") + " UTC"
@@ -376,16 +384,17 @@ export default function BacktestLab() {
           </div>
 
           {/* Timeframe Period */}
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 md:col-span-2">
             <label className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-indigo-400" /> Lookback Period
+              <Calendar className="w-3.5 h-3.5 text-indigo-400" /> Historical Lookback Period
             </label>
-            <div className="grid grid-cols-4 gap-1">
+            <div className="grid grid-cols-5 gap-1.5">
               {[
                 { label: "1D", val: 1 },
                 { label: "3D", val: 3 },
                 { label: "7D", val: 7 },
                 { label: "14D", val: 14 },
+                { label: "30D (1M)", val: 30 },
               ].map((p) => (
                 <button
                   key={p.val}

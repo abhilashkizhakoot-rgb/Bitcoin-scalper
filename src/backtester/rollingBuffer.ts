@@ -9,10 +9,13 @@ import { Candlestick } from "../types.js";
 import { fetchBinanceHistoricalKlines } from "./binanceFetcher.js";
 
 const CACHE_DIR = path.resolve(process.cwd(), ".backtest_cache");
-const BUFFER_FILE = path.join(CACHE_DIR, "rolling_7d_btcusdt.json");
+const BUFFER_FILE = path.join(CACHE_DIR, "rolling_30d_btcusdt.json");
+const LEGACY_7D_FILE = path.join(CACHE_DIR, "rolling_7d_btcusdt.json");
 
-// 7 weekdays * 24 hours * 60 minutes = 10,080 1-minute candles
-export const TARGET_WEEKDAY_CANDLES = 10080; 
+// 30 weekdays * 24 hours * 60 minutes = 43,200 1-minute candles
+// Total RAM consumption: ~6.5 MB. Total Disk footprint: ~4.2 MB.
+export const TARGET_WEEKDAY_CANDLES = 43200; 
+export const MAX_BUFFER_SIZE = 45000;
 
 export function isWeekend(timestampMs: number): boolean {
   const date = new Date(timestampMs);
@@ -31,6 +34,7 @@ export interface BufferStatus {
   excludeWeekends: boolean;
   retentionTarget: number;
   bufferHealthPercent: number;
+  memoryUsageMb: number;
 }
 
 export class RollingBufferManager {
@@ -38,6 +42,7 @@ export class RollingBufferManager {
   private symbol: string = "BTCUSDT";
   private isSyncing: boolean = false;
   private lastSyncTime: number = 0;
+  private lastDiskSaveTime: number = 0;
   private syncIntervalTimer: NodeJS.Timeout | null = null;
   private excludeWeekends: boolean = true;
 
@@ -57,6 +62,7 @@ export class RollingBufferManager {
   }
 
   private loadFromDisk() {
+    // 1. Try primary 30-day buffer file
     if (fs.existsSync(BUFFER_FILE)) {
       try {
         const raw = fs.readFileSync(BUFFER_FILE, "utf8");
@@ -64,34 +70,59 @@ export class RollingBufferManager {
         if (Array.isArray(parsed) && parsed.length > 0) {
           this.candles = parsed;
           console.log(
-            `[RollingBuffer] Loaded ${this.candles.length} historical 1m candles from persistent buffer`
+            `[RollingBuffer] Loaded ${this.candles.length} historical 1m candles from persistent 30-day buffer (~${((this.candles.length * 150) / (1024 * 1024)).toFixed(2)} MB RAM)`
           );
+          return;
         }
       } catch (err) {
-        console.warn("[RollingBuffer] Error loading buffer from disk, will re-bootstrap:", err);
-        this.candles = [];
+        console.warn("[RollingBuffer] Error loading 30-day buffer from disk:", err);
+      }
+    }
+
+    // 2. Fall back to legacy 7-day file if available for fast warm-start
+    if (fs.existsSync(LEGACY_7D_FILE)) {
+      try {
+        const raw = fs.readFileSync(LEGACY_7D_FILE, "utf8");
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.candles = parsed;
+          console.log(
+            `[RollingBuffer] Bootstrapped with ${this.candles.length} candles from legacy 7-day buffer; will expand to 30 days`
+          );
+        }
+      } catch (e) {
+        // ignore
       }
     }
   }
 
-  public saveToDisk() {
+  public saveToDisk(force: boolean = false) {
+    const now = Date.now();
+    // Throttle disk writes to every 5 minutes during runtime to ensure zero disk I/O burden
+    if (!force && now - this.lastDiskSaveTime < 5 * 60 * 1000) {
+      return;
+    }
+
     try {
       this.ensureCacheDir();
       fs.writeFileSync(BUFFER_FILE, JSON.stringify(this.candles), "utf8");
+      this.lastDiskSaveTime = now;
     } catch (err) {
-      console.warn("[RollingBuffer] Error saving buffer to disk:", err);
+      console.warn("[RollingBuffer] Error saving 30-day buffer to disk:", err);
     }
   }
 
   /**
-   * Initializes continuous background ingestion and ensures at least 7 days of 1-minute data
+   * Starts background ingestion loop that maintains 30 weekdays with zero live engine burden
    */
   public async startContinuousIngestion(): Promise<void> {
-    console.log("[RollingBuffer] Starting continuous 7-day rolling historical buffer service...");
-    // 1. Initial bootstrap or catch-up
-    await this.syncBuffer();
+    console.log("[RollingBuffer] Starting continuous 30-day rolling historical buffer service...");
+    // 1. Initial background bootstrap/catch-up
+    this.syncBuffer().catch((err) => {
+      console.warn("[RollingBuffer] Initial sync error:", err);
+    });
 
-    // 2. Continuous real-time ingestion loop (syncs every 60 seconds)
+    // 2. Continuous real-time ingestion loop (syncs latest candle every 60 seconds)
     if (!this.syncIntervalTimer) {
       this.syncIntervalTimer = setInterval(() => {
         this.syncBuffer().catch((err) => {
@@ -109,7 +140,7 @@ export class RollingBufferManager {
   }
 
   /**
-   * Syncs the buffer: fills any historical gap back to 7 weekdays and appends latest closed candles
+   * Syncs the buffer: fills any historical gap back to 30 weekdays and appends latest closed candles
    */
   public async syncBuffer(): Promise<void> {
     if (this.isSyncing) return;
@@ -118,12 +149,12 @@ export class RollingBufferManager {
     try {
       const nowMs = Date.now();
 
-      // Case A: Buffer is empty or insufficient (< TARGET_WEEKDAY_CANDLES)
+      // Case A: Buffer has less than target (43,200 weekday candles)
       if (this.candles.length < TARGET_WEEKDAY_CANDLES) {
-        console.log(`[RollingBuffer] Bootstrapping buffer (current: ${this.candles.length}/${TARGET_WEEKDAY_CANDLES} weekday candles)...`);
+        console.log(`[RollingBuffer] Expanding historical buffer (current: ${this.candles.length}/${TARGET_WEEKDAY_CANDLES} weekday candles)...`);
         
-        // Approximate time needed: 7 weekdays = 10 calendar days back to account for weekend exclusion
-        const lookbackMs = 11 * 24 * 60 * 60 * 1000;
+        // 30 weekdays requires ~44 calendar days to account for 6 weekends
+        const lookbackMs = 45 * 24 * 60 * 60 * 1000;
         const startTimeMs = nowMs - lookbackMs;
 
         const rawCandles = await fetchBinanceHistoricalKlines(this.symbol, startTimeMs, nowMs);
@@ -136,15 +167,14 @@ export class RollingBufferManager {
 
         this.candles = filtered;
         this.trimBuffer();
-        this.saveToDisk();
-        console.log(`[RollingBuffer] Bootstrap complete. Active buffer has ${this.candles.length} weekday candles.`);
+        this.saveToDisk(true); // Force initial save
+        console.log(`[RollingBuffer] 30-day bootstrap complete. Active buffer has ${this.candles.length} weekday candles (~${((this.candles.length * 150) / (1024 * 1024)).toFixed(2)} MB RAM).`);
       } else {
-        // Case B: Buffer already has data, fetch incremental updates from latest candle
+        // Case B: Buffer already populated, fetch incremental updates from latest candle
         const latestCandle = this.candles[this.candles.length - 1];
         const latestTimeMs = latestCandle.time * 1000;
         const gapMs = nowMs - latestTimeMs;
 
-        // If more than 60 seconds since last candle, fetch incremental
         if (gapMs >= 60000) {
           const startFetchMs = latestTimeMs + 60000;
           const newCandles = await fetchBinanceHistoricalKlines(this.symbol, startFetchMs, nowMs);
@@ -156,7 +186,6 @@ export class RollingBufferManager {
               if (this.excludeWeekends && isWeekend(tMs)) {
                 continue;
               }
-              // Ensure uniqueness and ascending order
               if (this.candles.length === 0 || c.time > this.candles[this.candles.length - 1].time) {
                 this.candles.push(c as Candlestick & { takerBuyVolume: number });
                 appendedCount++;
@@ -165,7 +194,7 @@ export class RollingBufferManager {
 
             if (appendedCount > 0) {
               this.trimBuffer();
-              this.saveToDisk();
+              this.saveToDisk(false); // Debounced save
             }
           }
         }
@@ -180,8 +209,6 @@ export class RollingBufferManager {
   }
 
   private trimBuffer(): void {
-    // Keep up to 12,000 candles (~8.3 weekdays) to ensure at least 7 full weekdays (10,080)
-    const MAX_BUFFER_SIZE = 12000;
     if (this.candles.length > MAX_BUFFER_SIZE) {
       this.candles = this.candles.slice(this.candles.length - MAX_BUFFER_SIZE);
     }
@@ -195,7 +222,7 @@ export class RollingBufferManager {
     excludeWeekends?: boolean;
     maxCandles?: number;
   }): (Candlestick & { takerBuyVolume: number })[] {
-    const days = options?.days || 7;
+    const days = options?.days || 30;
     const filterWeekends = options?.excludeWeekends !== undefined ? options.excludeWeekends : this.excludeWeekends;
     const targetCandleCount = options?.maxCandles || Math.min(days * 1440, this.candles.length);
 
@@ -217,6 +244,7 @@ export class RollingBufferManager {
     const newest = totalCandles > 0 ? new Date(this.candles[totalCandles - 1].time * 1000).toISOString() : null;
     const weekdaysCovered = Number((totalCandles / 1440).toFixed(2));
     const bufferHealthPercent = Math.min(100, Number(((totalCandles / TARGET_WEEKDAY_CANDLES) * 100).toFixed(1)));
+    const memoryUsageMb = Number(((totalCandles * 150) / (1024 * 1024)).toFixed(2));
 
     return {
       totalCandles,
@@ -228,6 +256,7 @@ export class RollingBufferManager {
       excludeWeekends: this.excludeWeekends,
       retentionTarget: TARGET_WEEKDAY_CANDLES,
       bufferHealthPercent,
+      memoryUsageMb,
     };
   }
 

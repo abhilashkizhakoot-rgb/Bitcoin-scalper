@@ -4847,15 +4847,19 @@ class TradingEngine {
         };
         return getReturnObj(true, pullbackRetestMessage, setupResult.setupName, setupResult, setupResult.sub_conditions);
       } else if (isEmaPushbackValid && !emaPushbackMessage.startsWith("Blocked")) {
+        const targetDistLong = Math.max(140, 2.4 * currentAtr);
+        const takeProfitLong = currentPrice + targetDistLong;
+        const boundedSlLong = Math.max(emaInvalidationFloor, currentPrice - 1.20 * currentAtr);
+        const riskDistLong = Math.max(1, currentPrice - boundedSlLong);
         const setupResult: TradingSetupResult = {
           setupId: "setup_2_dynamic_ema_pushback",
           setupName: "Setup 2: Dynamic EMA Pushback",
           isValid: true,
           direction: "LONG",
           entryPrice: currentPrice,
-          stopLoss: emaInvalidationFloor,
-          takeProfit: currentPrice + 2.0 * currentAtr,
-          riskReward: 2.0,
+          stopLoss: boundedSlLong,
+          takeProfit: takeProfitLong,
+          riskReward: targetDistLong / riskDistLong,
           description: emaPushbackMessage,
           sub_conditions: [
             { name: "5m MTF Alignment", status: "PASS", reason: "5m trend aligned" },
@@ -5309,15 +5313,19 @@ class TradingEngine {
         };
         return getReturnObj(true, pullbackRetestMessage, setupResult.setupName, setupResult, setupResult.sub_conditions);
       } else if (isEmaPushbackValid && !emaPushbackMessage.startsWith("Blocked")) {
+        const targetDistShort = Math.max(140, 2.4 * currentAtr);
+        const takeProfitShort = currentPrice - targetDistShort;
+        const boundedSlShort = Math.min(emaInvalidationCeiling, currentPrice + 1.20 * currentAtr);
+        const riskDistShort = Math.max(1, boundedSlShort - currentPrice);
         const setupResult: TradingSetupResult = {
           setupId: "setup_2_dynamic_ema_pushback",
           setupName: "Setup 2: Dynamic EMA Pushback",
           isValid: true,
           direction: "SHORT",
           entryPrice: currentPrice,
-          stopLoss: emaInvalidationCeiling,
-          takeProfit: currentPrice - 2.0 * currentAtr,
-          riskReward: 2.0,
+          stopLoss: boundedSlShort,
+          takeProfit: takeProfitShort,
+          riskReward: targetDistShort / riskDistShort,
           description: emaPushbackMessage,
           sub_conditions: [
             { name: "5m MTF Alignment", status: "PASS", reason: "5m trend aligned" },

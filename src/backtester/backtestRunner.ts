@@ -163,8 +163,9 @@ export function isSetupGatedByRegimeMatrix(
 
   // 3. Dynamic Condition Rules: Trend setups minimum momentum requirement
   if (["setup_1_pullback_retest", "setup_2_dynamic_ema_pushback", "setup_15_trendline_bounce"].includes(setupId)) {
-    if (currentAdx < 20) {
-      return { allowed: false, reason: `ADX (${currentAdx.toFixed(1)}) below minimum trend threshold (20).` };
+    const minAdxReq = setupId === "setup_2_dynamic_ema_pushback" ? 22 : 20;
+    if (currentAdx < minAdxReq) {
+      return { allowed: false, reason: `ADX (${currentAdx.toFixed(1)}) below minimum trend threshold (${minAdxReq}).` };
     }
   }
 
@@ -256,7 +257,9 @@ export async function runIsolatedBacktest(
     const currentAdx = adxSeries[sliceLastIdx] || 20;
 
     const ema9 = indicatorCalculator.calculateEMA(sliceCloses, 9)[sliceLastIdx] || currentPrice;
-    const ema20 = indicatorCalculator.calculateEMA(sliceCloses, 20)[sliceLastIdx] || currentPrice;
+    const ema20Series = indicatorCalculator.calculateEMA(sliceCloses, 20);
+    const ema20 = ema20Series[sliceLastIdx] || currentPrice;
+    const ema20Prev = ema20Series[sliceLastIdx - 2] || ema20;
     const ema50 = indicatorCalculator.calculateEMA(sliceCloses, 50)[sliceLastIdx] || currentPrice;
     const ema200 = indicatorCalculator.calculateEMA(sliceCloses, 200)[sliceLastIdx] || currentPrice;
 
@@ -442,30 +445,35 @@ export async function runIsolatedBacktest(
 
     // Setup 2: Dynamic EMA Pushback
     if (!signal && (targetSetup === "setup_2_dynamic_ema_pushback" || targetSetup === "all")) {
-      if (ema20 > ema50 && currentPrice > ema50) {
+      const hasEmaSeparation = Math.abs(ema20 - ema50) >= 0.40 * currentAtr;
+      if (hasEmaSeparation && ema20 > ema50 && currentPrice > ema50 && ema20 >= ema20Prev) {
         const touchedEma = currentCandle.low <= ema20 + 0.25 * currentAtr && currentCandle.close >= ema20 - 0.2 * currentAtr;
         const isBullishBounce = currentCandle.close > currentCandle.open && (currentCandle.close - currentCandle.low) > 0.4 * (currentCandle.high - currentCandle.low);
         if (touchedEma && isBullishBounce) {
+          const targetDist = Math.max(140, 2.40 * currentAtr);
+          const stopDist = Math.min(1.20 * currentAtr, Math.max(0.65 * currentAtr, currentPrice - ema50 + 0.20 * currentAtr));
           tryEmitSignal(
             "setup_2_dynamic_ema_pushback",
             "LONG",
             "Setup 2: Dynamic EMA Pushback",
-            Math.min(currentPrice - 1.25 * currentAtr, ema50 - 0.5 * currentAtr),
-            currentPrice + 2.0 * currentAtr,
-            `Dynamic EMA 20 ($${ema20.toFixed(2)}) / 50 ($${ema50.toFixed(2)}) trend bounce with verified bullish pushback.`
+            currentPrice - stopDist,
+            currentPrice + targetDist,
+            `Dynamic EMA 20 ($${ema20.toFixed(2)}) / 50 ($${ema50.toFixed(2)}) trend bounce with fee-positive target (+$${targetDist.toFixed(1)}) and bounded risk.`
           );
         }
-      } else if (ema20 < ema50 && currentPrice < ema50) {
+      } else if (hasEmaSeparation && ema20 < ema50 && currentPrice < ema50 && ema20 <= ema20Prev) {
         const touchedEma = currentCandle.high >= ema20 - 0.25 * currentAtr && currentCandle.close <= ema20 + 0.2 * currentAtr;
         const isBearishReject = currentCandle.close < currentCandle.open && (currentCandle.high - currentCandle.close) > 0.4 * (currentCandle.high - currentCandle.low);
         if (touchedEma && isBearishReject) {
+          const targetDist = Math.max(140, 2.40 * currentAtr);
+          const stopDist = Math.min(1.20 * currentAtr, Math.max(0.65 * currentAtr, ema50 - currentPrice + 0.20 * currentAtr));
           tryEmitSignal(
             "setup_2_dynamic_ema_pushback",
             "SHORT",
             "Setup 2: Dynamic EMA Pushback",
-            Math.max(currentPrice + 1.25 * currentAtr, ema50 + 0.5 * currentAtr),
-            currentPrice - 2.0 * currentAtr,
-            `Dynamic EMA 20 ($${ema20.toFixed(2)}) / 50 ($${ema50.toFixed(2)}) trend pushback with verified bearish rejection.`
+            currentPrice + stopDist,
+            currentPrice - targetDist,
+            `Dynamic EMA 20 ($${ema20.toFixed(2)}) / 50 ($${ema50.toFixed(2)}) trend pushback with fee-positive target (-$${targetDist.toFixed(1)}) and bounded risk.`
           );
         }
       }
@@ -753,10 +761,10 @@ export async function runIsolatedBacktest(
             break;
           }
 
-          // 3. Fix B & Win-Rate Calibration: Fee-Positive Dynamic Breakeven Ratchet for Setup 14
+          // 3. Fix B & Win-Rate Calibration: Fee-Positive Dynamic Breakeven Ratchet for Setup 14 and Setup 2
           // On 0.01 BTC position, $84 BTC offset is required to overcome round-trip exchange fees ($0.84)
           // Lock in Math.max(88, 0.40 * entryAtr) once price moves favorably by >= 1.15 * entryAtr
-          if (signal.setupId === "setup_14_fresh_momentum_impulse") {
+          if (signal.setupId === "setup_14_fresh_momentum_impulse" || signal.setupId === "setup_2_dynamic_ema_pushback") {
             const feeBufferBtc = Math.max(88, 0.40 * entryAtr);
             const favorableDist = futureCandle.close - entryPrice;
             if (favorableDist >= 1.15 * entryAtr) {
@@ -781,8 +789,8 @@ export async function runIsolatedBacktest(
             break;
           }
 
-          // 3. Fix B & Win-Rate Calibration: Fee-Positive Dynamic Breakeven Ratchet for Setup 14
-          if (signal.setupId === "setup_14_fresh_momentum_impulse") {
+          // 3. Fix B & Win-Rate Calibration: Fee-Positive Dynamic Breakeven Ratchet for Setup 14 and Setup 2
+          if (signal.setupId === "setup_14_fresh_momentum_impulse" || signal.setupId === "setup_2_dynamic_ema_pushback") {
             const feeBufferBtc = Math.max(88, 0.40 * entryAtr);
             const favorableDist = entryPrice - futureCandle.close;
             if (favorableDist >= 1.15 * entryAtr) {
@@ -810,13 +818,13 @@ export async function runIsolatedBacktest(
       const grossPnlUsd = grossPnlPoints * positionSizeBtc;
 
       // Fix C & E: Setup 10 utilizes Post-Only Maker limit entry (0.015%) and resting limit TP exit (0.015%)
-      // Setup 14 utilizes Taker entry (0.05%) and resting limit TP exit (0.015% Maker)
+      // Setup 14 & Setup 2 utilize Taker entry (0.05%) and resting limit TP exit (0.015% Maker)
       // Stop Loss exit triggers as a stop-market taker order (0.05%)
       const isSetup10Maker = signal.setupId === "setup_10_vwap_band_rejection";
-      const isSetup14 = signal.setupId === "setup_14_fresh_momentum_impulse";
+      const isMakerTpSetup = signal.setupId === "setup_10_vwap_band_rejection" || signal.setupId === "setup_14_fresh_momentum_impulse" || signal.setupId === "setup_2_dynamic_ema_pushback";
 
       const entryFeeRate = isSetup10Maker ? 0.00015 : 0.0005;
-      const exitFeeRate = ((isSetup10Maker || isSetup14) && exitReason === "TAKE_PROFIT") ? 0.00015 : 0.0005;
+      const exitFeeRate = (isMakerTpSetup && exitReason === "TAKE_PROFIT") ? 0.00015 : 0.0005;
 
       const notionalEntryUsd = entryPrice * positionSizeBtc;
       const notionalExitUsd = exitPrice * positionSizeBtc;

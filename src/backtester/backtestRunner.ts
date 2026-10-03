@@ -761,10 +761,15 @@ export async function runIsolatedBacktest(
             break;
           }
 
-          // 3. Fix B & Win-Rate Calibration: Fee-Positive Dynamic Breakeven Ratchet for Setup 14 and Setup 2
+          // 3. Fix B & Win-Rate Calibration: Fee-Positive Dynamic Breakeven Ratchet for Setup 14, Setup 2, Setup 3, and Setup 9
           // On 0.01 BTC position, $84 BTC offset is required to overcome round-trip exchange fees ($0.84)
           // Lock in Math.max(88, 0.40 * entryAtr) once price moves favorably by >= 1.15 * entryAtr
-          if (signal.setupId === "setup_14_fresh_momentum_impulse" || signal.setupId === "setup_2_dynamic_ema_pushback") {
+          if (
+            signal.setupId === "setup_14_fresh_momentum_impulse" ||
+            signal.setupId === "setup_2_dynamic_ema_pushback" ||
+            signal.setupId === "setup_3_liquidity_sweep" ||
+            signal.setupId === "setup_9_range_failed_auction"
+          ) {
             const feeBufferBtc = Math.max(88, 0.40 * entryAtr);
             const favorableDist = futureCandle.close - entryPrice;
             if (favorableDist >= 1.15 * entryAtr) {
@@ -789,8 +794,13 @@ export async function runIsolatedBacktest(
             break;
           }
 
-          // 3. Fix B & Win-Rate Calibration: Fee-Positive Dynamic Breakeven Ratchet for Setup 14 and Setup 2
-          if (signal.setupId === "setup_14_fresh_momentum_impulse" || signal.setupId === "setup_2_dynamic_ema_pushback") {
+          // 3. Fix B & Win-Rate Calibration: Fee-Positive Dynamic Breakeven Ratchet for Setup 14, Setup 2, Setup 3, and Setup 9
+          if (
+            signal.setupId === "setup_14_fresh_momentum_impulse" ||
+            signal.setupId === "setup_2_dynamic_ema_pushback" ||
+            signal.setupId === "setup_3_liquidity_sweep" ||
+            signal.setupId === "setup_9_range_failed_auction"
+          ) {
             const feeBufferBtc = Math.max(88, 0.40 * entryAtr);
             const favorableDist = entryPrice - futureCandle.close;
             if (favorableDist >= 1.15 * entryAtr) {
@@ -818,10 +828,15 @@ export async function runIsolatedBacktest(
       const grossPnlUsd = grossPnlPoints * positionSizeBtc;
 
       // Fix C & E: Setup 10 utilizes Post-Only Maker limit entry (0.015%) and resting limit TP exit (0.015%)
-      // Setup 14 & Setup 2 utilize Taker entry (0.05%) and resting limit TP exit (0.015% Maker)
+      // Setup 14, Setup 2, Setup 3, & Setup 9 utilize Taker entry (0.05%) and resting limit TP exit (0.015% Maker)
       // Stop Loss exit triggers as a stop-market taker order (0.05%)
       const isSetup10Maker = signal.setupId === "setup_10_vwap_band_rejection";
-      const isMakerTpSetup = signal.setupId === "setup_10_vwap_band_rejection" || signal.setupId === "setup_14_fresh_momentum_impulse" || signal.setupId === "setup_2_dynamic_ema_pushback";
+      const isMakerTpSetup =
+        signal.setupId === "setup_10_vwap_band_rejection" ||
+        signal.setupId === "setup_14_fresh_momentum_impulse" ||
+        signal.setupId === "setup_2_dynamic_ema_pushback" ||
+        signal.setupId === "setup_3_liquidity_sweep" ||
+        signal.setupId === "setup_9_range_failed_auction";
 
       const entryFeeRate = isSetup10Maker ? 0.00015 : 0.0005;
       const exitFeeRate = (isMakerTpSetup && exitReason === "TAKE_PROFIT") ? 0.00015 : 0.0005;

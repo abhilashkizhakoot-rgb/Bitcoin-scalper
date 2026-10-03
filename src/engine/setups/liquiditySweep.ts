@@ -246,17 +246,33 @@ export function evaluateLiquiditySweepSetup(
     return defaultFail("No validated liquidity pool breach and reclaim found");
   }
 
-  // Multi-Timeframe Filter: If MTF is enabled, reject solitary 1m internal swings unless high tier
-  if (mtfEnabled && matchedPool.tier === "1M_INTERNAL") {
-    // Only accept 1M_INTERNAL if order flow provides exceptional absorption backing
-    const takerRatio = orderFlowStats ? orderFlowStats.takerBuyRatio : 0.50;
-    const netCvd = orderFlowStats ? orderFlowStats.netCVD : 0;
-    const hasExceptionalFlow = direction === "LONG"
-      ? (takerRatio >= 0.55 || netCvd > 0)
-      : (takerRatio <= 0.45 || netCvd < 0);
+  // Double-Sweep Trap & Inducement Detection:
+  // Check prior 3-8 candles before the sweep candle for a weak initial poke
+  let isSecondarySweep = false;
+  const priorWindowStart = Math.max(0, sweepCandleIdx - 8);
+  const priorWindow = candles1m.slice(priorWindowStart, sweepCandleIdx);
 
-    if (!hasExceptionalFlow) {
-      return defaultFail(`Blocked: 1-minute internal swing sweep ($${matchedPool.level.toFixed(2)}) rejected to prevent stochastic noise (-0.01R expectancy). Awaiting 15m/5m/Session pool breach.`);
+  for (const pc of priorWindow) {
+    if (direction === "LONG") {
+      if (pc.low <= matchedPool.level + 0.15 * currentAtr && pc.low >= sweepCandle.low) {
+        // Prior test existed, current sweep cleared lower!
+        const pcBody = Math.abs(pc.close - pc.open);
+        const pcRange = Math.max(0.001, pc.high - pc.low);
+        if (pc.volume < avgVol * 1.1 || (pcBody / pcRange) < 0.40) {
+          isSecondarySweep = true;
+          break;
+        }
+      }
+    } else {
+      if (pc.high >= matchedPool.level - 0.15 * currentAtr && pc.high <= sweepCandle.high) {
+        // Prior test existed, current sweep cleared higher!
+        const pcBody = Math.abs(pc.close - pc.open);
+        const pcRange = Math.max(0.001, pc.high - pc.low);
+        if (pc.volume < avgVol * 1.1 || (pcBody / pcRange) < 0.40) {
+          isSecondarySweep = true;
+          break;
+        }
+      }
     }
   }
 
@@ -285,33 +301,16 @@ export function evaluateLiquiditySweepSetup(
     return defaultFail(`Insufficient Volume: Sweep volume (${volMult.toFixed(2)}x) below requirement (${(reqVolMult * 0.75).toFixed(2)}x).`);
   }
 
-  // Double-Sweep Trap & Inducement Detection:
-  // Check prior 3-8 candles before the sweep candle for a weak initial poke
-  let isSecondarySweep = false;
-  const priorWindowStart = Math.max(0, sweepCandleIdx - 8);
-  const priorWindow = candles1m.slice(priorWindowStart, sweepCandleIdx);
+  // Multi-Timeframe Filter: If MTF is enabled, reject solitary 1m internal swings unless high tier or secondary inducement purge
+  if (mtfEnabled && matchedPool.tier === "1M_INTERNAL") {
+    const takerRatio = orderFlowStats ? orderFlowStats.takerBuyRatio : 0.50;
+    const netCvd = orderFlowStats ? orderFlowStats.netCVD : 0;
+    const hasExceptionalFlow = direction === "LONG"
+      ? (takerRatio >= 0.54 && netCvd > 0 && isSecondarySweep)
+      : (takerRatio <= 0.46 && netCvd < 0 && isSecondarySweep);
 
-  for (const pc of priorWindow) {
-    if (direction === "LONG") {
-      if (pc.low <= matchedPool.level + 0.15 * currentAtr && pc.low >= sweepCandle.low) {
-        // Prior test existed, current sweep cleared lower!
-        const pcBody = Math.abs(pc.close - pc.open);
-        const pcRange = Math.max(0.001, pc.high - pc.low);
-        if (pc.volume < avgVol * 1.1 || (pcBody / pcRange) < 0.40) {
-          isSecondarySweep = true;
-          break;
-        }
-      }
-    } else {
-      if (pc.high >= matchedPool.level - 0.15 * currentAtr && pc.high <= sweepCandle.high) {
-        // Prior test existed, current sweep cleared higher!
-        const pcBody = Math.abs(pc.close - pc.open);
-        const pcRange = Math.max(0.001, pc.high - pc.low);
-        if (pc.volume < avgVol * 1.1 || (pcBody / pcRange) < 0.40) {
-          isSecondarySweep = true;
-          break;
-        }
-      }
+    if (!hasExceptionalFlow) {
+      return defaultFail(`Blocked: 1-minute internal swing sweep ($${matchedPool.level.toFixed(2)}) rejected to prevent stochastic noise (-0.01R expectancy). Awaiting 15m/5m/Session pool breach or secondary purge.`);
     }
   }
 
@@ -376,11 +375,13 @@ export function evaluateLiquiditySweepSetup(
   // -------------------------------------------------------------
   // PILLAR 5: FVG Retracement, Consequent Encroachment (50% CE), & Payoff Geometry
   // -------------------------------------------------------------
-  // Stop Loss: Anchored strictly beyond the sweep's extreme wick + protective ATR buffer
+  // Stop Loss: Anchored strictly beyond the sweep's extreme wick + protective ATR buffer, bounded to prevent blowout losses
   const sweepExtreme = direction === "LONG" ? sweepCandle.low : sweepCandle.high;
+  const rawRisk = Math.abs(currentCandle.close - sweepExtreme) + Math.max(20, 0.35 * currentAtr);
+  const boundedRisk = Math.min(1.20 * currentAtr, Math.max(0.60 * currentAtr, rawRisk));
   const stopLoss = direction === "LONG"
-    ? sweepExtreme - Math.max(25, 0.40 * currentAtr)
-    : sweepExtreme + Math.max(25, 0.40 * currentAtr);
+    ? currentCandle.close - boundedRisk
+    : currentCandle.close + boundedRisk;
 
   // Scan displacement leg (from sweep candle to current candle) for a Fair Value Gap
   const displacementCandles = candles1m.slice(Math.max(0, sweepCandleIdx - 1));
@@ -414,14 +415,14 @@ export function evaluateLiquiditySweepSetup(
     ? fvgCe
     : currentCandle.close;
 
-  // Target Profit calculation enforcing >= minRrRatio (default 2.0R)
-  const risk = Math.abs(optimalLimitEntry - stopLoss);
-  const minTargetDistance = Math.max(risk * minRrRatio, 1.8 * currentAtr);
+  // Target Profit calculation: ANCHORED TO ACTUAL EXECUTION PRICE (currentCandle.close) to prevent inverted / sub-fee targets
+  const actualRisk = Math.abs(currentCandle.close - stopLoss);
+  const minTargetDistance = Math.max(140, Math.max(actualRisk * minRrRatio, 2.20 * currentAtr));
   const takeProfit = direction === "LONG"
-    ? optimalLimitEntry + minTargetDistance
-    : optimalLimitEntry - minTargetDistance;
+    ? currentCandle.close + minTargetDistance
+    : currentCandle.close - minTargetDistance;
 
-  const actualRr = risk > 0 ? Math.round((Math.abs(takeProfit - optimalLimitEntry) / risk) * 100) / 100 : minRrRatio;
+  const actualRr = actualRisk > 0 ? Math.round((minTargetDistance / actualRisk) * 100) / 100 : minRrRatio;
 
   const secondaryTag = isSecondarySweep ? " [SECONDARY PURGE: Inducement Cleared]" : "";
   const fvgTag = fvgCe !== undefined

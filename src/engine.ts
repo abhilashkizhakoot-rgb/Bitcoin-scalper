@@ -4345,6 +4345,7 @@ class TradingEngine {
         entryPrice: currentPrice,
         stopLoss: failedAuctionResult.stopLoss,
         takeProfit: failedAuctionResult.takeProfit,
+        riskReward: Math.round((Math.abs(failedAuctionResult.takeProfit - currentPrice) / Math.max(1, Math.abs(currentPrice - failedAuctionResult.stopLoss))) * 100) / 100,
         description: `[Setup 9 - Range Failed Auction Reclaim Confirmed]: ${failedAuctionResult.description}`,
         sub_conditions: [
           { name: "Range Boundary SFP Breach", status: "PASS", reason: `Range boundary $${failedAuctionResult.rangeBoundary.toFixed(2)} reclaimed` },

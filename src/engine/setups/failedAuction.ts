@@ -111,6 +111,22 @@ export function evaluateFailedAuctionSetup(
 
   const rangeHigh = Math.max(...rangeSlice.map(c => c.high));
   const rangeLow = Math.min(...rangeSlice.map(c => c.low));
+  const rangeHeight = rangeHigh - rangeLow;
+
+  if (rangeHeight < 1.40 * currentAtr || rangeHeight < 70) {
+    return {
+      isValid: false,
+      direction,
+      rangeBoundary: 0,
+      reclaimPrice: 0,
+      deviationAtr: 0,
+      candlesOutside: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      description: `Blocked: Range height ($${rangeHeight.toFixed(1)}) too compressed (< 1.40x ATR) to overcome transaction costs.`
+    };
+  }
+
   const rangeMedian = (rangeHigh + rangeLow) / 2;
 
   // --- HARD VELOCITY GUARD: Avoid fading explosive directional momentum sprints ---
@@ -235,8 +251,11 @@ export function evaluateFailedAuctionSetup(
           (orderFlowStats.takerBuyRatio >= 0.50 && orderBookStats.imbalanceRatio >= -0.05);
 
         if (isReclaimed && isBullishCandle && isOrderFlowSupported) {
-          const stopLoss = pokeLowest - Math.max(25, 0.45 * currentAtr);
-          const takeProfit = rangeMedian > currentPrice + 0.5 * currentAtr ? rangeMedian : rangeHigh - Math.max(20, 0.35 * currentAtr);
+          const rawRisk = Math.abs(currentPrice - pokeLowest) + Math.max(20, 0.35 * currentAtr);
+          const boundedRisk = Math.min(1.20 * currentAtr, Math.max(0.60 * currentAtr, rawRisk));
+          const stopLoss = currentPrice - boundedRisk;
+          const targetDist = Math.max(140, Math.max(boundedRisk * 1.5, 2.20 * currentAtr));
+          const takeProfit = currentPrice + targetDist;
 
           return {
             isValid: true,
@@ -310,8 +329,11 @@ export function evaluateFailedAuctionSetup(
           (orderFlowStats.takerBuyRatio <= 0.50 && orderBookStats.imbalanceRatio <= 0.05);
 
         if (isReclaimed && isBearishCandle && isOrderFlowSupported) {
-          const stopLoss = pokeHighest + Math.max(25, 0.45 * currentAtr);
-          const takeProfit = rangeMedian < currentPrice - 0.5 * currentAtr ? rangeMedian : rangeLow + Math.max(20, 0.35 * currentAtr);
+          const rawRisk = Math.abs(pokeHighest - currentPrice) + Math.max(20, 0.35 * currentAtr);
+          const boundedRisk = Math.min(1.20 * currentAtr, Math.max(0.60 * currentAtr, rawRisk));
+          const stopLoss = currentPrice + boundedRisk;
+          const targetDist = Math.max(140, Math.max(boundedRisk * 1.5, 2.20 * currentAtr));
+          const takeProfit = currentPrice - targetDist;
 
           return {
             isValid: true,

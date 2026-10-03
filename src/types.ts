@@ -115,6 +115,55 @@ export interface SetupPerformanceStats {
   avg_pnl?: number;
 }
 
+export type SetupProbabilityTier =
+  | "TIER_1_ULTRA_HIGH" // Win rate >= 70%
+  | "TIER_2_STRONG"     // Win rate 60% - 69.9%
+  | "TIER_3_MODERATE"   // Win rate 50% - 59.9%
+  | "TIER_4_LOW";       // Win rate < 50%
+
+export interface SetupRankingItem {
+  rank: number;
+  setup_id: string;
+  setup_name: string;
+  category: "TREND" | "RANGE" | "REVERSAL" | "ORDERFLOW" | "MOMENTUM";
+  total_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number; // e.g. 75.0%
+  bayesian_win_rate: number; // Beta(2,2) posterior shrinkage
+  wilson_lower: number; // 95% Wilson score interval lower bound
+  wilson_upper: number; // 95% Wilson score interval upper bound
+  profit_factor: number;
+  net_pnl_usdt: number;
+  avg_pnl: number;
+  expectancy: number; // Mathematical Expectancy $/trade
+  payoff_ratio: number; // Avg Win / Avg Loss
+  long_count: number;
+  long_win_rate: number;
+  short_count: number;
+  short_win_rate: number;
+  avg_hold_duration_seconds: number;
+  tier: SetupProbabilityTier;
+  optimal_regimes: MarketRegime[];
+  sample_confidence: "VERY_HIGH" | "HIGH" | "MEDIUM" | "EMERGING" | "BASELINE";
+  recommendation: string;
+  description: string;
+  has_live_trades: boolean;
+}
+
+export interface SetupRankingResponse {
+  rankings: SetupRankingItem[];
+  summary: {
+    total_setups_evaluated: number;
+    highest_win_rate_setup: string;
+    highest_win_rate_pct: number;
+    highest_bayesian_setup: string;
+    average_win_rate_pct: number;
+    total_trades_analyzed: number;
+    high_probability_setups_count: number; // Tier 1 + Tier 2
+  };
+}
+
 export interface TradingSignal {
   id: string;
   trade_id: string | null;
@@ -396,9 +445,11 @@ export interface StrategyConfig {
     failed_auction_max_deviation_atr_mult?: number; // Maximum price poke beyond range boundary in ATR multiples (default: 0.8)
     failed_auction_max_candles_outside?: number; // Maximum candles price spent outside boundary before reclaiming (default: 3)
     vwap_band_reversal_enabled?: boolean; // Enable dedicated VWAP Outer Band Rejection Mean Reversion Strategy (Setup 10) (default: true)
-    vwap_band_reversal_deviation_mult?: number; // Standard deviation multiplier for VWAP outer band (default: 1.5)
+    vwap_band_reversal_deviation_mult?: number; // Standard deviation multiplier for VWAP outer band (default: 2.2)
     vwap_band_reversal_min_wick_ratio?: number; // Minimum rejection wick ratio for inward candle (default: 0.30)
     vwap_band_reversal_require_reversal_candle?: boolean; // Require verified 2-candle or pinbar reversal pattern (default: true)
+    vwap_band_reversal_min_reward_usd?: number; // Friction hurdle gate: Minimum price distance to VWAP target in USD (default: 120.0)
+    vwap_band_reversal_max_adx?: number; // Sideways ADX ceiling for mean-reversion scalp (default: 22.0)
     eqh_eql_strategy_enabled?: boolean; // Enable EQH/EQL Double Touch Divergence Strategy (Setup 11) (default: true)
     eqh_eql_min_touch_count?: number; // Minimum touches required at equal level (default: 2)
     eqh_eql_require_divergence?: boolean; // Require volume decay or RSI/CVD momentum divergence on 2nd touch (default: true)
@@ -409,13 +460,13 @@ export interface StrategyConfig {
     cvd_divergence_lookback_candles?: number; // Lookback candles to identify prior swing high/low for CVD comparison (default: 20)
     cvd_divergence_require_structural_extreme?: boolean; // Require divergence to occur at structural swing high/low or range boundary (default: true)
     oi_flush_strategy_enabled?: boolean; // Enable Open Interest (OI) Flush & Cascade Fade Strategy (Setup 13) (default: true)
-    oi_flush_min_contraction_pct?: number; // Minimum percentage drop in Open Interest over 1m-3m to qualify as flush (default: 1.0%)
-    oi_flush_min_vol_mult?: number; // Minimum volume multiplier on the flush impulse candle relative to 20-period SMA (default: 1.8x)
-    oi_flush_min_reversal_wick_pct?: number; // Minimum reversal wick percentage on the liquidation flush candle (default: 45%)
+    oi_flush_min_contraction_pct?: number; // Minimum percentage drop in Open Interest over 1m-3m to qualify as flush (default: 0.25%)
+    oi_flush_min_vol_mult?: number; // Minimum volume multiplier on the flush impulse candle relative to 20-period SMA (default: 1.5x)
+    oi_flush_min_reversal_wick_pct?: number; // Minimum reversal wick percentage on the liquidation flush candle (default: 38%)
     oi_flush_require_second_candle_confirmation?: boolean; // Require 2nd candle or delta stabilization confirmation before entering cascade fade (default: true)
     fresh_momentum_strategy_enabled?: boolean; // Enable Fresh Momentum Impulse Strategy (Setup 14) (default: true)
-    fresh_momentum_min_body_ratio?: number; // Minimum body-to-range ratio for displacement candle (default: 0.48)
-    fresh_momentum_min_vol_mult?: number; // Minimum volume multiplier relative to 20-period SMA (default: 1.15x)
+    fresh_momentum_min_body_ratio?: number; // Minimum body-to-range ratio for displacement candle (default: 0.60)
+    fresh_momentum_min_vol_mult?: number; // Minimum volume multiplier relative to 20-period SMA (default: 1.60x)
     fresh_momentum_max_chase_atr?: number; // Maximum ATR distance from impulse origin to qualify as fresh (default: 4.5x)
     fresh_momentum_respect_ema200_overextension?: boolean; // Respect 200 EMA overextension filter to avoid entering into macro exhaustion (default: true)
     fresh_momentum_max_ema200_extension_atr?: number; // Maximum allowed ATR extension from 200 EMA before Fresh Momentum is blocked (default: 2.5)

@@ -99,7 +99,52 @@ export interface BacktestResult {
   longWinRate: number;
   shortTradesCount: number;
   shortWinRate: number;
+  gatedSignalsCount?: number;
   regimeBreakdown: Record<string, RegimePerformance>;
   trades: BacktestTrade[];
   equityCurve: { timestamp: string; equity: number }[];
+}
+
+export interface BacktestRankItem {
+  rank: number;
+  setupId: string;
+  setupName: string;
+  category: "trend" | "range" | "reversal" | "orderflow";
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  wins?: number;
+  losses?: number;
+  winRate: number; // percentage, e.g. 75.0
+  bayesianWinRate: number;
+  profitFactor: number;
+  netPnlUsd: number;
+  netPnl?: number;
+  expectancyUsd: number;
+  maxDrawdownPercent: number;
+  longTrades: number;
+  longWinRate: number;
+  shortTrades: number;
+  shortWinRate: number;
+  averageHoldDurationSeconds: number;
+  tier: "TIER_1_ULTRA_HIGH" | "TIER_2_STRONG" | "TIER_3_MODERATE" | "TIER_4_LOW";
+  recommendation: string;
+}
+
+export interface BacktestRankResult {
+  runId: string;
+  days: number;
+  symbol: string;
+  periodStart: string;
+  periodEnd: string;
+  totalCandlesAnalyzed: number;
+  candlesEvaluated?: number;
+  rankings: BacktestRankItem[];
+  summary: {
+    totalSetupsEvaluated: number;
+    highestWinRateSetup: string;
+    highestWinRate: number;
+    averageWinRate: number;
+    totalBacktestTrades: number;
+  };
 }

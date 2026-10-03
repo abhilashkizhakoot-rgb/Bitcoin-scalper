@@ -94,12 +94,36 @@ export function evaluateVwapBandRejectionSetup(
   const atr14 = indicators.calculateATR(candles1m, 14);
   const currentAtr = atr14[lastIdx] || 50;
 
-  const mult = ms.vwap_band_reversal_deviation_mult || 1.5;
+  // Fix E: Strict sideways ADX ceiling (ADX <= 22) - block entry if directional breakout momentum is forming
+  const adx14 = indicators.calculateADX(candles1m, 14);
+  const currentAdx = adx14[lastIdx] !== undefined ? adx14[lastIdx] : 20;
+  const maxAdx = ms.vwap_band_reversal_max_adx || 22.0;
+
+  // Fix B: Widen standard deviation multiplier from 1.5 to 2.2 to fade true statistical exhaustion
+  const mult = ms.vwap_band_reversal_deviation_mult || 2.2;
   indicators.calculateVWAP(candles1m, mult);
 
   const vwapVal = currentCandle.vwap !== undefined ? currentCandle.vwap : currentPrice;
   const vwapUpper = currentCandle.vwap_upper !== undefined ? currentCandle.vwap_upper : currentPrice + mult * currentAtr;
   const vwapLower = currentCandle.vwap_lower !== undefined ? currentCandle.vwap_lower : currentPrice - mult * currentAtr;
+
+  if (currentAdx > maxAdx) {
+    return {
+      isValid: false,
+      direction,
+      vwapPrice: vwapVal,
+      bandPrice: direction === "LONG" ? vwapLower : vwapUpper,
+      bandDeviationSigma: mult,
+      reversalType: "",
+      stopLoss: 0,
+      takeProfit: 0,
+      riskReward: 0,
+      description: `Blocked: ADX (${currentAdx.toFixed(1)}) exceeds Setup 10 sideways ceiling (${maxAdx}). Strong breakout momentum underway.`
+    };
+  }
+
+  // Fix A: Friction Hurdle Gate - ensure minimum price travel to VWAP justifies fees
+  const minRewardHurdle = ms.vwap_band_reversal_min_reward_usd || Math.max(120, 1.35 * currentAtr);
 
   const minWickRatio = ms.vwap_band_reversal_min_wick_ratio || 0.30;
   const rsi14 = indicators.calculateRSI(candles1m.map(c => c.close), 14);
@@ -174,6 +198,22 @@ export function evaluateVwapBandRejectionSetup(
     const rewardDistance = takeProfit - currentPrice;
     const rrRatio = riskDistance > 0 ? rewardDistance / riskDistance : 0;
 
+    // Fix A: Minimum reward distance to VWAP to overcome exchange friction
+    if (rewardDistance < minRewardHurdle) {
+      return {
+        isValid: false,
+        direction: "LONG",
+        vwapPrice: vwapVal,
+        bandPrice: vwapLower,
+        bandDeviationSigma: mult,
+        reversalType: rejectionCheck.type || "Bullish Reversal",
+        stopLoss,
+        takeProfit,
+        riskReward: Number(rrRatio.toFixed(2)),
+        description: `VWAP Mean Reversion reward distance too low to overcome exchange friction ($${rewardDistance.toFixed(2)} < $${minRewardHurdle.toFixed(2)})`
+      };
+    }
+
     if (rrRatio < 1.25) {
       return {
         isValid: false,
@@ -205,7 +245,7 @@ export function evaluateVwapBandRejectionSetup(
         stopLoss,
         takeProfit,
         riskReward: Number(rrRatio.toFixed(2)),
-        description: `Bullish VWAP Band Mean-Reversion: Price rejected from -${mult.toFixed(1)}sigma band ($${vwapLower.toFixed(2)}) with ${patternName} (RSI: ${currentRsi.toFixed(1)}, R:R ${rrRatio.toFixed(2)}x) targeting Session VWAP $${vwapVal.toFixed(2)} (SL: $${stopLoss.toFixed(2)}).`
+        description: `Bullish VWAP Band Mean-Reversion (Post-Only Maker): Price rejected from -${mult.toFixed(1)}sigma band ($${vwapLower.toFixed(2)}) with ${patternName} (RSI: ${currentRsi.toFixed(1)}, R:R ${rrRatio.toFixed(2)}x) targeting Session VWAP $${vwapVal.toFixed(2)} (SL: $${stopLoss.toFixed(2)}).`
       };
     }
 
@@ -286,6 +326,22 @@ export function evaluateVwapBandRejectionSetup(
     const rewardDistance = currentPrice - takeProfit;
     const rrRatio = riskDistance > 0 ? rewardDistance / riskDistance : 0;
 
+    // Fix A: Minimum reward distance to VWAP to overcome exchange friction
+    if (rewardDistance < minRewardHurdle) {
+      return {
+        isValid: false,
+        direction: "SHORT",
+        vwapPrice: vwapVal,
+        bandPrice: vwapUpper,
+        bandDeviationSigma: mult,
+        reversalType: rejectionCheck.type || "Bearish Reversal",
+        stopLoss,
+        takeProfit,
+        riskReward: Number(rrRatio.toFixed(2)),
+        description: `VWAP Mean Reversion reward distance too low to overcome exchange friction ($${rewardDistance.toFixed(2)} < $${minRewardHurdle.toFixed(2)})`
+      };
+    }
+
     if (rrRatio < 1.25) {
       return {
         isValid: false,
@@ -317,7 +373,7 @@ export function evaluateVwapBandRejectionSetup(
         stopLoss,
         takeProfit,
         riskReward: Number(rrRatio.toFixed(2)),
-        description: `Bearish VWAP Band Mean-Reversion: Price rejected from +${mult.toFixed(1)}sigma band ($${vwapUpper.toFixed(2)}) with ${patternName} (RSI: ${currentRsi.toFixed(1)}, R:R ${rrRatio.toFixed(2)}x) targeting Session VWAP $${vwapVal.toFixed(2)} (SL: $${stopLoss.toFixed(2)}).`
+        description: `Bearish VWAP Band Mean-Reversion (Post-Only Maker): Price rejected from +${mult.toFixed(1)}sigma band ($${vwapUpper.toFixed(2)}) with ${patternName} (RSI: ${currentRsi.toFixed(1)}, R:R ${rrRatio.toFixed(2)}x) targeting Session VWAP $${vwapVal.toFixed(2)} (SL: $${stopLoss.toFixed(2)}).`
       };
     }
 

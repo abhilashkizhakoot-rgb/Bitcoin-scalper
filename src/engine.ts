@@ -1942,8 +1942,18 @@ class TradingEngine {
     );
     const eligSweepDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_3_liquidity_sweep", signalDirection).eligible;
     const eligFailedAuctionDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_9_range_failed_auction", signalDirection).eligible;
-    const isSmcActive = (signalDirection === "LONG" && ((eligSweepDir && this.detectLiquiditySweep("LONG").isSweep) || (eligFailedAuctionDir && this.evaluateFailedAuctionSetup("LONG").isValid) || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive || smcTrendlineActive)) ||
-                        (signalDirection === "SHORT" && ((eligSweepDir && this.detectLiquiditySweep("SHORT").isSweep) || (eligFailedAuctionDir && this.evaluateFailedAuctionSetup("SHORT").isValid) || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive || smcTrendlineActive));
+    const eligOiFlushDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_13_oi_flush_cascade", signalDirection).eligible;
+    const smcOiFlushActive = eligOiFlushDir && (
+      (signalDirection === "LONG" && this.evaluateOiFlushCascadeFadeSetup("LONG").isValid) ||
+      (signalDirection === "SHORT" && this.evaluateOiFlushCascadeFadeSetup("SHORT").isValid)
+    );
+    const eligCvdAbsorptionDir = (signalDirection === "LONG" || signalDirection === "SHORT") && this.isSetupEligibleForConditions("setup_12_cvd_absorption", signalDirection).eligible;
+    const smcCvdAbsorptionActive = eligCvdAbsorptionDir && (
+      (signalDirection === "LONG" && this.evaluateCvdAbsorptionDivergenceSetup("LONG").isValid) ||
+      (signalDirection === "SHORT" && this.evaluateCvdAbsorptionDivergenceSetup("SHORT").isValid)
+    );
+    const isSmcActive = (signalDirection === "LONG" && ((eligSweepDir && this.detectLiquiditySweep("LONG").isSweep) || (eligFailedAuctionDir && this.evaluateFailedAuctionSetup("LONG").isValid) || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive || smcTrendlineActive || smcOiFlushActive || smcCvdAbsorptionActive)) ||
+                        (signalDirection === "SHORT" && ((eligSweepDir && this.detectLiquiditySweep("SHORT").isSweep) || (eligFailedAuctionDir && this.evaluateFailedAuctionSetup("SHORT").isValid) || smcFvgActive || smcVwapActive || smcEqhEqlActive || smcFreshMomentumActive || smcTrendlineActive || smcOiFlushActive || smcCvdAbsorptionActive));
 
     if (this.currentRegime === MarketRegime.LOW_VOLATILITY && !isSmcActive) {
       const earlyConds: Checkpoint[] = [
@@ -2017,14 +2027,15 @@ class TradingEngine {
 
     // C2: Market Regime lock
     // Blocked all entries during LOW_VOLATILITY unless structural setup active.
-    const regimeValid = !isLowVolatility || smcFreshMomentumActive;
+    const regimeValid = !isLowVolatility || smcFreshMomentumActive || smcOiFlushActive;
     const regimeAligned =
-      (signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND || smcFreshMomentumActive)) ||
-      (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND || smcFreshMomentumActive)) ||
+      (signalDirection === "LONG" && (this.currentRegime === MarketRegime.STRONG_UPTREND || this.currentRegime === MarketRegime.RANGE_BOUND || smcFreshMomentumActive || smcOiFlushActive)) ||
+      (signalDirection === "SHORT" && (this.currentRegime === MarketRegime.STRONG_DOWNTREND || this.currentRegime === MarketRegime.RANGE_BOUND || smcFreshMomentumActive || smcOiFlushActive)) ||
       this.currentRegime === MarketRegime.HIGH_VOLATILITY ||
-      smcFreshMomentumActive;
+      smcFreshMomentumActive ||
+      smcOiFlushActive;
 
-    const isRegimeSoftened = smcFreshMomentumActive;
+    const isRegimeSoftened = smcFreshMomentumActive || smcOiFlushActive;
 
     conditions.push({
       name: "Market Regime Filter",
@@ -2068,10 +2079,18 @@ class TradingEngine {
       trendAligned = adxMet;
       currentTrendStr = smcFreshMomentumActive
         ? "PASSING (Bypassed via Fresh Momentum Impulse Setup 14)"
-        : (activeSweepSignal.isSweep 
-            ? "PASSING (Bypassed via Liquidity Sweep Reversal Setup 3)"
-            : "PASSING (Bypassed via SMC Structural Setup)");
-      requiredStr = smcFreshMomentumActive ? "Fresh Momentum Impulse Active" : "SMC Structural Setup Active";
+        : (smcOiFlushActive
+            ? "PASSING (Bypassed via OI Flush & Cascade Fade Setup 13)"
+            : (smcCvdAbsorptionActive
+                ? "PASSING (Bypassed via CVD Absorption Setup 12)"
+                : (activeSweepSignal.isSweep 
+                    ? "PASSING (Bypassed via Liquidity Sweep Reversal Setup 3)"
+                    : "PASSING (Bypassed via SMC Structural Setup)")));
+      requiredStr = smcFreshMomentumActive 
+        ? "Fresh Momentum Impulse Active" 
+        : (smcOiFlushActive 
+            ? "OI Flush & Cascade Fade Active" 
+            : (smcCvdAbsorptionActive ? "CVD Absorption Active" : "SMC Structural Setup Active"));
     } else if (isExhaustionBypassEnabled && isExhaustionActive) {
       adxMet = adxValue >= hardFloorAdx && adxValue <= maxExhaustionAdx;
       trendAligned = adxMet;
@@ -2407,40 +2426,40 @@ class TradingEngine {
     const netCVD = this.orderFlowStats ? this.orderFlowStats.netCVD : 0;
 
     if (signalDirection === "LONG") {
-      const hasMinTakerBuy = flowRes.takerBuyRatio >= 0.45;
-      const hasMinScore = flowRes.score >= 35;
-      const notOpposingCvd = netCVD >= -0.20 || flowRes.takerBuyRatio >= 0.52;
+      const hasMinTakerBuy = smcOiFlushActive ? flowRes.takerBuyRatio >= 0.38 : flowRes.takerBuyRatio >= 0.45;
+      const hasMinScore = smcOiFlushActive ? flowRes.score >= 25 : flowRes.score >= 35;
+      const notOpposingCvd = smcOiFlushActive || netCVD >= -0.20 || flowRes.takerBuyRatio >= 0.52;
       ofMet = hasMinTakerBuy && hasMinScore && notOpposingCvd;
       if (!ofMet) {
         let failReason = "";
         if (!hasMinTakerBuy) {
-          failReason = `Taker Buy ${(flowRes.takerBuyRatio * 100).toFixed(1)}% < 45.0% minimum`;
+          failReason = `Taker Buy ${(flowRes.takerBuyRatio * 100).toFixed(1)}% < ${(smcOiFlushActive ? 38 : 45).toFixed(1)}% minimum`;
         } else if (!notOpposingCvd) {
           failReason = `Negative CVD (${netCVD.toFixed(4)} BTC) indicates ongoing sell absorption`;
         } else {
-          failReason = `Order Flow score ${flowRes.score}/100 < 35`;
+          failReason = `Order Flow score ${flowRes.score}/100 < ${smcOiFlushActive ? 25 : 35}`;
         }
         ofVal = `${ofVal} - BLOCKED (${failReason}: ${flowRes.description})`;
       } else {
-        ofVal = `${ofVal} - PASSED (Verified Institutional Buy Support)`;
+        ofVal = `${ofVal} - PASSED (${smcOiFlushActive ? "Verified Liquidation Flush Buy Absorption" : "Verified Institutional Buy Support"})`;
       }
     } else if (signalDirection === "SHORT") {
-      const hasMinTakerSell = flowRes.takerBuyRatio <= 0.55; // Taker sell >= 45%
-      const hasMinScore = flowRes.score >= 35;
-      const notOpposingCvd = netCVD <= 0.20 || flowRes.takerBuyRatio <= 0.48;
+      const hasMinTakerSell = smcOiFlushActive ? flowRes.takerBuyRatio <= 0.62 : flowRes.takerBuyRatio <= 0.55; // Taker sell >= 38% for flush fade, 45% normal
+      const hasMinScore = smcOiFlushActive ? flowRes.score >= 25 : flowRes.score >= 35;
+      const notOpposingCvd = smcOiFlushActive || netCVD <= 0.20 || flowRes.takerBuyRatio <= 0.48;
       ofMet = hasMinTakerSell && hasMinScore && notOpposingCvd;
       if (!ofMet) {
         let failReason = "";
         if (!hasMinTakerSell) {
-          failReason = `Taker Sell ${((1 - flowRes.takerBuyRatio) * 100).toFixed(1)}% < 45.0% minimum (Taker Buy ${(flowRes.takerBuyRatio * 100).toFixed(1)}% > 55.0%)`;
+          failReason = `Taker Sell ${((1 - flowRes.takerBuyRatio) * 100).toFixed(1)}% < ${(smcOiFlushActive ? 38 : 45).toFixed(1)}% minimum`;
         } else if (!notOpposingCvd) {
           failReason = `Positive CVD (+${netCVD.toFixed(4)} BTC) indicates buyer absorption`;
         } else {
-          failReason = `Order Flow score ${flowRes.score}/100 < 35`;
+          failReason = `Order Flow score ${flowRes.score}/100 < ${smcOiFlushActive ? 25 : 35}`;
         }
         ofVal = `${ofVal} - BLOCKED (${failReason}: ${flowRes.description})`;
       } else {
-        ofVal = `${ofVal} - PASSED (Verified Institutional Sell Pressure)`;
+        ofVal = `${ofVal} - PASSED (${smcOiFlushActive ? "Verified Liquidation Flush Sell Absorption" : "Verified Institutional Sell Pressure"})`;
       }
     }
 
@@ -3322,21 +3341,22 @@ class TradingEngine {
       }
     } catch (err) {
       // Offline / fallback: simulate realistic subtle OI fluctuations, with occasional contraction on high-volatility candles
-      const current = this.openInterestStats.currentOI;
+      const current = this.openInterestStats.currentOI || 85000;
       const lastCandle = this.candles1m[this.candles1m.length - 1];
-      const isHighVol = lastCandle && lastCandle.volume > 28;
-      const changePct = isHighVol ? -(1.0 + Math.random() * 0.8) : (Math.random() - 0.49) * 0.15;
+      const prevCandle = this.candles1m.length >= 2 ? this.candles1m[this.candles1m.length - 2] : null;
+      const isHighVol = lastCandle && (lastCandle.volume > 18 || (prevCandle && prevCandle.volume > 18));
+      const changePct = isHighVol ? -(0.35 + Math.random() * 0.45) : (Math.random() - 0.49) * 0.15;
       const newOi = Math.max(80000, current * (1 + changePct / 100));
       const nowSec = Math.floor(Date.now() / 1000);
 
       this.openInterestStats = {
         currentOI: newOi,
         prevOI_1m: current,
-        prevOI_5m: current,
+        prevOI_5m: current * (1 - changePct * 0.5 / 100),
         oiChange1m: newOi - current,
         oiChangePct1m: changePct,
-        oiChange5m: changePct * 1.2,
-        oiChangePct5m: changePct * 1.2,
+        oiChange5m: (newOi - current) * 1.5,
+        oiChangePct5m: changePct * 1.5,
         lastUpdateSecs: nowSec,
       };
     }
@@ -5559,6 +5579,9 @@ class TradingEngine {
                                 result.message?.toLowerCase().includes("squeeze") ||
                                 result.message?.toLowerCase().includes("momentum") ||
                                 result.message?.toLowerCase().includes("sweep") ||
+                                result.message?.toLowerCase().includes("flush") ||
+                                result.message?.toLowerCase().includes("cascade") ||
+                                result.active_setup?.setupId === "setup_13_oi_flush_cascade" ||
                                 result.message?.toLowerCase().includes("isolated");
 
     const relVolume = this.calculateAccurateRelativeVolume();
@@ -5643,19 +5666,24 @@ class TradingEngine {
     const angle = Math.atan(normalizedSlope / 10) * (180 / Math.PI);
 
     // 1. Trend Alignment Check: Prevent trading against a strong long-term EMA 200 trend
-    if (direction === "LONG" && angle < -12) {
-      return {
-        ...result,
-        confirmed: false,
-        message: `Blocked: LONG trade avoided because the EMA 200 long-term trend is strongly bearish (Angle: ${angle.toFixed(1)} deg), presenting high overhead rejection risk.`
-      };
-    }
-    if (direction === "SHORT" && angle > 12) {
-      return {
-        ...result,
-        confirmed: false,
-        message: `Blocked: SHORT trade avoided because the EMA 200 long-term trend is strongly bullish (Angle: ${angle.toFixed(1)} deg), presenting high dynamic support bounce risk.`
-      };
+    const isCascadeFade = result.active_setup?.setupId === "setup_13_oi_flush_cascade" ||
+                          result.message?.toLowerCase().includes("setup 13") ||
+                          result.message?.toLowerCase().includes("cascade fade");
+    if (!isCascadeFade) {
+      if (direction === "LONG" && angle < -12) {
+        return {
+          ...result,
+          confirmed: false,
+          message: `Blocked: LONG trade avoided because the EMA 200 long-term trend is strongly bearish (Angle: ${angle.toFixed(1)} deg), presenting high overhead rejection risk.`
+        };
+      }
+      if (direction === "SHORT" && angle > 12) {
+        return {
+          ...result,
+          confirmed: false,
+          message: `Blocked: SHORT trade avoided because the EMA 200 long-term trend is strongly bullish (Angle: ${angle.toFixed(1)} deg), presenting high dynamic support bounce risk.`
+        };
+      }
     }
 
     // 2. Adaptive Proximity & Chop Protection Rules
@@ -6442,7 +6470,7 @@ class TradingEngine {
       setup_11_eqh_eql_double_touch: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
       setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
       setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
-      setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+      setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY],
       setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
     };
 
@@ -6551,7 +6579,7 @@ class TradingEngine {
       const chopIndex = compositeChop.compositeChop;
 
       if (isMeanReversion) {
-        const maxAdx = ms.dynamic_mean_reversion_max_adx || 32;
+        const maxAdx = setupId === "setup_10_vwap_band_rejection" ? (ms.vwap_band_reversal_max_adx || 22) : (ms.dynamic_mean_reversion_max_adx || 32);
         if (currentAdx > maxAdx) {
           conditions_allowed = false;
           conditionReason = `Dynamically gated: ADX (${currentAdx.toFixed(1)}) exceeds mean-reversion ceiling (${maxAdx}). Strong runaway trend detected.`;
@@ -8911,8 +8939,10 @@ class TradingEngine {
     const isEmaOverextended = distEma9 > 2.5 * lastAtr;
     const isConditionB = isOutsideBB && isEmaOverextended;
 
+    const isOiFlush = this.evaluateOiFlushCascadeFadeSetup(execDirection).isValid;
+
     // Extreme Confluence: Parabolic & mathematically exhausted -> BLOCK ENTRY
-    if (isConditionA && isConditionB && !isFreshImpulse) {
+    if (isConditionA && isConditionB && !isFreshImpulse && !isOiFlush) {
       this.log(
         `  [ENTRY BLOCKED - Confluence of Extremes] Late-stage exhaustion blowout detected! Order Flow Climax (Imbalance: ${(rawImbalance * 100).toFixed(1)}%, Taker: ${(takerRatio * 100).toFixed(1)}%) & Physical Overextension (Outside BB: ${isOutsideBB}, Dist to EMA9: $${distEma9.toFixed(2)} vs 2.5xATR $${(2.5 * lastAtr).toFixed(2)}). Trade entry aborted.`
       );
@@ -8921,6 +8951,8 @@ class TradingEngine {
 
     if (isFreshImpulse) {
       this.log(`[FRESH MOMENTUM] Early-stage momentum impulse displacement verified (Setup 14). Bypassing late-stage exhaustion block.`);
+    } else if (isOiFlush) {
+      this.log(`[OI FLUSH FADE] Liquidation cascade exhaustion fade verified (Setup 13). Bypassing late-stage exhaustion block.`);
     } else if (isConditionA && !isConditionB) {
       this.log(`[VOLT] [High-Momentum Breakout Allowed]: Extreme Order Flow detected, but Price is not overextended. Executing Market Order.`);
     } else if (isConditionB && !isConditionA) {

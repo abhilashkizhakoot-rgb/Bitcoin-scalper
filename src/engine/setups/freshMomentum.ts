@@ -61,8 +61,9 @@ export function evaluateFreshMomentumImpulseSetup(
     };
   }
 
-  const minBodyRatio = ms.fresh_momentum_min_body_ratio !== undefined ? ms.fresh_momentum_min_body_ratio : 0.48;
-  const minVolMult = ms.fresh_momentum_min_vol_mult !== undefined ? ms.fresh_momentum_min_vol_mult : 1.15;
+  // Fix C: Stiffen volume multiplier (1.60x) and displacement body ratio (0.60) to eliminate noise trades
+  const minBodyRatio = ms.fresh_momentum_min_body_ratio !== undefined ? ms.fresh_momentum_min_body_ratio : 0.60;
+  const minVolMult = ms.fresh_momentum_min_vol_mult !== undefined ? ms.fresh_momentum_min_vol_mult : 1.60;
   const maxChaseAtr = ms.fresh_momentum_max_chase_atr !== undefined ? ms.fresh_momentum_max_chase_atr : 4.5;
   const ema200ProximityBlock = ms.fresh_momentum_ema200_proximity_block !== false;
   const slowEmaPeriod = ms.slow_ema_period || 200;
@@ -201,7 +202,7 @@ export function evaluateFreshMomentumImpulseSetup(
       
       const prevC = candles1m[idx - 1];
       const twoCandleBody = prevC ? (prevC.open - c.close) : 0;
-      const currentCandleDisplacement = body >= Math.max(18, 0.30 * currentAtr) && bodyRatio >= 0.35;
+      const currentCandleDisplacement = body >= Math.max(22, 0.40 * currentAtr) && bodyRatio >= 0.50;
       const isTwoCandleDisplacement = prevC &&
         currentCandleDisplacement &&
         twoCandleBody >= Math.max(45, 0.85 * currentAtr) &&
@@ -235,7 +236,9 @@ export function evaluateFreshMomentumImpulseSetup(
       const risk = stopLoss - currentPrice;
       if (risk <= 0) continue;
 
-      const takeProfit = currentPrice - Math.max(risk * 2.2, 2.0 * currentAtr);
+      // Fix A & Win-Rate Calibration: Anchor Take Profit directly to empirical 1m impulse capacity without risk-multiplied inflation
+      const targetDistance = Math.max(110, 1.40 * currentAtr);
+      const takeProfit = currentPrice - targetDistance;
       const rrRatio = (currentPrice - takeProfit) / risk;
 
       return {
@@ -328,7 +331,7 @@ export function evaluateFreshMomentumImpulseSetup(
 
       const prevC = candles1m[idx - 1];
       const twoCandleBody = prevC ? (c.close - prevC.open) : 0;
-      const currentCandleDisplacement = body >= Math.max(18, 0.30 * currentAtr) && bodyRatio >= 0.35;
+      const currentCandleDisplacement = body >= Math.max(22, 0.40 * currentAtr) && bodyRatio >= 0.50;
       const isTwoCandleDisplacement = prevC &&
         currentCandleDisplacement &&
         twoCandleBody >= Math.max(45, 0.85 * currentAtr) &&
@@ -362,7 +365,9 @@ export function evaluateFreshMomentumImpulseSetup(
       const risk = currentPrice - stopLoss;
       if (risk <= 0) continue;
 
-      const takeProfit = currentPrice + Math.max(risk * 2.2, 2.0 * currentAtr);
+      // Fix A & Win-Rate Calibration: Anchor Take Profit directly to empirical 1m impulse capacity without risk-multiplied inflation
+      const targetDistance = Math.max(110, 1.40 * currentAtr);
+      const takeProfit = currentPrice + targetDistance;
       const rrRatio = (takeProfit - currentPrice) / risk;
 
       return {

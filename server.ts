@@ -12,7 +12,7 @@ import { dbManager } from "./src/db_sim.js";
 import { tradingEngine } from "./src/engine.js";
 import { ConnectionStatus, MarketRegime } from "./src/types.js";
 import { GoogleGenAI, Type } from "@google/genai";
-import { AVAILABLE_SETUPS, runIsolatedBacktest } from "./src/backtester/backtestRunner.js";
+import { AVAILABLE_SETUPS, runIsolatedBacktest, runRankAllBacktest } from "./src/backtester/backtestRunner.js";
 import { rollingBufferManager } from "./src/backtester/rollingBuffer.js";
 
 function getRequestBaseUrl(req: express.Request): string {
@@ -584,6 +584,17 @@ async function startServer() {
     }
   });
 
+  app.post("/api/backtest/rank-all", async (req, res) => {
+    try {
+      const payload = req.body || {};
+      const rankResult = await runRankAllBacktest(payload);
+      res.json({ success: true, result: rankResult });
+    } catch (err: any) {
+      console.error("[BacktestAPI] Rank all error:", err);
+      res.status(500).json({ success: false, error: err.message || "Backtest ranking failed" });
+    }
+  });
+
   app.get("/api/backtest/history", (req, res) => {
     res.json({ history: backtestHistoryCache });
   });
@@ -705,6 +716,12 @@ async function startServer() {
 
   app.get("/api/analytics/setup-performance", (req, res) => {
     res.json(dbManager.getPerformanceBySetup());
+  });
+
+  app.get("/api/analytics/setup-rankings", (req, res) => {
+    const { sortBy, tier, regime } = req.query as { sortBy?: any; tier?: string; regime?: string };
+    const rankings = dbManager.getSetupRankings({ sortBy, tier, regime });
+    res.json(rankings);
   });
 
   // ----------------------------------------------------

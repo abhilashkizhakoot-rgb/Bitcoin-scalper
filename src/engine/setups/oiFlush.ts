@@ -47,36 +47,48 @@ export function evaluateOiFlushCascadeFadeSetup(
     };
   }
 
-  // Regime Safeguards: Do not fade liquidation cascades against strong trending regimes
+  // Regime Safeguards: In strong runaway regimes, ensure confirmed exhaustion wick and stabilization
+  // (Note: Do not unconditionally block STRONG_DOWNTREND/STRONG_UPTREND because liquidation cascades inherently create waterfall candles that trigger trend regimes!)
   if (direction === "LONG" && currentRegime === MarketRegime.STRONG_DOWNTREND) {
-    return {
-      isValid: false,
-      direction,
-      flushExtreme: 0,
-      cascadeType: "",
-      oiContractionPct: 0,
-      volumeMult: 0,
-      reversalWickPct: 0,
-      stopLoss: 0,
-      takeProfit: 0,
-      riskReward: 0,
-      description: "Blocked: Long Liquidation Flush fade prohibited in STRONG_DOWNTREND regime."
-    };
+    // Only block if current candle continues to dump hard with no stabilization wick
+    const curC = candles1m[candles1m.length - 1];
+    const curRange = Math.max(1.0, curC.high - curC.low);
+    const lowerWick = Math.min(curC.open, curC.close) - curC.low;
+    if (lowerWick / curRange < 0.25 && curC.close <= curC.open) {
+      return {
+        isValid: false,
+        direction,
+        flushExtreme: 0,
+        cascadeType: "",
+        oiContractionPct: 0,
+        volumeMult: 0,
+        reversalWickPct: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Blocked: Active runaway selloff in STRONG_DOWNTREND with no stabilization wick."
+      };
+    }
   }
   if (direction === "SHORT" && currentRegime === MarketRegime.STRONG_UPTREND) {
-    return {
-      isValid: false,
-      direction,
-      flushExtreme: 0,
-      cascadeType: "",
-      oiContractionPct: 0,
-      volumeMult: 0,
-      reversalWickPct: 0,
-      stopLoss: 0,
-      takeProfit: 0,
-      riskReward: 0,
-      description: "Blocked: Short Squeeze Flush fade prohibited in STRONG_UPTREND regime."
-    };
+    const curC = candles1m[candles1m.length - 1];
+    const curRange = Math.max(1.0, curC.high - curC.low);
+    const upperWick = curC.high - Math.max(curC.open, curC.close);
+    if (upperWick / curRange < 0.25 && curC.close >= curC.open) {
+      return {
+        isValid: false,
+        direction,
+        flushExtreme: 0,
+        cascadeType: "",
+        oiContractionPct: 0,
+        volumeMult: 0,
+        reversalWickPct: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Blocked: Active runaway breakout in STRONG_UPTREND with no exhaustion wick."
+      };
+    }
   }
 
   const lastIdx = candles1m.length - 1;
@@ -96,9 +108,9 @@ export function evaluateOiFlushCascadeFadeSetup(
     };
   }
 
-  const minContractionPct = ms.oi_flush_min_contraction_pct !== undefined ? ms.oi_flush_min_contraction_pct : 1.0;
-  const minVolMult = ms.oi_flush_min_vol_mult !== undefined ? ms.oi_flush_min_vol_mult : 1.8;
-  const minWickPct = (ms.oi_flush_min_reversal_wick_pct !== undefined ? ms.oi_flush_min_reversal_wick_pct : 45) / 100;
+  const minContractionPct = ms.oi_flush_min_contraction_pct !== undefined ? ms.oi_flush_min_contraction_pct : 0.05;
+  const minVolMult = ms.oi_flush_min_vol_mult !== undefined ? ms.oi_flush_min_vol_mult : 1.20;
+  const minWickPct = (ms.oi_flush_min_reversal_wick_pct !== undefined ? ms.oi_flush_min_reversal_wick_pct : 30) / 100;
   const requireConfirmation = ms.oi_flush_require_second_candle_confirmation !== false;
 
   const currentCandle = candles1m[lastIdx];
@@ -111,168 +123,180 @@ export function evaluateOiFlushCascadeFadeSetup(
   const sumVol = volSlice.reduce((sum, c) => sum + (c.volume || 0), 0);
   const avgVol = volSlice.length > 0 ? Math.max(1.0, sumVol / volSlice.length) : 15.0;
 
-  // Detect cascade candidate: either prevCandle (with current candle confirming) or currentCandle
-  const checkPrev = requireConfirmation && lastIdx >= 2;
-  const flushCandle = checkPrev ? prevCandle : currentCandle;
-
-  const flushRange = Math.max(1.0, flushCandle.high - flushCandle.low);
-  const volMult = (flushCandle.volume || avgVol) / avgVol;
-
   // Measure OI contraction: negative change in OI during flush
   const oiDropPct1m = -openInterestStats.oiChangePct1m;
   const oiDropPct5m = -openInterestStats.oiChangePct5m;
   const effectiveOiContraction = Math.max(0, Math.max(oiDropPct1m, oiDropPct5m));
 
-  const isVolumeSurge = volMult >= minVolMult * 0.90;
-  const isOiContractionMet = effectiveOiContraction >= minContractionPct || (volMult >= 2.0 && flushRange >= 1.2 * currentAtr && (openInterestStats.oiChange1m < 0 || openInterestStats.oiChangePct1m <= -0.4));
-  const isDisplacementSufficient = flushRange >= 0.9 * currentAtr;
+  // Evaluate candidate candles: prefer prevCandle with 2nd candle stabilization if requireConfirmation is set,
+  // or currentCandle if it has already formed the flush rejection
+  const candidates: {
+    candle: typeof currentCandle;
+    isPrev: boolean;
+    volMult: number;
+    range: number;
+    wickRatio: number;
+  }[] = [];
+
+  if (requireConfirmation && lastIdx >= 2) {
+    const pRange = Math.max(1.0, prevCandle.high - prevCandle.low);
+    const pVolMult = (prevCandle.volume || avgVol) / avgVol;
+    const pWick = direction === "LONG"
+      ? Math.min(prevCandle.open, prevCandle.close) - prevCandle.low
+      : prevCandle.high - Math.max(prevCandle.open, prevCandle.close);
+    candidates.push({
+      candle: prevCandle,
+      isPrev: true,
+      volMult: pVolMult,
+      range: pRange,
+      wickRatio: pWick / pRange
+    });
+  }
+
+  // Also consider current candle if it formed significant rejection
+  const cRange = Math.max(1.0, currentCandle.high - currentCandle.low);
+  const cVolMult = (currentCandle.volume || avgVol) / avgVol;
+  const cWick = direction === "LONG"
+    ? Math.min(currentCandle.open, currentCandle.close) - currentCandle.low
+    : currentCandle.high - Math.max(currentCandle.open, currentCandle.close);
+  candidates.push({
+    candle: currentCandle,
+    isPrev: false,
+    volMult: cVolMult,
+    range: cRange,
+    wickRatio: cWick / cRange
+  });
 
   if (direction === "LONG") {
-    // Long Liquidation Cascade Fade: Heavy longs liquidated -> price dropped -> long lower wick
-    const lowerWick = Math.min(flushCandle.open, flushCandle.close) - flushCandle.low;
-    const lowerWickRatio = lowerWick / flushRange;
+    for (const cand of candidates) {
+      const flushCandle = cand.candle;
+      const flushRange = cand.range;
+      const volMult = cand.volMult;
+      const lowerWickRatio = cand.wickRatio;
 
-    if (!isVolumeSurge || !isOiContractionMet || !isDisplacementSufficient || lowerWickRatio < minWickPct) {
+      const isVolumeSurge = volMult >= minVolMult * 0.85 || volMult >= 1.15;
+      const isOiContractionMet =
+        effectiveOiContraction >= Math.min(minContractionPct, 0.02) ||
+        openInterestStats.oiChange1m < 0 ||
+        openInterestStats.oiChange5m < 0 ||
+        openInterestStats.oiChangePct1m <= -0.02 ||
+        (volMult >= 1.20 && flushRange >= 0.40 * currentAtr) ||
+        orderFlowStats.takerBuyRatio <= 0.40;
+      const isDisplacementSufficient = flushRange >= 0.35 * currentAtr;
+
+      if (!isVolumeSurge || !isOiContractionMet || !isDisplacementSufficient || lowerWickRatio < minWickPct) {
+        continue;
+      }
+
+      // Anti-falling-knife safeguard if checking previous candle
+      if (cand.isPrev) {
+        if (currentCandle.low < flushCandle.low - 0.05 * currentAtr) {
+          continue; // cascade breached flush low
+        }
+        if (orderFlowStats.takerBuyRatio < 0.32) {
+          continue; // severe selling still active
+        }
+      }
+
+      const stopLoss = flushCandle.low - Math.max(25, 0.45 * currentAtr);
+      const risk = currentPrice - stopLoss;
+      const takeProfit = Math.max(flushCandle.high, currentPrice + Math.max(risk * 2.2, 2.0 * currentAtr));
+      const rrRatio = risk > 0 ? (takeProfit - currentPrice) / risk : 0;
+
       return {
-        isValid: false,
-        direction,
+        isValid: true,
+        direction: "LONG",
         flushExtreme: flushCandle.low,
-        cascadeType: "",
-        oiContractionPct: effectiveOiContraction,
-        volumeMult: volMult,
-        reversalWickPct: lowerWickRatio * 100,
-        stopLoss: 0,
-        takeProfit: 0,
-        riskReward: 0,
-        description: `No long liquidation cascade flush (Vol: ${volMult.toFixed(2)}x/${minVolMult}x, OI Contraction: ${effectiveOiContraction.toFixed(2)}%/${minContractionPct}%, Lower Wick: ${(lowerWickRatio * 100).toFixed(0)}%/${(minWickPct * 100).toFixed(0)}%)`
+        cascadeType: "LONG_LIQUIDATION_CASCADE_FADE",
+        oiContractionPct: Number(effectiveOiContraction.toFixed(2)),
+        volumeMult: Number(volMult.toFixed(2)),
+        reversalWickPct: Number((lowerWickRatio * 100).toFixed(0)),
+        stopLoss,
+        takeProfit,
+        riskReward: Number(rrRatio.toFixed(2)),
+        description: `Long Liquidation Cascade Fade: Forced liquidations flushed price down to $${flushCandle.low.toFixed(2)} with ${volMult.toFixed(2)}x volume surge & ${effectiveOiContraction.toFixed(2)}% OI contraction. Liquidation wick confirmed (${(lowerWickRatio * 100).toFixed(0)}% lower wick). Fading air pocket back to origin $${takeProfit.toFixed(2)} (Strict SL: $${stopLoss.toFixed(2)}, R:R ${rrRatio.toFixed(2)}:1).`
       };
     }
 
-    // Anti-falling-knife safeguard:
-    if (checkPrev) {
-      if (currentCandle.low < flushCandle.low - 0.05 * currentAtr) {
-        return {
-          isValid: false,
-          direction,
-          flushExtreme: flushCandle.low,
-          cascadeType: "",
-          oiContractionPct: effectiveOiContraction,
-          volumeMult: volMult,
-          reversalWickPct: lowerWickRatio * 100,
-          stopLoss: 0,
-          takeProfit: 0,
-          riskReward: 0,
-          description: `Cascade still active: current candle breached flush low $${flushCandle.low.toFixed(2)}`
-        };
-      }
-      if (orderFlowStats.takerBuyRatio < 0.44 && currentPrice < currentCandle.open) {
-        return {
-          isValid: false,
-          direction,
-          flushExtreme: flushCandle.low,
-          cascadeType: "",
-          oiContractionPct: effectiveOiContraction,
-          volumeMult: volMult,
-          reversalWickPct: lowerWickRatio * 100,
-          stopLoss: 0,
-          takeProfit: 0,
-          riskReward: 0,
-          description: `Awaiting 2nd candle delta stabilization after liquidation flush (Taker Buy: ${(orderFlowStats.takerBuyRatio * 100).toFixed(1)}%)`
-        };
-      }
-    }
-
-    const stopLoss = flushCandle.low - Math.max(25, 0.45 * currentAtr);
-    const risk = currentPrice - stopLoss;
-    const takeProfit = Math.max(flushCandle.high, currentPrice + Math.max(risk * 2.5, 2.2 * currentAtr));
-    const rrRatio = risk > 0 ? (takeProfit - currentPrice) / risk : 0;
-
+    const primary = candidates[0];
     return {
-      isValid: true,
-      direction: "LONG",
-      flushExtreme: flushCandle.low,
-      cascadeType: "LONG_LIQUIDATION_CASCADE_FADE",
+      isValid: false,
+      direction,
+      flushExtreme: primary.candle.low,
+      cascadeType: "",
       oiContractionPct: effectiveOiContraction,
-      volumeMult: volMult,
-      reversalWickPct: lowerWickRatio * 100,
-      stopLoss,
-      takeProfit,
-      riskReward: Number(rrRatio.toFixed(2)),
-      description: `Long Liquidation Cascade Fade: Forced liquidations flushed price down to $${flushCandle.low.toFixed(2)} with ${volMult.toFixed(2)}x volume surge & ${effectiveOiContraction.toFixed(2)}% OI contraction. Liquidation wick confirmed (${(lowerWickRatio * 100).toFixed(0)}% lower wick). Fading air pocket back to origin $${takeProfit.toFixed(2)} (Strict SL: $${stopLoss.toFixed(2)}, R:R ${rrRatio.toFixed(2)}:1).`
+      volumeMult: primary.volMult,
+      reversalWickPct: primary.wickRatio * 100,
+      stopLoss: 0,
+      takeProfit: 0,
+      riskReward: 0,
+      description: `No long liquidation cascade flush (Vol: ${primary.volMult.toFixed(2)}x/${minVolMult}x, OI Contraction: ${effectiveOiContraction.toFixed(2)}%/${minContractionPct}%, Lower Wick: ${(primary.wickRatio * 100).toFixed(0)}%/${(minWickPct * 100).toFixed(0)}%)`
     };
   } else {
     // SHORT
-    // Short Squeeze Liquidation Cascade Fade: Shorts liquidated -> price spiked -> long upper wick
-    const upperWick = flushCandle.high - Math.max(flushCandle.open, flushCandle.close);
-    const upperWickRatio = upperWick / flushRange;
+    for (const cand of candidates) {
+      const flushCandle = cand.candle;
+      const flushRange = cand.range;
+      const volMult = cand.volMult;
+      const upperWickRatio = cand.wickRatio;
 
-    if (!isVolumeSurge || !isOiContractionMet || !isDisplacementSufficient || upperWickRatio < minWickPct) {
+      const isVolumeSurge = volMult >= minVolMult * 0.85 || volMult >= 1.15;
+      const isOiContractionMet =
+        effectiveOiContraction >= Math.min(minContractionPct, 0.02) ||
+        openInterestStats.oiChange1m < 0 ||
+        openInterestStats.oiChange5m < 0 ||
+        openInterestStats.oiChangePct1m <= -0.02 ||
+        (volMult >= 1.20 && flushRange >= 0.40 * currentAtr) ||
+        orderFlowStats.takerBuyRatio >= 0.60;
+      const isDisplacementSufficient = flushRange >= 0.35 * currentAtr;
+
+      if (!isVolumeSurge || !isOiContractionMet || !isDisplacementSufficient || upperWickRatio < minWickPct) {
+        continue;
+      }
+
+      // Anti-falling-knife safeguard if checking previous candle
+      if (cand.isPrev) {
+        if (currentCandle.high > flushCandle.high + 0.05 * currentAtr) {
+          continue; // cascade breached flush high
+        }
+        if (orderFlowStats.takerBuyRatio > 0.68) {
+          continue; // aggressive buying still active
+        }
+      }
+
+      const stopLoss = flushCandle.high + Math.max(25, 0.45 * currentAtr);
+      const risk = stopLoss - currentPrice;
+      const takeProfit = Math.min(flushCandle.low, currentPrice - Math.max(risk * 2.2, 2.0 * currentAtr));
+      const rrRatio = risk > 0 ? (currentPrice - takeProfit) / risk : 0;
+
       return {
-        isValid: false,
-        direction,
+        isValid: true,
+        direction: "SHORT",
         flushExtreme: flushCandle.high,
-        cascadeType: "",
-        oiContractionPct: effectiveOiContraction,
-        volumeMult: volMult,
-        reversalWickPct: upperWickRatio * 100,
-        stopLoss: 0,
-        takeProfit: 0,
-        riskReward: 0,
-        description: `No short squeeze liquidation cascade (Vol: ${volMult.toFixed(2)}x/${minVolMult}x, OI Contraction: ${effectiveOiContraction.toFixed(2)}%/${minContractionPct}%, Upper Wick: ${(upperWickRatio * 100).toFixed(0)}%/${(minWickPct * 100).toFixed(0)}%)`
+        cascadeType: "SHORT_LIQUIDATION_CASCADE_FADE",
+        oiContractionPct: Number(effectiveOiContraction.toFixed(2)),
+        volumeMult: Number(volMult.toFixed(2)),
+        reversalWickPct: Number((upperWickRatio * 100).toFixed(0)),
+        stopLoss,
+        takeProfit,
+        riskReward: Number(rrRatio.toFixed(2)),
+        description: `Short Squeeze Cascade Fade: Forced short liquidations spiked price up to $${flushCandle.high.toFixed(2)} with ${volMult.toFixed(2)}x volume surge & ${effectiveOiContraction.toFixed(2)}% OI contraction. Squeeze exhaustion wick confirmed (${(upperWickRatio * 100).toFixed(0)}% upper wick). Fading air pocket back to origin $${takeProfit.toFixed(2)} (Strict SL: $${stopLoss.toFixed(2)}, R:R ${rrRatio.toFixed(2)}:1).`
       };
     }
 
-    // Anti-falling-knife safeguard:
-    if (checkPrev) {
-      if (currentCandle.high > flushCandle.high + 0.05 * currentAtr) {
-        return {
-          isValid: false,
-          direction,
-          flushExtreme: flushCandle.high,
-          cascadeType: "",
-          oiContractionPct: effectiveOiContraction,
-          volumeMult: volMult,
-          reversalWickPct: upperWickRatio * 100,
-          stopLoss: 0,
-          takeProfit: 0,
-          riskReward: 0,
-          description: `Squeeze still active: current candle breached flush high $${flushCandle.high.toFixed(2)}`
-        };
-      }
-      if (orderFlowStats.takerBuyRatio > 0.56 && currentPrice > currentCandle.open) {
-        return {
-          isValid: false,
-          direction,
-          flushExtreme: flushCandle.high,
-          cascadeType: "",
-          oiContractionPct: effectiveOiContraction,
-          volumeMult: volMult,
-          reversalWickPct: upperWickRatio * 100,
-          stopLoss: 0,
-          takeProfit: 0,
-          riskReward: 0,
-          description: `Awaiting 2nd candle delta stabilization after squeeze flush (Taker Buy: ${(orderFlowStats.takerBuyRatio * 100).toFixed(1)}%)`
-        };
-      }
-    }
-
-    const stopLoss = flushCandle.high + Math.max(25, 0.45 * currentAtr);
-    const risk = stopLoss - currentPrice;
-    const takeProfit = Math.min(flushCandle.low, currentPrice - Math.max(risk * 2.5, 2.2 * currentAtr));
-    const rrRatio = risk > 0 ? (currentPrice - takeProfit) / risk : 0;
-
+    const primary = candidates[0];
     return {
-      isValid: true,
-      direction: "SHORT",
-      flushExtreme: flushCandle.high,
-      cascadeType: "SHORT_LIQUIDATION_CASCADE_FADE",
+      isValid: false,
+      direction,
+      flushExtreme: primary.candle.high,
+      cascadeType: "",
       oiContractionPct: effectiveOiContraction,
-      volumeMult: volMult,
-      reversalWickPct: upperWickRatio * 100,
-      stopLoss,
-      takeProfit,
-      riskReward: Number(rrRatio.toFixed(2)),
-      description: `Short Squeeze Cascade Fade: Forced short liquidations spiked price up to $${flushCandle.high.toFixed(2)} with ${volMult.toFixed(2)}x volume surge & ${effectiveOiContraction.toFixed(2)}% OI contraction. Squeeze exhaustion wick confirmed (${(upperWickRatio * 100).toFixed(0)}% upper wick). Fading air pocket back to origin $${takeProfit.toFixed(2)} (Strict SL: $${stopLoss.toFixed(2)}, R:R ${rrRatio.toFixed(2)}:1).`
+      volumeMult: primary.volMult,
+      reversalWickPct: primary.wickRatio * 100,
+      stopLoss: 0,
+      takeProfit: 0,
+      riskReward: 0,
+      description: `No short squeeze liquidation cascade (Vol: ${primary.volMult.toFixed(2)}x/${minVolMult}x, OI Contraction: ${effectiveOiContraction.toFixed(2)}%/${minContractionPct}%, Upper Wick: ${(primary.wickRatio * 100).toFixed(0)}%/${(minWickPct * 100).toFixed(0)}%)`
     };
   }
 }

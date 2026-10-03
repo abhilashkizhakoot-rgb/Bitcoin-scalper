@@ -31,7 +31,8 @@ export function evaluateContextAwareVolume(
   const isFailedAuction = msg.includes("failed auction") || msg.includes("sfp") || msg.includes("setup 9");
   const isCvdAbsorption = msg.includes("cvd absorption") || msg.includes("delta divergence") || msg.includes("setup 12");
   const isOiFlush = msg.includes("open interest") || msg.includes("oi flush") || msg.includes("cascade fade") || msg.includes("setup 13");
-  const isRangeReversal = regime === MarketRegime.RANGE_BOUND || isFailedAuction || isCvdAbsorption || msg.includes("range reversal") || msg.includes("ranging bullish") || msg.includes("ranging bearish");
+  const isVwapBand = msg.includes("vwap band") || msg.includes("setup 10");
+  const isRangeReversal = regime === MarketRegime.RANGE_BOUND || isFailedAuction || isCvdAbsorption || isVwapBand || isOiFlush || msg.includes("range reversal") || msg.includes("ranging bullish") || msg.includes("ranging bearish");
 
   let setupCategory = "General Momentum";
   let targetRelVol = baseMinRelVol; // default e.g. 1.30x
@@ -43,12 +44,16 @@ export function evaluateContextAwareVolume(
     categoryDescription = "Fresh Momentum Impulse: Early 1m displacement burst supported by volume expansion (>= 1.15x) and immediate taker aggression.";
   } else if (isOiFlush) {
     setupCategory = "Liquidation Cascade Fade (OI Flush)";
-    targetRelVol = Math.max(1.30, baseMinRelVol);
-    categoryDescription = "OI Flush Cascade Fade: Requires confirmed volume surge (>= 1.30x) during liquidation flush followed by exhaustion.";
+    targetRelVol = Math.min(baseMinRelVol * 0.85, 1.10);
+    categoryDescription = "OI Flush Cascade Fade: Requires confirmed volume surge during liquidation flush followed by stabilization turnover (>= 1.10x).";
   } else if (isCvdAbsorption) {
     setupCategory = "CVD Absorption & Delta Divergence";
-    targetRelVol = Math.min(baseMinRelVol * 0.85, 1.10);
-    categoryDescription = "CVD Absorption: Passive institutional absorption at structural extremes operates with steady turnover (>= 1.10x).";
+    targetRelVol = Math.min(baseMinRelVol * 0.85, 1.05);
+    categoryDescription = "CVD Absorption: Passive institutional absorption at structural extremes operates with steady turnover (>= 1.05x).";
+  } else if (isVwapBand) {
+    setupCategory = "VWAP Outer Band Rejection";
+    targetRelVol = Math.min(baseMinRelVol * 0.85, 1.05);
+    categoryDescription = "VWAP Band Rejection: Mean-reversion off outer standard deviation bands requires inward rejection turnover (>= 1.05x).";
   } else if (isFailedAuction) {
     setupCategory = "Range Failed Auction (SFP Reclaim)";
     targetRelVol = Math.min(baseMinRelVol * 0.85, 1.10);

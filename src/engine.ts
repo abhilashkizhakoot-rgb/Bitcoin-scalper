@@ -4345,7 +4345,6 @@ class TradingEngine {
         entryPrice: currentPrice,
         stopLoss: failedAuctionResult.stopLoss,
         takeProfit: failedAuctionResult.takeProfit,
-        riskReward: Math.round((Math.abs(failedAuctionResult.takeProfit - currentPrice) / Math.max(1, Math.abs(currentPrice - failedAuctionResult.stopLoss))) * 100) / 100,
         description: `[Setup 9 - Range Failed Auction Reclaim Confirmed]: ${failedAuctionResult.description}`,
         sub_conditions: [
           { name: "Range Boundary SFP Breach", status: "PASS", reason: `Range boundary $${failedAuctionResult.rangeBoundary.toFixed(2)} reclaimed` },
@@ -4848,19 +4847,15 @@ class TradingEngine {
         };
         return getReturnObj(true, pullbackRetestMessage, setupResult.setupName, setupResult, setupResult.sub_conditions);
       } else if (isEmaPushbackValid && !emaPushbackMessage.startsWith("Blocked")) {
-        const targetDistLong = Math.max(140, 2.4 * currentAtr);
-        const takeProfitLong = currentPrice + targetDistLong;
-        const boundedSlLong = Math.max(emaInvalidationFloor, currentPrice - 1.20 * currentAtr);
-        const riskDistLong = Math.max(1, currentPrice - boundedSlLong);
         const setupResult: TradingSetupResult = {
           setupId: "setup_2_dynamic_ema_pushback",
           setupName: "Setup 2: Dynamic EMA Pushback",
           isValid: true,
           direction: "LONG",
           entryPrice: currentPrice,
-          stopLoss: boundedSlLong,
-          takeProfit: takeProfitLong,
-          riskReward: targetDistLong / riskDistLong,
+          stopLoss: emaInvalidationFloor,
+          takeProfit: currentPrice + 2.0 * currentAtr,
+          riskReward: 2.0,
           description: emaPushbackMessage,
           sub_conditions: [
             { name: "5m MTF Alignment", status: "PASS", reason: "5m trend aligned" },
@@ -5314,19 +5309,15 @@ class TradingEngine {
         };
         return getReturnObj(true, pullbackRetestMessage, setupResult.setupName, setupResult, setupResult.sub_conditions);
       } else if (isEmaPushbackValid && !emaPushbackMessage.startsWith("Blocked")) {
-        const targetDistShort = Math.max(140, 2.4 * currentAtr);
-        const takeProfitShort = currentPrice - targetDistShort;
-        const boundedSlShort = Math.min(emaInvalidationCeiling, currentPrice + 1.20 * currentAtr);
-        const riskDistShort = Math.max(1, boundedSlShort - currentPrice);
         const setupResult: TradingSetupResult = {
           setupId: "setup_2_dynamic_ema_pushback",
           setupName: "Setup 2: Dynamic EMA Pushback",
           isValid: true,
           direction: "SHORT",
           entryPrice: currentPrice,
-          stopLoss: boundedSlShort,
-          takeProfit: takeProfitShort,
-          riskReward: targetDistShort / riskDistShort,
+          stopLoss: emaInvalidationCeiling,
+          takeProfit: currentPrice - 2.0 * currentAtr,
+          riskReward: 2.0,
           description: emaPushbackMessage,
           sub_conditions: [
             { name: "5m MTF Alignment", status: "PASS", reason: "5m trend aligned" },
@@ -6479,7 +6470,7 @@ class TradingEngine {
       setup_11_eqh_eql_double_touch: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
       setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
       setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
-      setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY],
+      setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
       setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
     };
 
@@ -6588,7 +6579,7 @@ class TradingEngine {
       const chopIndex = compositeChop.compositeChop;
 
       if (isMeanReversion) {
-        const maxAdx = setupId === "setup_10_vwap_band_rejection" ? (ms.vwap_band_reversal_max_adx || 22) : (ms.dynamic_mean_reversion_max_adx || 32);
+        const maxAdx = ms.dynamic_mean_reversion_max_adx || 32;
         if (currentAdx > maxAdx) {
           conditions_allowed = false;
           conditionReason = `Dynamically gated: ADX (${currentAdx.toFixed(1)}) exceeds mean-reversion ceiling (${maxAdx}). Strong runaway trend detected.`;

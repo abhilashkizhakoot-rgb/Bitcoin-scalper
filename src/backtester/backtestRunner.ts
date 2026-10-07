@@ -10,8 +10,6 @@ import {
   BacktestTrade,
   BacktestSetupOption,
   RegimePerformance,
-  BacktestRankItem,
-  BacktestRankResult,
 } from "./types.js";
 import { fetchBinanceHistoricalKlines } from "./binanceFetcher.js";
 import {
@@ -104,74 +102,6 @@ export const AVAILABLE_SETUPS: BacktestSetupOption[] = [
   },
 ];
 
-/**
- * Institutional Dynamic Market Regime Gating Matrix
- * Matches the live trading engine's strict regime permissions.
- * Any setup not included in the allowed list for the current regime is strictly blocked.
- */
-export const DYNAMIC_REGIME_GATING_MATRIX: Record<string, MarketRegime[]> = {
-  setup_1_pullback_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
-  setup_2_dynamic_ema_pushback: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
-  setup_3_liquidity_sweep: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
-  setup_4_fvg_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
-  setup_9_range_failed_auction: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
-  setup_10_vwap_band_rejection: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
-  setup_11_eqh_eql_double_touch: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
-  setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
-  setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
-  setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY],
-  setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
-};
-
-export function isSetupGatedByRegimeMatrix(
-  setupId: string,
-  direction: "LONG" | "SHORT",
-  currentRegime: MarketRegime,
-  currentAdx: number = 25
-): { allowed: boolean; reason?: string } {
-  const allowedRegimes = DYNAMIC_REGIME_GATING_MATRIX[setupId] || Object.values(MarketRegime);
-
-  // 1. Dynamic Market Regime Gating Matrix Check
-  if (!allowedRegimes.includes(currentRegime)) {
-    return {
-      allowed: false,
-      reason: `Prohibited in current ${currentRegime} regime by Dynamic Market Regime Gating Matrix. Allowed: [${allowedRegimes.join(", ")}].`,
-    };
-  }
-
-  // 2. Directional Counter-trend Safeguard for Mean Reversion setups
-  const isMeanReversion = [
-    "setup_3_liquidity_sweep",
-    "setup_9_range_failed_auction",
-    "setup_10_vwap_band_rejection",
-    "setup_11_eqh_eql_double_touch",
-  ].includes(setupId);
-
-  if (isMeanReversion) {
-    if (direction === "LONG" && currentRegime === MarketRegime.STRONG_DOWNTREND) {
-      return { allowed: false, reason: "Counter-trend Long prohibited in STRONG_DOWNTREND." };
-    }
-    if (direction === "SHORT" && currentRegime === MarketRegime.STRONG_UPTREND) {
-      return { allowed: false, reason: "Counter-trend Short prohibited in STRONG_UPTREND." };
-    }
-    // Fix E: Specific sideways ADX ceiling for Setup 10 (ADX <= 22), otherwise 32 for general mean reversion
-    const maxMeanRevAdx = setupId === "setup_10_vwap_band_rejection" ? 22 : 32;
-    if (currentAdx > maxMeanRevAdx) {
-      return { allowed: false, reason: `ADX (${currentAdx.toFixed(1)}) exceeds mean-reversion ceiling (${maxMeanRevAdx}).` };
-    }
-  }
-
-  // 3. Dynamic Condition Rules: Trend setups minimum momentum requirement
-  if (["setup_1_pullback_retest", "setup_2_dynamic_ema_pushback", "setup_15_trendline_bounce"].includes(setupId)) {
-    const minAdxReq = setupId === "setup_2_dynamic_ema_pushback" ? 22 : 20;
-    if (currentAdx < minAdxReq) {
-      return { allowed: false, reason: `ADX (${currentAdx.toFixed(1)}) below minimum trend threshold (${minAdxReq}).` };
-    }
-  }
-
-  return { allowed: true };
-}
-
 export async function runIsolatedBacktest(
   request: BacktestRequest
 ): Promise<BacktestResult> {
@@ -220,7 +150,6 @@ export async function runIsolatedBacktest(
   let peakBalance = initialBalance;
   let maxDrawdownUsd = 0;
   let maxDrawdownPercent = 0;
-  let gatedSignalsCount = 0;
 
   const trades: BacktestTrade[] = [];
   const indicatorCalculator = new IndicatorCalculator();
@@ -257,9 +186,7 @@ export async function runIsolatedBacktest(
     const currentAdx = adxSeries[sliceLastIdx] || 20;
 
     const ema9 = indicatorCalculator.calculateEMA(sliceCloses, 9)[sliceLastIdx] || currentPrice;
-    const ema20Series = indicatorCalculator.calculateEMA(sliceCloses, 20);
-    const ema20 = ema20Series[sliceLastIdx] || currentPrice;
-    const ema20Prev = ema20Series[sliceLastIdx - 2] || ema20;
+    const ema20 = indicatorCalculator.calculateEMA(sliceCloses, 20)[sliceLastIdx] || currentPrice;
     const ema50 = indicatorCalculator.calculateEMA(sliceCloses, 50)[sliceLastIdx] || currentPrice;
     const ema200 = indicatorCalculator.calculateEMA(sliceCloses, 200)[sliceLastIdx] || currentPrice;
 
@@ -300,30 +227,16 @@ export async function runIsolatedBacktest(
       lastUpdateSecs: Math.floor(currentCandle.time),
     };
 
-    // Determine Market Regime (Using 50-bar rolling ATR expansion & multi-EMA alignment)
-    const lookbackAtr = Math.min(candleSlice.length, 50);
-    let sumAtrLong = 0;
-    for (let k = sliceLastIdx - lookbackAtr + 1; k <= sliceLastIdx; k++) {
-      sumAtrLong += atrSeries[k] || 50;
-    }
-    const longTermAtr = sumAtrLong / lookbackAtr;
-    const atrExpansionRatio = currentAtr / (longTermAtr || 1);
-
-    // EMA Alignment for Regime
-    const isBullAligned = ema9 > ema20 && ema20 > ema50;
-    const isBearAligned = ema9 < ema20 && ema20 < ema50;
-
+    // Determine Market Regime
     let currentRegime: MarketRegime = MarketRegime.RANGE_BOUND;
-    if (atrExpansionRatio < 0.65) {
-      currentRegime = MarketRegime.LOW_VOLATILITY;
-    } else if (atrExpansionRatio > 1.45) {
+    if (currentAtr > baselineAtr * 1.75) {
       currentRegime = MarketRegime.HIGH_VOLATILITY;
-    } else if (isBullAligned && (currentAdx > 22 || (currentPrice > ema20 && currentAdx > 18))) {
+    } else if (currentAdx > 25 && ema20 > ema50 && currentPrice > ema20) {
       currentRegime = MarketRegime.STRONG_UPTREND;
-    } else if (isBearAligned && (currentAdx > 22 || (currentPrice < ema20 && currentAdx > 18))) {
+    } else if (currentAdx > 25 && ema20 < ema50 && currentPrice < ema20) {
       currentRegime = MarketRegime.STRONG_DOWNTREND;
-    } else {
-      currentRegime = MarketRegime.RANGE_BOUND;
+    } else if (currentAdx < 18) {
+      currentRegime = MarketRegime.LOW_VOLATILITY;
     }
 
     const mockConfig = {
@@ -335,17 +248,10 @@ export async function runIsolatedBacktest(
         failed_auction_strategy_enabled: true,
         fvg_strategy_enabled: true,
         vwap_strategy_enabled: true,
-        vwap_band_reversal_enabled: true,
-        vwap_band_reversal_deviation_mult: 2.2,
-        vwap_band_reversal_min_reward_usd: 120,
-        vwap_band_reversal_max_adx: 22,
         double_touch_strategy_enabled: true,
         cvd_absorption_strategy_enabled: true,
         oi_flush_strategy_enabled: true,
         momentum_impulse_strategy_enabled: true,
-        fresh_momentum_strategy_enabled: true,
-        fresh_momentum_min_vol_mult: 1.60,
-        fresh_momentum_min_body_ratio: 0.60,
       },
       risk_management: {
         default_stop_loss_atr: 1.25,
@@ -365,7 +271,7 @@ export async function runIsolatedBacktest(
       config: mockConfig,
     };
 
-    // 4. Evaluate Setup Signals with Strict Dynamic Market Regime Gating Matrix
+    // 4. Evaluate Setup Signals
     let signal: {
       direction: "LONG" | "SHORT";
       setupId: string;
@@ -376,30 +282,6 @@ export async function runIsolatedBacktest(
     } | null = null;
 
     const targetSetup = request.setupId;
-
-    // Helper to evaluate and apply strict Dynamic Market Regime Gating Matrix
-    const tryEmitSignal = (
-      setupId: string,
-      direction: "LONG" | "SHORT",
-      setupName: string,
-      stopLoss: number,
-      takeProfit: number,
-      description: string
-    ) => {
-      const gate = isSetupGatedByRegimeMatrix(setupId, direction, currentRegime, currentAdx);
-      if (gate.allowed) {
-        signal = {
-          direction,
-          setupId,
-          setupName,
-          stopLoss,
-          takeProfit,
-          description,
-        };
-      } else {
-        gatedSignalsCount++;
-      }
-    };
 
     // Setup 1: Pullback & Retest
     if (!signal && (targetSetup === "setup_1_pullback_retest" || targetSetup === "all")) {
@@ -415,14 +297,14 @@ export async function runIsolatedBacktest(
         const isBullishCandle = currentCandle.close > currentCandle.open && (currentCandle.close - currentCandle.low) > 0.4 * (currentCandle.high - currentCandle.low);
 
         if (hadBreakoutHigh && isRetestingHigh && isBullishCandle) {
-          tryEmitSignal(
-            "setup_1_pullback_retest",
-            "LONG",
-            "Setup 1: Pullback & Retest",
-            Math.min(currentPrice - 1.25 * currentAtr, rHigh - 0.75 * currentAtr),
-            currentPrice + 1.8 * currentAtr,
-            `Pullback & retest of broken range high ($${rHigh.toFixed(2)}) as new support with bullish rejection.`
-          );
+          signal = {
+            direction: "LONG",
+            setupId: "setup_1_pullback_retest",
+            setupName: "Setup 1: Pullback & Retest",
+            stopLoss: Math.min(currentPrice - 1.25 * currentAtr, rHigh - 0.75 * currentAtr),
+            takeProfit: currentPrice + 1.8 * currentAtr,
+            description: `Pullback & retest of broken range high ($${rHigh.toFixed(2)}) as new support with bullish rejection.`,
+          };
         } else {
           // SHORT: prior breakdown below rLow, current candle pulls back to rLow and rejects
           const hadBreakdownLow = recentCandles.some((c) => c.close < rLow);
@@ -430,14 +312,14 @@ export async function runIsolatedBacktest(
           const isBearishCandle = currentCandle.close < currentCandle.open && (currentCandle.high - currentCandle.close) > 0.4 * (currentCandle.high - currentCandle.low);
 
           if (hadBreakdownLow && isRetestingLow && isBearishCandle) {
-            tryEmitSignal(
-              "setup_1_pullback_retest",
-              "SHORT",
-              "Setup 1: Pullback & Retest",
-              Math.max(currentPrice + 1.25 * currentAtr, rLow + 0.75 * currentAtr),
-              currentPrice - 1.8 * currentAtr,
-              `Pullback & retest of broken range low ($${rLow.toFixed(2)}) as new resistance with bearish rejection.`
-            );
+            signal = {
+              direction: "SHORT",
+              setupId: "setup_1_pullback_retest",
+              setupName: "Setup 1: Pullback & Retest",
+              stopLoss: Math.max(currentPrice + 1.25 * currentAtr, rLow + 0.75 * currentAtr),
+              takeProfit: currentPrice - 1.8 * currentAtr,
+              description: `Pullback & retest of broken range low ($${rLow.toFixed(2)}) as new resistance with bearish rejection.`,
+            };
           }
         }
       }
@@ -445,36 +327,31 @@ export async function runIsolatedBacktest(
 
     // Setup 2: Dynamic EMA Pushback
     if (!signal && (targetSetup === "setup_2_dynamic_ema_pushback" || targetSetup === "all")) {
-      const hasEmaSeparation = Math.abs(ema20 - ema50) >= 0.40 * currentAtr;
-      if (hasEmaSeparation && ema20 > ema50 && currentPrice > ema50 && ema20 >= ema20Prev) {
+      if (ema20 > ema50 && currentPrice > ema50) {
         const touchedEma = currentCandle.low <= ema20 + 0.25 * currentAtr && currentCandle.close >= ema20 - 0.2 * currentAtr;
         const isBullishBounce = currentCandle.close > currentCandle.open && (currentCandle.close - currentCandle.low) > 0.4 * (currentCandle.high - currentCandle.low);
         if (touchedEma && isBullishBounce) {
-          const targetDist = Math.max(140, 2.40 * currentAtr);
-          const stopDist = Math.min(1.20 * currentAtr, Math.max(0.65 * currentAtr, currentPrice - ema50 + 0.20 * currentAtr));
-          tryEmitSignal(
-            "setup_2_dynamic_ema_pushback",
-            "LONG",
-            "Setup 2: Dynamic EMA Pushback",
-            currentPrice - stopDist,
-            currentPrice + targetDist,
-            `Dynamic EMA 20 ($${ema20.toFixed(2)}) / 50 ($${ema50.toFixed(2)}) trend bounce with fee-positive target (+$${targetDist.toFixed(1)}) and bounded risk.`
-          );
+          signal = {
+            direction: "LONG",
+            setupId: "setup_2_dynamic_ema_pushback",
+            setupName: "Setup 2: Dynamic EMA Pushback",
+            stopLoss: Math.min(currentPrice - 1.25 * currentAtr, ema50 - 0.5 * currentAtr),
+            takeProfit: currentPrice + 2.0 * currentAtr,
+            description: `Dynamic EMA 20 ($${ema20.toFixed(2)}) / 50 ($${ema50.toFixed(2)}) trend bounce with verified bullish pushback.`,
+          };
         }
-      } else if (hasEmaSeparation && ema20 < ema50 && currentPrice < ema50 && ema20 <= ema20Prev) {
+      } else if (ema20 < ema50 && currentPrice < ema50) {
         const touchedEma = currentCandle.high >= ema20 - 0.25 * currentAtr && currentCandle.close <= ema20 + 0.2 * currentAtr;
         const isBearishReject = currentCandle.close < currentCandle.open && (currentCandle.high - currentCandle.close) > 0.4 * (currentCandle.high - currentCandle.low);
         if (touchedEma && isBearishReject) {
-          const targetDist = Math.max(140, 2.40 * currentAtr);
-          const stopDist = Math.min(1.20 * currentAtr, Math.max(0.65 * currentAtr, ema50 - currentPrice + 0.20 * currentAtr));
-          tryEmitSignal(
-            "setup_2_dynamic_ema_pushback",
-            "SHORT",
-            "Setup 2: Dynamic EMA Pushback",
-            currentPrice + stopDist,
-            currentPrice - targetDist,
-            `Dynamic EMA 20 ($${ema20.toFixed(2)}) / 50 ($${ema50.toFixed(2)}) trend pushback with fee-positive target (-$${targetDist.toFixed(1)}) and bounded risk.`
-          );
+          signal = {
+            direction: "SHORT",
+            setupId: "setup_2_dynamic_ema_pushback",
+            setupName: "Setup 2: Dynamic EMA Pushback",
+            stopLoss: Math.max(currentPrice + 1.25 * currentAtr, ema50 + 0.5 * currentAtr),
+            takeProfit: currentPrice - 2.0 * currentAtr,
+            description: `Dynamic EMA 20 ($${ema20.toFixed(2)}) / 50 ($${ema50.toFixed(2)}) trend pushback with verified bearish rejection.`,
+          };
         }
       }
     }
@@ -483,25 +360,25 @@ export async function runIsolatedBacktest(
     if (!signal && (targetSetup === "setup_3_liquidity_sweep" || targetSetup === "all")) {
       const longRes = evaluateLiquiditySweepSetup("LONG", ctx);
       if (longRes.isValid) {
-        tryEmitSignal(
-          "setup_3_liquidity_sweep",
-          "LONG",
-          "Setup 3: Liquidity Sweep Reversal",
-          longRes.stopLoss,
-          longRes.takeProfit,
-          longRes.description
-        );
+        signal = {
+          direction: "LONG",
+          setupId: "setup_3_liquidity_sweep",
+          setupName: "Setup 3: Liquidity Sweep Reversal",
+          stopLoss: longRes.stopLoss,
+          takeProfit: longRes.takeProfit,
+          description: longRes.description,
+        };
       } else {
         const shortRes = evaluateLiquiditySweepSetup("SHORT", ctx);
         if (shortRes.isValid) {
-          tryEmitSignal(
-            "setup_3_liquidity_sweep",
-            "SHORT",
-            "Setup 3: Liquidity Sweep Reversal",
-            shortRes.stopLoss,
-            shortRes.takeProfit,
-            shortRes.description
-          );
+          signal = {
+            direction: "SHORT",
+            setupId: "setup_3_liquidity_sweep",
+            setupName: "Setup 3: Liquidity Sweep Reversal",
+            stopLoss: shortRes.stopLoss,
+            takeProfit: shortRes.takeProfit,
+            description: shortRes.description,
+          };
         }
       }
     }
@@ -510,25 +387,25 @@ export async function runIsolatedBacktest(
     if (!signal && (targetSetup === "setup_15_trendline_bounce" || targetSetup === "all")) {
       const longRes = evaluateTrendlineBounceSetup("LONG", ctx);
       if (longRes.isValid) {
-        tryEmitSignal(
-          "setup_15_trendline_bounce",
-          "LONG",
-          "Setup 15: Trendline Bounce & Retest",
-          longRes.stopLoss,
-          longRes.takeProfit,
-          longRes.description
-        );
+        signal = {
+          direction: "LONG",
+          setupId: "setup_15_trendline_bounce",
+          setupName: "Setup 15: Trendline Bounce & Retest",
+          stopLoss: longRes.stopLoss,
+          takeProfit: longRes.takeProfit,
+          description: longRes.description,
+        };
       } else {
         const shortRes = evaluateTrendlineBounceSetup("SHORT", ctx);
         if (shortRes.isValid) {
-          tryEmitSignal(
-            "setup_15_trendline_bounce",
-            "SHORT",
-            "Setup 15: Trendline Bounce & Retest",
-            shortRes.stopLoss,
-            shortRes.takeProfit,
-            shortRes.description
-          );
+          signal = {
+            direction: "SHORT",
+            setupId: "setup_15_trendline_bounce",
+            setupName: "Setup 15: Trendline Bounce & Retest",
+            stopLoss: shortRes.stopLoss,
+            takeProfit: shortRes.takeProfit,
+            description: shortRes.description,
+          };
         }
       }
     }
@@ -537,25 +414,25 @@ export async function runIsolatedBacktest(
     if (!signal && (targetSetup === "setup_9_range_failed_auction" || targetSetup === "all")) {
       const longRes = evaluateFailedAuctionSetup("LONG", ctx);
       if (longRes.isValid) {
-        tryEmitSignal(
-          "setup_9_range_failed_auction",
-          "LONG",
-          "Setup 9: Range Failed Auction / Support Bounce",
-          longRes.stopLoss,
-          longRes.takeProfit,
-          longRes.description
-        );
+        signal = {
+          direction: "LONG",
+          setupId: "setup_9_range_failed_auction",
+          setupName: "Setup 9: Range Failed Auction / Support Bounce",
+          stopLoss: longRes.stopLoss,
+          takeProfit: longRes.takeProfit,
+          description: longRes.description,
+        };
       } else {
         const shortRes = evaluateFailedAuctionSetup("SHORT", ctx);
         if (shortRes.isValid) {
-          tryEmitSignal(
-            "setup_9_range_failed_auction",
-            "SHORT",
-            "Setup 9: Range Failed Auction / Resistance Rejection",
-            shortRes.stopLoss,
-            shortRes.takeProfit,
-            shortRes.description
-          );
+          signal = {
+            direction: "SHORT",
+            setupId: "setup_9_range_failed_auction",
+            setupName: "Setup 9: Range Failed Auction / Resistance Rejection",
+            stopLoss: shortRes.stopLoss,
+            takeProfit: shortRes.takeProfit,
+            description: shortRes.description,
+          };
         }
       }
     }
@@ -564,25 +441,25 @@ export async function runIsolatedBacktest(
     if (!signal && (targetSetup === "setup_4_fvg_retest" || targetSetup === "all")) {
       const longRes = evaluateFairValueGapSetup("LONG", ctx);
       if (longRes.isValid) {
-        tryEmitSignal(
-          "setup_4_fvg_retest",
-          "LONG",
-          "Setup 4: Fair Value Gap Retest",
-          longRes.stopLoss,
-          longRes.takeProfit,
-          longRes.description
-        );
+        signal = {
+          direction: "LONG",
+          setupId: "setup_4_fvg_retest",
+          setupName: "Setup 4: Fair Value Gap Retest",
+          stopLoss: longRes.stopLoss,
+          takeProfit: longRes.takeProfit,
+          description: longRes.description,
+        };
       } else {
         const shortRes = evaluateFairValueGapSetup("SHORT", ctx);
         if (shortRes.isValid) {
-          tryEmitSignal(
-            "setup_4_fvg_retest",
-            "SHORT",
-            "Setup 4: Fair Value Gap Retest",
-            shortRes.stopLoss,
-            shortRes.takeProfit,
-            shortRes.description
-          );
+          signal = {
+            direction: "SHORT",
+            setupId: "setup_4_fvg_retest",
+            setupName: "Setup 4: Fair Value Gap Retest",
+            stopLoss: shortRes.stopLoss,
+            takeProfit: shortRes.takeProfit,
+            description: shortRes.description,
+          };
         }
       }
     }
@@ -591,25 +468,25 @@ export async function runIsolatedBacktest(
     if (!signal && (targetSetup === "setup_10_vwap_band_rejection" || targetSetup === "all")) {
       const longRes = evaluateVwapBandRejectionSetup("LONG", ctx);
       if (longRes.isValid) {
-        tryEmitSignal(
-          "setup_10_vwap_band_rejection",
-          "LONG",
-          "Setup 10: VWAP Band Rejection",
-          longRes.stopLoss,
-          longRes.takeProfit,
-          longRes.description
-        );
+        signal = {
+          direction: "LONG",
+          setupId: "setup_10_vwap_band_rejection",
+          setupName: "Setup 10: VWAP Band Rejection",
+          stopLoss: longRes.stopLoss,
+          takeProfit: longRes.takeProfit,
+          description: longRes.description,
+        };
       } else {
         const shortRes = evaluateVwapBandRejectionSetup("SHORT", ctx);
         if (shortRes.isValid) {
-          tryEmitSignal(
-            "setup_10_vwap_band_rejection",
-            "SHORT",
-            "Setup 10: VWAP Band Rejection",
-            shortRes.stopLoss,
-            shortRes.takeProfit,
-            shortRes.description
-          );
+          signal = {
+            direction: "SHORT",
+            setupId: "setup_10_vwap_band_rejection",
+            setupName: "Setup 10: VWAP Band Rejection",
+            stopLoss: shortRes.stopLoss,
+            takeProfit: shortRes.takeProfit,
+            description: shortRes.description,
+          };
         }
       }
     }
@@ -618,25 +495,25 @@ export async function runIsolatedBacktest(
     if (!signal && (targetSetup === "setup_11_eqh_eql_double_touch" || targetSetup === "all")) {
       const longRes = evaluateEqhEqlDoubleTouchSetup("LONG", ctx);
       if (longRes.isValid) {
-        tryEmitSignal(
-          "setup_11_eqh_eql_double_touch",
-          "LONG",
-          "Setup 11: EQH/EQL Double Touch",
-          longRes.stopLoss,
-          longRes.takeProfit,
-          longRes.description
-        );
+        signal = {
+          direction: "LONG",
+          setupId: "setup_11_eqh_eql_double_touch",
+          setupName: "Setup 11: EQH/EQL Double Touch",
+          stopLoss: longRes.stopLoss,
+          takeProfit: longRes.takeProfit,
+          description: longRes.description,
+        };
       } else {
         const shortRes = evaluateEqhEqlDoubleTouchSetup("SHORT", ctx);
         if (shortRes.isValid) {
-          tryEmitSignal(
-            "setup_11_eqh_eql_double_touch",
-            "SHORT",
-            "Setup 11: EQH/EQL Double Touch",
-            shortRes.stopLoss,
-            shortRes.takeProfit,
-            shortRes.description
-          );
+          signal = {
+            direction: "SHORT",
+            setupId: "setup_11_eqh_eql_double_touch",
+            setupName: "Setup 11: EQH/EQL Double Touch",
+            stopLoss: shortRes.stopLoss,
+            takeProfit: shortRes.takeProfit,
+            description: shortRes.description,
+          };
         }
       }
     }
@@ -645,25 +522,25 @@ export async function runIsolatedBacktest(
     if (!signal && (targetSetup === "setup_12_cvd_absorption" || targetSetup === "all")) {
       const longRes = evaluateCvdAbsorptionSetup("LONG", ctx);
       if (longRes.isValid) {
-        tryEmitSignal(
-          "setup_12_cvd_absorption",
-          "LONG",
-          "Setup 12: CVD Absorption",
-          longRes.stopLoss,
-          longRes.takeProfit,
-          longRes.description
-        );
+        signal = {
+          direction: "LONG",
+          setupId: "setup_12_cvd_absorption",
+          setupName: "Setup 12: CVD Absorption",
+          stopLoss: longRes.stopLoss,
+          takeProfit: longRes.takeProfit,
+          description: longRes.description,
+        };
       } else {
         const shortRes = evaluateCvdAbsorptionSetup("SHORT", ctx);
         if (shortRes.isValid) {
-          tryEmitSignal(
-            "setup_12_cvd_absorption",
-            "SHORT",
-            "Setup 12: CVD Absorption",
-            shortRes.stopLoss,
-            shortRes.takeProfit,
-            shortRes.description
-          );
+          signal = {
+            direction: "SHORT",
+            setupId: "setup_12_cvd_absorption",
+            setupName: "Setup 12: CVD Absorption",
+            stopLoss: shortRes.stopLoss,
+            takeProfit: shortRes.takeProfit,
+            description: shortRes.description,
+          };
         }
       }
     }
@@ -672,25 +549,25 @@ export async function runIsolatedBacktest(
     if (!signal && (targetSetup === "setup_13_oi_flush_cascade" || targetSetup === "all")) {
       const longRes = evaluateOiFlushCascadeFadeSetup("LONG", ctx);
       if (longRes.isValid) {
-        tryEmitSignal(
-          "setup_13_oi_flush_cascade",
-          "LONG",
-          "Setup 13: OI Flush & Cascade Fade",
-          longRes.stopLoss,
-          longRes.takeProfit,
-          longRes.description
-        );
+        signal = {
+          direction: "LONG",
+          setupId: "setup_13_oi_flush_cascade",
+          setupName: "Setup 13: OI Flush & Cascade Fade",
+          stopLoss: longRes.stopLoss,
+          takeProfit: longRes.takeProfit,
+          description: longRes.description,
+        };
       } else {
         const shortRes = evaluateOiFlushCascadeFadeSetup("SHORT", ctx);
         if (shortRes.isValid) {
-          tryEmitSignal(
-            "setup_13_oi_flush_cascade",
-            "SHORT",
-            "Setup 13: OI Flush & Cascade Fade",
-            shortRes.stopLoss,
-            shortRes.takeProfit,
-            shortRes.description
-          );
+          signal = {
+            direction: "SHORT",
+            setupId: "setup_13_oi_flush_cascade",
+            setupName: "Setup 13: OI Flush & Cascade Fade",
+            stopLoss: shortRes.stopLoss,
+            takeProfit: shortRes.takeProfit,
+            description: shortRes.description,
+          };
         }
       }
     }
@@ -699,25 +576,25 @@ export async function runIsolatedBacktest(
     if (!signal && (targetSetup === "setup_14_fresh_momentum_impulse" || targetSetup === "all")) {
       const longRes = evaluateFreshMomentumImpulseSetup("LONG", ctx);
       if (longRes.isValid) {
-        tryEmitSignal(
-          "setup_14_fresh_momentum_impulse",
-          "LONG",
-          "Setup 14: Fresh Momentum Impulse",
-          longRes.stopLoss,
-          longRes.takeProfit,
-          longRes.description
-        );
+        signal = {
+          direction: "LONG",
+          setupId: "setup_14_fresh_momentum_impulse",
+          setupName: "Setup 14: Fresh Momentum Impulse",
+          stopLoss: longRes.stopLoss,
+          takeProfit: longRes.takeProfit,
+          description: longRes.description,
+        };
       } else {
         const shortRes = evaluateFreshMomentumImpulseSetup("SHORT", ctx);
         if (shortRes.isValid) {
-          tryEmitSignal(
-            "setup_14_fresh_momentum_impulse",
-            "SHORT",
-            "Setup 14: Fresh Momentum Impulse",
-            shortRes.stopLoss,
-            shortRes.takeProfit,
-            shortRes.description
-          );
+          signal = {
+            direction: "SHORT",
+            setupId: "setup_14_fresh_momentum_impulse",
+            setupName: "Setup 14: Fresh Momentum Impulse",
+            stopLoss: shortRes.stopLoss,
+            takeProfit: shortRes.takeProfit,
+            description: shortRes.description,
+          };
         }
       }
     }
@@ -729,7 +606,6 @@ export async function runIsolatedBacktest(
       const entryAtr = currentAtr;
       const targetSl = signal.stopLoss;
       const targetTp = signal.takeProfit;
-      let currentSl = targetSl;
 
       let exitPrice = entryPrice;
       let exitTimeMs = entryTimeMs;
@@ -748,64 +624,34 @@ export async function runIsolatedBacktest(
           peakFavorablePrice = Math.max(peakFavorablePrice, futureCandle.high);
           peakAdversePrice = Math.min(peakAdversePrice, futureCandle.low);
 
-          // 1. Check TP first if high breached target
+          // Check TP first if high breached target
           if (futureCandle.high >= targetTp) {
             exitPrice = targetTp;
             exitReason = "TAKE_PROFIT";
             break;
           }
-          // 2. Check existing SL before ratcheting
-          if (futureCandle.low <= currentSl) {
-            exitPrice = currentSl;
+          // Check SL
+          if (futureCandle.low <= targetSl) {
+            exitPrice = targetSl;
             exitReason = "STOP_LOSS";
             break;
-          }
-
-          // 3. Fix B & Win-Rate Calibration: Fee-Positive Dynamic Breakeven Ratchet for Setup 14, Setup 2, Setup 3, and Setup 9
-          // On 0.01 BTC position, $84 BTC offset is required to overcome round-trip exchange fees ($0.84)
-          // Lock in Math.max(88, 0.40 * entryAtr) once price moves favorably by >= 1.15 * entryAtr
-          if (
-            signal.setupId === "setup_14_fresh_momentum_impulse" ||
-            signal.setupId === "setup_2_dynamic_ema_pushback" ||
-            signal.setupId === "setup_3_liquidity_sweep" ||
-            signal.setupId === "setup_9_range_failed_auction"
-          ) {
-            const feeBufferBtc = Math.max(88, 0.40 * entryAtr);
-            const favorableDist = futureCandle.close - entryPrice;
-            if (favorableDist >= 1.15 * entryAtr) {
-              currentSl = Math.max(currentSl, entryPrice + feeBufferBtc);
-            }
           }
         } else {
           // SHORT
           peakFavorablePrice = Math.min(peakFavorablePrice, futureCandle.low);
           peakAdversePrice = Math.max(peakAdversePrice, futureCandle.high);
 
-          // 1. Check TP first
+          // Check TP
           if (futureCandle.low <= targetTp) {
             exitPrice = targetTp;
             exitReason = "TAKE_PROFIT";
             break;
           }
-          // 2. Check existing SL before ratcheting
-          if (futureCandle.high >= currentSl) {
-            exitPrice = currentSl;
+          // Check SL
+          if (futureCandle.high >= targetSl) {
+            exitPrice = targetSl;
             exitReason = "STOP_LOSS";
             break;
-          }
-
-          // 3. Fix B & Win-Rate Calibration: Fee-Positive Dynamic Breakeven Ratchet for Setup 14, Setup 2, Setup 3, and Setup 9
-          if (
-            signal.setupId === "setup_14_fresh_momentum_impulse" ||
-            signal.setupId === "setup_2_dynamic_ema_pushback" ||
-            signal.setupId === "setup_3_liquidity_sweep" ||
-            signal.setupId === "setup_9_range_failed_auction"
-          ) {
-            const feeBufferBtc = Math.max(88, 0.40 * entryAtr);
-            const favorableDist = entryPrice - futureCandle.close;
-            if (favorableDist >= 1.15 * entryAtr) {
-              currentSl = Math.min(currentSl, entryPrice - feeBufferBtc);
-            }
           }
         }
 
@@ -827,23 +673,10 @@ export async function runIsolatedBacktest(
         signal.direction === "LONG" ? exitPrice - entryPrice : entryPrice - exitPrice;
       const grossPnlUsd = grossPnlPoints * positionSizeBtc;
 
-      // Fix C & E: Setup 10 utilizes Post-Only Maker limit entry (0.015%) and resting limit TP exit (0.015%)
-      // Setup 14, Setup 2, Setup 3, & Setup 9 utilize Taker entry (0.05%) and resting limit TP exit (0.015% Maker)
-      // Stop Loss exit triggers as a stop-market taker order (0.05%)
-      const isSetup10Maker = signal.setupId === "setup_10_vwap_band_rejection";
-      const isMakerTpSetup =
-        signal.setupId === "setup_10_vwap_band_rejection" ||
-        signal.setupId === "setup_14_fresh_momentum_impulse" ||
-        signal.setupId === "setup_2_dynamic_ema_pushback" ||
-        signal.setupId === "setup_3_liquidity_sweep" ||
-        signal.setupId === "setup_9_range_failed_auction";
-
-      const entryFeeRate = isSetup10Maker ? 0.00015 : 0.0005;
-      const exitFeeRate = (isMakerTpSetup && exitReason === "TAKE_PROFIT") ? 0.00015 : 0.0005;
-
+      // Fees: 0.05% entry, 0.05% exit taker rate
       const notionalEntryUsd = entryPrice * positionSizeBtc;
       const notionalExitUsd = exitPrice * positionSizeBtc;
-      const feesUsd = simulateFees ? (notionalEntryUsd * entryFeeRate + notionalExitUsd * exitFeeRate) : 0;
+      const feesUsd = simulateFees ? (notionalEntryUsd + notionalExitUsd) * 0.0005 : 0;
       const netPnlUsd = grossPnlUsd - feesUsd;
       const pnlPercent = (netPnlUsd / (notionalEntryUsd / leverage)) * 100;
 
@@ -998,118 +831,8 @@ export async function runIsolatedBacktest(
     longWinRate: Number(longWinRate.toFixed(2)),
     shortTradesCount: shortTrades.length,
     shortWinRate: Number(shortWinRate.toFixed(2)),
-    gatedSignalsCount,
     regimeBreakdown,
     trades,
     equityCurve,
-  };
-}
-
-export async function runRankAllBacktest(
-  request: Omit<BacktestRequest, "setupId">
-): Promise<BacktestRankResult> {
-  const individualSetups = AVAILABLE_SETUPS.filter((s) => s.id !== "all");
-  const rankItems: BacktestRankItem[] = [];
-
-  let periodStart = "";
-  let periodEnd = "";
-  let totalCandlesAnalyzed = 0;
-  let totalBacktestTrades = 0;
-
-  for (const setup of individualSetups) {
-    try {
-      const res = await runIsolatedBacktest({
-        ...request,
-        setupId: setup.id,
-        isolationMode: true,
-      });
-
-      if (!periodStart) {
-        periodStart = res.periodStart;
-        periodEnd = res.periodEnd;
-        totalCandlesAnalyzed = res.totalCandlesAnalyzed;
-      }
-
-      totalBacktestTrades += res.totalTrades;
-
-      // Bayesian adjusted win rate: (wins + 2) / (total + 4) * 100
-      const bayesianWinRate = Number(
-        (((res.winningTrades + 2) / (res.totalTrades + 4)) * 100).toFixed(1)
-      );
-
-      let tier: "TIER_1_ULTRA_HIGH" | "TIER_2_STRONG" | "TIER_3_MODERATE" | "TIER_4_LOW" = "TIER_4_LOW";
-      if (res.winRate >= 70) tier = "TIER_1_ULTRA_HIGH";
-      else if (res.winRate >= 60) tier = "TIER_2_STRONG";
-      else if (res.winRate >= 50) tier = "TIER_3_MODERATE";
-
-      let recommendation = "Standard Setup";
-      if (res.winRate >= 75) recommendation = "Elite Alpha Trigger - High win rate with strong profit factor";
-      else if (res.winRate >= 65) recommendation = "High Probability Core - Dependable trend/range capture";
-      else if (res.winRate >= 50) recommendation = "Moderate Probability - Requires strict regime/confluence filter";
-      else recommendation = "Low Probability - Sensitive to choppy conditions or wide ATR";
-
-      rankItems.push({
-        rank: 0,
-        setupId: setup.id,
-        setupName: setup.name,
-        category: setup.category,
-        totalTrades: res.totalTrades,
-        winningTrades: res.winningTrades,
-        losingTrades: res.losingTrades,
-        winRate: res.winRate,
-        bayesianWinRate,
-        profitFactor: res.profitFactor,
-        netPnlUsd: res.netPnlUsd,
-        expectancyUsd: res.expectancyUsd,
-        maxDrawdownPercent: res.maxDrawdownPercent,
-        longTrades: res.longTradesCount,
-        longWinRate: res.longWinRate,
-        shortTrades: res.shortTradesCount,
-        shortWinRate: res.shortWinRate,
-        averageHoldDurationSeconds: res.averageHoldDurationSeconds,
-        tier,
-        recommendation,
-      });
-    } catch (err) {
-      console.warn(`[runRankAllBacktest] Error evaluating ${setup.id}:`, err);
-    }
-  }
-
-  // Sort by win rate descending (with bayesianWinRate as secondary)
-  rankItems.sort((a, b) => {
-    if (b.winRate !== a.winRate) return b.winRate - a.winRate;
-    if (b.bayesianWinRate !== a.bayesianWinRate) return b.bayesianWinRate - a.bayesianWinRate;
-    return b.netPnlUsd - a.netPnlUsd;
-  });
-
-  // Assign ranks and aliases
-  rankItems.forEach((item, index) => {
-    item.rank = index + 1;
-    item.wins = item.winningTrades;
-    item.losses = item.losingTrades;
-    item.netPnl = item.netPnlUsd;
-  });
-
-  const avgWinRate =
-    rankItems.length > 0
-      ? Number((rankItems.reduce((acc, r) => acc + r.winRate, 0) / rankItems.length).toFixed(1))
-      : 0;
-
-  return {
-    runId: `rank-${Date.now()}`,
-    days: request.days || 3,
-    symbol: request.symbol || "BTCUSDT",
-    periodStart,
-    periodEnd,
-    totalCandlesAnalyzed,
-    candlesEvaluated: totalCandlesAnalyzed,
-    rankings: rankItems,
-    summary: {
-      totalSetupsEvaluated: rankItems.length,
-      highestWinRateSetup: rankItems[0]?.setupName || "N/A",
-      highestWinRate: rankItems[0]?.winRate || 0,
-      averageWinRate: avgWinRate,
-      totalBacktestTrades,
-    },
   };
 }

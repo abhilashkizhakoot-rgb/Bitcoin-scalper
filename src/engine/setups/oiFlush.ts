@@ -47,48 +47,36 @@ export function evaluateOiFlushCascadeFadeSetup(
     };
   }
 
-  // Regime Safeguards: In strong runaway regimes, ensure confirmed exhaustion wick and stabilization
-  // (Note: Do not unconditionally block STRONG_DOWNTREND/STRONG_UPTREND because liquidation cascades inherently create waterfall candles that trigger trend regimes!)
+  // Regime Safeguards: Do not fade liquidation cascades against strong trending regimes
   if (direction === "LONG" && currentRegime === MarketRegime.STRONG_DOWNTREND) {
-    // Only block if current candle continues to dump hard with no stabilization wick
-    const curC = candles1m[candles1m.length - 1];
-    const curRange = Math.max(1.0, curC.high - curC.low);
-    const lowerWick = Math.min(curC.open, curC.close) - curC.low;
-    if (lowerWick / curRange < 0.25 && curC.close <= curC.open) {
-      return {
-        isValid: false,
-        direction,
-        flushExtreme: 0,
-        cascadeType: "",
-        oiContractionPct: 0,
-        volumeMult: 0,
-        reversalWickPct: 0,
-        stopLoss: 0,
-        takeProfit: 0,
-        riskReward: 0,
-        description: "Blocked: Active runaway selloff in STRONG_DOWNTREND with no stabilization wick."
-      };
-    }
+    return {
+      isValid: false,
+      direction,
+      flushExtreme: 0,
+      cascadeType: "",
+      oiContractionPct: 0,
+      volumeMult: 0,
+      reversalWickPct: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      riskReward: 0,
+      description: "Blocked: Long Liquidation Flush fade prohibited in STRONG_DOWNTREND regime."
+    };
   }
   if (direction === "SHORT" && currentRegime === MarketRegime.STRONG_UPTREND) {
-    const curC = candles1m[candles1m.length - 1];
-    const curRange = Math.max(1.0, curC.high - curC.low);
-    const upperWick = curC.high - Math.max(curC.open, curC.close);
-    if (upperWick / curRange < 0.25 && curC.close >= curC.open) {
-      return {
-        isValid: false,
-        direction,
-        flushExtreme: 0,
-        cascadeType: "",
-        oiContractionPct: 0,
-        volumeMult: 0,
-        reversalWickPct: 0,
-        stopLoss: 0,
-        takeProfit: 0,
-        riskReward: 0,
-        description: "Blocked: Active runaway breakout in STRONG_UPTREND with no exhaustion wick."
-      };
-    }
+    return {
+      isValid: false,
+      direction,
+      flushExtreme: 0,
+      cascadeType: "",
+      oiContractionPct: 0,
+      volumeMult: 0,
+      reversalWickPct: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      riskReward: 0,
+      description: "Blocked: Short Squeeze Flush fade prohibited in STRONG_UPTREND regime."
+    };
   }
 
   const lastIdx = candles1m.length - 1;
@@ -108,9 +96,9 @@ export function evaluateOiFlushCascadeFadeSetup(
     };
   }
 
-  const minContractionPct = ms.oi_flush_min_contraction_pct !== undefined ? ms.oi_flush_min_contraction_pct : 0.05;
-  const minVolMult = ms.oi_flush_min_vol_mult !== undefined ? ms.oi_flush_min_vol_mult : 1.20;
-  const minWickPct = (ms.oi_flush_min_reversal_wick_pct !== undefined ? ms.oi_flush_min_reversal_wick_pct : 30) / 100;
+  const minContractionPct = ms.oi_flush_min_contraction_pct !== undefined ? ms.oi_flush_min_contraction_pct : 0.25;
+  const minVolMult = ms.oi_flush_min_vol_mult !== undefined ? ms.oi_flush_min_vol_mult : 1.5;
+  const minWickPct = (ms.oi_flush_min_reversal_wick_pct !== undefined ? ms.oi_flush_min_reversal_wick_pct : 38) / 100;
   const requireConfirmation = ms.oi_flush_require_second_candle_confirmation !== false;
 
   const currentCandle = candles1m[lastIdx];
@@ -174,15 +162,14 @@ export function evaluateOiFlushCascadeFadeSetup(
       const volMult = cand.volMult;
       const lowerWickRatio = cand.wickRatio;
 
-      const isVolumeSurge = volMult >= minVolMult * 0.85 || volMult >= 1.15;
+      const isVolumeSurge = volMult >= minVolMult * 0.85 || volMult >= 1.35;
       const isOiContractionMet =
-        effectiveOiContraction >= Math.min(minContractionPct, 0.02) ||
+        effectiveOiContraction >= Math.min(minContractionPct, 0.25) ||
         openInterestStats.oiChange1m < 0 ||
         openInterestStats.oiChange5m < 0 ||
-        openInterestStats.oiChangePct1m <= -0.02 ||
-        (volMult >= 1.20 && flushRange >= 0.40 * currentAtr) ||
-        orderFlowStats.takerBuyRatio <= 0.40;
-      const isDisplacementSufficient = flushRange >= 0.35 * currentAtr;
+        openInterestStats.oiChangePct1m <= -0.15 ||
+        (volMult >= 1.6 && flushRange >= 0.85 * currentAtr);
+      const isDisplacementSufficient = flushRange >= 0.70 * currentAtr;
 
       if (!isVolumeSurge || !isOiContractionMet || !isDisplacementSufficient || lowerWickRatio < minWickPct) {
         continue;
@@ -193,7 +180,7 @@ export function evaluateOiFlushCascadeFadeSetup(
         if (currentCandle.low < flushCandle.low - 0.05 * currentAtr) {
           continue; // cascade breached flush low
         }
-        if (orderFlowStats.takerBuyRatio < 0.32) {
+        if (orderFlowStats.takerBuyRatio < 0.38) {
           continue; // severe selling still active
         }
       }
@@ -240,15 +227,14 @@ export function evaluateOiFlushCascadeFadeSetup(
       const volMult = cand.volMult;
       const upperWickRatio = cand.wickRatio;
 
-      const isVolumeSurge = volMult >= minVolMult * 0.85 || volMult >= 1.15;
+      const isVolumeSurge = volMult >= minVolMult * 0.85 || volMult >= 1.35;
       const isOiContractionMet =
-        effectiveOiContraction >= Math.min(minContractionPct, 0.02) ||
+        effectiveOiContraction >= Math.min(minContractionPct, 0.25) ||
         openInterestStats.oiChange1m < 0 ||
         openInterestStats.oiChange5m < 0 ||
-        openInterestStats.oiChangePct1m <= -0.02 ||
-        (volMult >= 1.20 && flushRange >= 0.40 * currentAtr) ||
-        orderFlowStats.takerBuyRatio >= 0.60;
-      const isDisplacementSufficient = flushRange >= 0.35 * currentAtr;
+        openInterestStats.oiChangePct1m <= -0.15 ||
+        (volMult >= 1.6 && flushRange >= 0.85 * currentAtr);
+      const isDisplacementSufficient = flushRange >= 0.70 * currentAtr;
 
       if (!isVolumeSurge || !isOiContractionMet || !isDisplacementSufficient || upperWickRatio < minWickPct) {
         continue;
@@ -259,7 +245,7 @@ export function evaluateOiFlushCascadeFadeSetup(
         if (currentCandle.high > flushCandle.high + 0.05 * currentAtr) {
           continue; // cascade breached flush high
         }
-        if (orderFlowStats.takerBuyRatio > 0.68) {
+        if (orderFlowStats.takerBuyRatio > 0.62) {
           continue; // aggressive buying still active
         }
       }

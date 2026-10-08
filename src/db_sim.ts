@@ -145,8 +145,8 @@ const DEFAULT_CONFIG: StrategyConfig = {
     order_book_max_spoof_risk: 70,
     regime_change_cooldown_minutes: 15,
     regime_macro_slope_lookback: 5,
-    regime_macro_slope_threshold: 0.0005,
-    regime_ribbon_compression_threshold: 0.0015,
+    regime_macro_slope_threshold: 0.0002,
+    regime_ribbon_compression_threshold: 0.0009,
     require_volume_profile_in_ranging: true,
     enable_choppy_market_filter: true,
     max_allowed_chop_index: 58.0,
@@ -1185,11 +1185,11 @@ class DatabaseManager {
         changed = true;
       }
       if (this.cache.config.general.regime_macro_slope_threshold === undefined) {
-        this.cache.config.general.regime_macro_slope_threshold = 0.0005;
+        this.cache.config.general.regime_macro_slope_threshold = 0.0002;
         changed = true;
       }
       if (this.cache.config.general.regime_ribbon_compression_threshold === undefined) {
-        this.cache.config.general.regime_ribbon_compression_threshold = 0.0015;
+        this.cache.config.general.regime_ribbon_compression_threshold = 0.0009;
         changed = true;
       }
       if (this.cache.config.general.require_volume_profile_in_ranging === undefined) {

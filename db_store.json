@@ -9104,7 +9104,9 @@
       "is_trading_active": true,
       "cooldown_minutes": 30,
       "max_trades_per_day": 8,
-      "order_book_min_depth": 2.5
+      "order_book_min_depth": 2.5,
+      "regime_macro_slope_threshold": 0.0002,
+      "regime_ribbon_compression_threshold": 0.0009
     },
     "ml_settings": {
       "entry_threshold_long": 0.8,

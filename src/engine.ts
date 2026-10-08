@@ -8413,7 +8413,7 @@ class TradingEngine {
 
     // Calculate Macro Slope (Flatness)
     const slopeLookback = config.general.regime_macro_slope_lookback !== undefined ? config.general.regime_macro_slope_lookback : 5;
-    const slopeThreshold = config.general.regime_macro_slope_threshold !== undefined ? config.general.regime_macro_slope_threshold : 0.0005;
+    const slopeThreshold = config.general.regime_macro_slope_threshold !== undefined ? config.general.regime_macro_slope_threshold : 0.0002;
     const slopeEma = (ema100.length > lastIdx && ema100[lastIdx] !== undefined) ? ema100 : ema50;
     const prevIdx = Math.max(0, lastIdx - slopeLookback);
     const currentEmaVal = slopeEma[lastIdx];
@@ -8422,7 +8422,7 @@ class TradingEngine {
     const isSlopeFlat = macroSlope < slopeThreshold;
 
     // Calculate Ribbon Ribbon Compression (Tightness)
-    const compressionThreshold = config.general.regime_ribbon_compression_threshold !== undefined ? config.general.regime_ribbon_compression_threshold : 0.0015;
+    const compressionThreshold = config.general.regime_ribbon_compression_threshold !== undefined ? config.general.regime_ribbon_compression_threshold : 0.0009;
     const emaMean = (ema9Val + ema21Val + ema50Val) / 3;
     const emaVariance = (
       Math.pow(ema9Val - emaMean, 2) +
@@ -9544,11 +9544,23 @@ class TradingEngine {
         const beTriggerAtr = config.risk_management.breakeven_trigger_atr !== undefined
           ? (isQuickScalpTrade ? Math.min(config.risk_management.breakeven_trigger_atr, 0.70) : config.risk_management.breakeven_trigger_atr)
           : defaultBeTrigger;
-        if ((peakPrice - entryPrice) >= (lastAtr * beTriggerAtr)) {
+        const longProfit = peakPrice - entryPrice;
+        if (longProfit >= (lastAtr * beTriggerAtr)) {
           // Standard round-trip taker fee buffer (~0.10% of notional) + guaranteed green tick ($2.50)
           const feeBufferUsd = Math.max(entryPrice * 0.0010, (entryFee + exitFeeProj) / (qty || 0.001));
           const positiveTickGain = Math.max(2.5, 0.08 * lastAtr);
-          const targetBe = entryPrice + feeBufferUsd + positiveTickGain;
+          let targetBe = entryPrice + feeBufferUsd + positiveTickGain;
+
+          // Tiered Profit Lock & Ratchet (Protects large runs from 100% giveback)
+          // When peak profit reaches >= 2.0x ATR, ratchet floor to lock in at least 1.0x ATR pure profit
+          if (longProfit >= 2.0 * lastAtr) {
+            const lockedProfitAtr = Math.max(targetBe, entryPrice + 1.0 * lastAtr);
+            targetBe = Math.max(targetBe, lockedProfitAtr);
+          } else if (longProfit >= 1.5 * lastAtr) {
+            // When peak profit reaches >= 1.5x ATR, lock in at least 0.5x ATR pure profit
+            const lockedProfitAtr = Math.max(targetBe, entryPrice + 0.5 * lastAtr);
+            targetBe = Math.max(targetBe, lockedProfitAtr);
+          }
 
           // Invariant Safety Guard: Breakeven SL must NEVER choke the active trade.
           // It must stay with proper breathing room below current market price and not exceed peakPrice.
@@ -9613,11 +9625,23 @@ class TradingEngine {
         const beTriggerAtrShort = config.risk_management.breakeven_trigger_atr !== undefined
           ? (isQuickScalpTradeShort ? Math.min(config.risk_management.breakeven_trigger_atr, 0.70) : config.risk_management.breakeven_trigger_atr)
           : defaultBeTriggerShort;
-        if ((entryPrice - valleyPrice) >= (lastAtr * beTriggerAtrShort)) {
+        const shortProfit = entryPrice - valleyPrice;
+        if (shortProfit >= (lastAtr * beTriggerAtrShort)) {
           // Standard round-trip taker fee buffer (~0.10% of notional) + guaranteed green tick ($2.50)
           const feeBufferUsd = Math.max(entryPrice * 0.0010, (entryFee + exitFeeProj) / (qty || 0.001));
           const positiveTickGain = Math.max(2.5, 0.08 * lastAtr);
-          const targetBe = entryPrice - feeBufferUsd - positiveTickGain;
+          let targetBe = entryPrice - feeBufferUsd - positiveTickGain;
+
+          // Tiered Profit Lock & Ratchet (Protects large runs from 100% giveback)
+          // When peak profit reaches >= 2.0x ATR, ratchet floor to lock in at least 1.0x ATR pure profit
+          if (shortProfit >= 2.0 * lastAtr) {
+            const lockedProfitAtr = Math.min(targetBe, entryPrice - 1.0 * lastAtr);
+            targetBe = Math.min(targetBe, lockedProfitAtr);
+          } else if (shortProfit >= 1.5 * lastAtr) {
+            // When peak profit reaches >= 1.5x ATR, lock in at least 0.5x ATR pure profit
+            const lockedProfitAtr = Math.min(targetBe, entryPrice - 0.5 * lastAtr);
+            targetBe = Math.min(targetBe, lockedProfitAtr);
+          }
 
           // Invariant Safety Guard: Breakeven SL must NEVER choke the active trade.
           // It must stay with proper breathing room above current market price and not drop below valleyPrice.

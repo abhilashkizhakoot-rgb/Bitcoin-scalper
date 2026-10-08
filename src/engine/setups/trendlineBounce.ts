@@ -294,14 +294,31 @@ export function evaluateTrendlineBounceSetup(
         description: `Blocked: Aggressive taker selling (${((1 - orderFlowStats.takerBuyRatio) * 100).toFixed(1)}%) dominates the tape - no bid defense at trendline.`
       };
     }
+    // Pro Trading School Trendline Liquidity Sweep & Reclaim Tracking
+    let isLiquiditySweepReclaim = false;
+    let liquiditySweepWickAtr = 0;
+
     const activeCandle = candles1m[lastIdx];
-    const activeRange = activeCandle.high - activeCandle.low;
+    const activeRange = Math.max(0.001, activeCandle.high - activeCandle.low);
     const activeLowerWick = Math.min(activeCandle.open, activeCandle.close) - activeCandle.low;
-    if (activeCandle.close < activeCandle.open && (activeLowerWick < 0.25 * activeRange)) {
+    const lowerWickRatio = activeLowerWick / activeRange;
+
+    // Order flow CVD absorption confirms rejection:
+    const isCvdAbsorptionConfirmedLong = !!(
+      orderFlowStats &&
+      (orderFlowStats.ofiLeadSignal === "ABSORPTION_BULL" ||
+        (orderFlowStats.netCVD > 0 && orderFlowStats.takerBuyRatio > 0.55))
+    );
+
+    // Enforce candle close confirmation:
+    // Retest setups must not enter at the high wicks of red candles during retests.
+    const isCandleConfirmedLong = (activeCandle.close > activeCandle.open && lowerWickRatio >= 0.30) || isCvdAbsorptionConfirmedLong;
+
+    if (!isCandleConfirmedLong && !rejectionCheckLong.confirmed && !isLiquiditySweepReclaim) {
       return {
         ...defaultResult,
         trendlinePrice: trendlineAtCurrent,
-        description: "Blocked: Active candle is expanding red with zero lower rejection wick into support."
+        description: "Blocked: Trendline bounce requires candle close confirmation (green candle with >=30% lower wick) or CVD absorption."
       };
     }
 
@@ -340,9 +357,6 @@ export function evaluateTrendlineBounceSetup(
     }
 
     // 5. Pro Trading School Trendline Liquidity Sweep & Reclaim Check
-    let isLiquiditySweepReclaim = false;
-    let liquiditySweepWickAtr = 0;
-
     for (const c of recentCandles) {
       const cIdx = candles1m.indexOf(c);
       const lineVal = bestLine.slope * cIdx + bestLine.intercept;
@@ -358,14 +372,14 @@ export function evaluateTrendlineBounceSetup(
 
     // 6. Candle rejection check
     const lastClosed = candles1m[lastIdx - 1] || candles1m[lastIdx];
-    const isGreenClose = lastClosed.close >= lastClosed.open || closes[lastIdx] >= opens[lastIdx];
+    const isGreenClose = lastClosed.close > lastClosed.open;
     const rejectionPattern = rejectionCheckLong.confirmed 
       ? rejectionCheckLong.type 
       : (isLiquiditySweepReclaim 
           ? "Trendline Liquidity Sweep & Reclaim Wick" 
           : (isGreenClose ? "Bullish Candle Reaction" : ""));
 
-    if (requireCandleReversal && (!rejectionCheckLong.confirmed && !isGreenClose && !isLiquiditySweepReclaim)) {
+    if (requireCandleReversal && (!rejectionCheckLong.confirmed && !isGreenClose && !isLiquiditySweepReclaim && !isCvdAbsorptionConfirmedLong)) {
       return {
         ...defaultResult,
         trendlinePrice: trendlineAtCurrent,
@@ -646,14 +660,31 @@ export function evaluateTrendlineBounceSetup(
         description: `Blocked: Aggressive taker buying (${(orderFlowStats.takerBuyRatio * 100).toFixed(1)}%) dominates the tape - cannot short into buyer momentum.`
       };
     }
+    // Pro Trading School Trendline Liquidity Sweep & Reclaim Tracking
+    let isLiquiditySweepReclaim = false;
+    let liquiditySweepWickAtr = 0;
+
     const activeCandle = candles1m[lastIdx];
-    const activeRange = activeCandle.high - activeCandle.low;
+    const activeRange = Math.max(0.001, activeCandle.high - activeCandle.low);
     const activeUpperWick = activeCandle.high - Math.max(activeCandle.open, activeCandle.close);
-    if (activeCandle.close > activeCandle.open && (activeUpperWick < 0.25 * activeRange)) {
+    const upperWickRatio = activeUpperWick / activeRange;
+
+    // Order flow CVD absorption confirms rejection:
+    const isCvdAbsorptionConfirmedShort = !!(
+      orderFlowStats &&
+      (orderFlowStats.ofiLeadSignal === "ABSORPTION_BEAR" ||
+        (orderFlowStats.netCVD < 0 && orderFlowStats.takerBuyRatio < 0.45))
+    );
+
+    // Enforce candle close confirmation:
+    // Retest setups must not short at the low wicks of green candles during retests.
+    const isCandleConfirmedShort = (activeCandle.close < activeCandle.open && upperWickRatio >= 0.30) || isCvdAbsorptionConfirmedShort;
+
+    if (!isCandleConfirmedShort && !rejectionCheckShort.confirmed && !isLiquiditySweepReclaim) {
       return {
         ...defaultResult,
         trendlinePrice: trendlineAtCurrent,
-        description: "Blocked: Active candle is expanding green with zero upper rejection wick into resistance."
+        description: "Blocked: Trendline bounce requires candle close confirmation (red candle with >=30% upper wick) or CVD absorption."
       };
     }
 
@@ -691,9 +722,6 @@ export function evaluateTrendlineBounceSetup(
     }
 
     // 5. Pro Trading School Trendline Liquidity Sweep & Reclaim Check
-    let isLiquiditySweepReclaim = false;
-    let liquiditySweepWickAtr = 0;
-
     for (const c of recentCandles) {
       const cIdx = candles1m.indexOf(c);
       const lineVal = bestLine.slope * cIdx + bestLine.intercept;
@@ -708,14 +736,14 @@ export function evaluateTrendlineBounceSetup(
 
     // 6. Candle rejection check
     const lastClosed = candles1m[lastIdx - 1] || candles1m[lastIdx];
-    const isRedClose = lastClosed.close <= lastClosed.open || closes[lastIdx] <= opens[lastIdx];
+    const isRedClose = lastClosed.close < lastClosed.open;
     const rejectionPattern = rejectionCheckShort.confirmed 
       ? rejectionCheckShort.type 
       : (isLiquiditySweepReclaim 
           ? "Trendline Liquidity Sweep & Reclaim Wick" 
           : (isRedClose ? "Bearish Candle Reaction" : ""));
 
-    if (requireCandleReversal && (!rejectionCheckShort.confirmed && !isRedClose && !isLiquiditySweepReclaim)) {
+    if (requireCandleReversal && (!rejectionCheckShort.confirmed && !isRedClose && !isLiquiditySweepReclaim && !isCvdAbsorptionConfirmedShort)) {
       return {
         ...defaultResult,
         trendlinePrice: trendlineAtCurrent,

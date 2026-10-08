@@ -31,7 +31,7 @@ export function evaluateFairValueGapSetup(
   direction: "LONG" | "SHORT" | "NEUTRAL",
   ctx: SetupContext
 ): FairValueGapResult {
-  const { candles1m, currentPrice, currentRegime, indicators, config } = ctx;
+  const { candles1m, currentPrice, currentRegime, indicators, orderFlowStats, config } = ctx;
   const ms: any = config.market_structure || {};
 
   if (ms.fvg_strategy_enabled === false || direction === "NEUTRAL") {
@@ -379,7 +379,20 @@ export function evaluateFairValueGapSetup(
       const isBullishClose = currentCandle.close > currentCandle.open;
       const isUpperHalfClose = currentCandle.close >= currentCandle.low + 0.5 * range;
 
-      const isRejectionConfirmed = (lowerWickRatio >= 0.35 || (isBullishClose && isUpperHalfClose));
+      // Order flow CVD absorption confirms rejection:
+      const isCvdAbsorptionConfirmed = !!(
+        orderFlowStats &&
+        (orderFlowStats.ofiLeadSignal === "ABSORPTION_BULL" ||
+          (orderFlowStats.netCVD > 0 && orderFlowStats.takerBuyRatio > 0.55))
+      );
+
+      // Enforce candle close confirmation:
+      // Prevents buying at the high wicks of red candles during retests.
+      // Retest must be on a confirmed green candle with lower rejection wick (>= 0.30)
+      // or order flow CVD absorption must confirm rejection.
+      const isCandleConfirmed = (isBullishClose && lowerWickRatio >= 0.30) || isCvdAbsorptionConfirmed;
+      const isLegacyRejectionConfirmed = (lowerWickRatio >= 0.35 || (isBullishClose && isUpperHalfClose));
+      const isRejectionConfirmed = isCandleConfirmed && (isLegacyRejectionConfirmed || isCvdAbsorptionConfirmed);
 
       if (requireRejection && !isRejectionConfirmed) {
         return {
@@ -393,7 +406,7 @@ export function evaluateFairValueGapSetup(
           gapSizeAtr: gapSize / currentAtr,
           stopLoss: 0,
           takeProfit: 0,
-          description: `Bullish FVG zone [$${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}] (CE: $${ce.toFixed(2)}) tapped, awaiting rejection wick (>=35%) or green reversal close.`,
+          description: `Bullish FVG zone [$${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}] (CE: $${ce.toFixed(2)}) tapped, awaiting candle close confirmation (green candle with >=30% lower wick) or CVD absorption.`,
         };
       }
 
@@ -509,7 +522,20 @@ export function evaluateFairValueGapSetup(
       const isBearishClose = currentCandle.close < currentCandle.open;
       const isLowerHalfClose = currentCandle.close <= currentCandle.low + 0.5 * range;
 
-      const isRejectionConfirmed = (upperWickRatio >= 0.35 || (isBearishClose && isLowerHalfClose));
+      // Order flow CVD absorption confirms rejection:
+      const isCvdAbsorptionConfirmed = !!(
+        orderFlowStats &&
+        (orderFlowStats.ofiLeadSignal === "ABSORPTION_BEAR" ||
+          (orderFlowStats.netCVD < 0 && orderFlowStats.takerBuyRatio < 0.45))
+      );
+
+      // Enforce candle close confirmation:
+      // Prevents shorting at the low wicks of green candles during retests.
+      // Retest must be on a confirmed red candle with upper rejection wick (>= 0.30)
+      // or order flow CVD absorption must confirm rejection.
+      const isCandleConfirmed = (isBearishClose && upperWickRatio >= 0.30) || isCvdAbsorptionConfirmed;
+      const isLegacyRejectionConfirmed = (upperWickRatio >= 0.35 || (isBearishClose && isLowerHalfClose));
+      const isRejectionConfirmed = isCandleConfirmed && (isLegacyRejectionConfirmed || isCvdAbsorptionConfirmed);
 
       if (requireRejection && !isRejectionConfirmed) {
         return {
@@ -523,7 +549,7 @@ export function evaluateFairValueGapSetup(
           gapSizeAtr: gapSize / currentAtr,
           stopLoss: 0,
           takeProfit: 0,
-          description: `Bearish FVG zone [$${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}] (CE: $${ce.toFixed(2)}) tapped, awaiting rejection wick (>=35%) or red reversal close.`,
+          description: `Bearish FVG zone [$${fvgBottom.toFixed(2)} - $${fvgTop.toFixed(2)}] (CE: $${ce.toFixed(2)}) tapped, awaiting candle close confirmation (red candle with >=30% upper wick) or CVD absorption.`,
         };
       }
 

@@ -7,6 +7,27 @@
     <meta name="description" content="CatBoost + FinBERT + Multi-Timeframe Regime Detection scalping simulator and dashboard for Delta Exchange BTC futures." />
     <meta property="og:title" content="Bitcoin Futures 29-Minute AI Scalping Bot" />
     <meta property="og:description" content="CatBoost + FinBERT + Multi-Timeframe Regime Detection scalping simulator and dashboard for Delta Exchange BTC futures." />
+    <script>
+      // Suppress benign Vite HMR websocket disconnection errors in sandboxed iframes
+      window.addEventListener('unhandledrejection', function (event) {
+        if (
+          event.reason &&
+          (event.reason.message?.includes('WebSocket') ||
+           event.reason.message?.includes('vite') ||
+           String(event.reason).includes('WebSocket'))
+        ) {
+          event.preventDefault();
+        }
+      });
+      window.addEventListener('error', function (event) {
+        if (
+          event.message?.includes('WebSocket') ||
+          (event.filename && event.filename.includes('@vite/client'))
+        ) {
+          event.preventDefault();
+        }
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>

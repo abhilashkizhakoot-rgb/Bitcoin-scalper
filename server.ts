@@ -1061,7 +1061,10 @@ Provide a confidence score (0-100) for each recommendation based on how strongly
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
       appType: "spa",
     });
     

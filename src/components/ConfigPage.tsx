@@ -3906,13 +3906,13 @@ export default function ConfigPage({
                       const defaultMatrix: Record<string, MarketRegime[]> = {
                         setup_1_pullback_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
                         setup_2_dynamic_ema_pushback: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
-                        setup_3_liquidity_sweep: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+                        setup_3_liquidity_sweep: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY, MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
                         setup_4_fvg_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
                         setup_9_range_failed_auction: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
-                        setup_10_vwap_band_rejection: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
+                        setup_10_vwap_band_rejection: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY, MarketRegime.HIGH_VOLATILITY, MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
                         setup_11_eqh_eql_double_touch: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
-                        setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
-                        setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
+                        setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY, MarketRegime.STRONG_DOWNTREND, MarketRegime.STRONG_UPTREND],
+                        setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND, MarketRegime.STRONG_DOWNTREND, MarketRegime.STRONG_UPTREND],
                         setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
                         setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
                       };

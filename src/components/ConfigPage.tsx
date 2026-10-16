@@ -4037,6 +4037,398 @@ export default function ConfigPage({
               </div>
             </div>
 
+            {/* ================= DYNAMIC TRADING SESSION x SETUP GATING MATRIX ================= */}
+            <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm" id="dynamic-session-matrix">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-3 border-b border-slate-100 gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-indigo-600" />
+                    <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-sans">
+                      Dynamic Trading Session x Setup Gating Matrix
+                    </h4>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
+                      Institutional Liquidity Filter
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Filters setups according to institutional order flow profiles across Asian, European, and US trading sessions. Prevents breakout chasing during low-liquidity hours and protects against false trends on weekends.
+                  </p>
+                </div>
+
+                {/* Master Switch for Session Matrix Gating */}
+                <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/70 px-3 py-2 rounded-lg shrink-0">
+                  <div className="text-right">
+                    <p className="text-[11px] font-semibold text-slate-800">Enforce Session Matrix</p>
+                    <p className="text-[9px] font-mono text-slate-400">
+                      {msConfig.dynamic_session_setup_matrix_enabled !== false ? "STRICT GATING ACTIVE" : "BYPASSED (ALL SESSIONS)"}
+                    </p>
+                  </div>
+                  <button
+                    id="toggle-dynamic-session-matrix"
+                    type="button"
+                    onClick={async () => {
+                      const next = msConfig.dynamic_session_setup_matrix_enabled === false ? true : false;
+                      setMsConfig({ ...msConfig, dynamic_session_setup_matrix_enabled: next });
+                      try {
+                        await apiFetch("/api/strategy/dynamic-conditions/update", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ dynamic_session_setup_matrix_enabled: next }),
+                        });
+                      } catch (e) {
+                        console.error("Failed to toggle session matrix master:", e);
+                      }
+                    }}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.dynamic_session_setup_matrix_enabled !== false ? "bg-indigo-600" : "bg-slate-300"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.dynamic_session_setup_matrix_enabled !== false ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* Current Active Session Live Status Banner */}
+              {(() => {
+                const getCurrentLiveSession = () => {
+                  const windows = generalConfig.timing_windows || [];
+                  const d = new Date();
+                  const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+                  const istOffset = 5.5 * 3600000;
+                  const istDate = new Date(utcMs + istOffset);
+                  const hour = istDate.getHours();
+                  const minute = istDate.getMinutes();
+                  const day = istDate.getDay();
+                  const minutesOfDay = hour * 60 + minute;
+
+                  if (day === 0 || (day === 6 && minutesOfDay > 90)) {
+                    return "weekends";
+                  }
+
+                  const parseTimeToMinutes = (tStr: string) => {
+                    const parts = tStr.split(":");
+                    return parts.length === 2 ? parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10) : 0;
+                  };
+
+                  const match = windows.find((w) => {
+                    if (w.id === "weekends") return false;
+                    const s = parseTimeToMinutes(w.start_time);
+                    const e = parseTimeToMinutes(w.end_time);
+                    return s < e ? minutesOfDay >= s && minutesOfDay < e : minutesOfDay >= s || minutesOfDay < e;
+                  });
+
+                  return match ? match.id : "intraday_chop";
+                };
+
+                const currentSessionId = getCurrentLiveSession();
+                const sessionLabels: Record<string, { name: string; time: string; icon: string }> = {
+                  asia_open: { name: "Asia Open Front-run", time: "05:00 - 09:30 IST", icon: "🌅" },
+                  intraday_chop: { name: "Intra-day Chop (Europe/Asia)", time: "09:30 - 18:30 IST", icon: "☕" },
+                  europe_us_overlap: { name: "US / Europe Overlap", time: "18:30 - 22:30 IST", icon: "🗽" },
+                  late_us_session: { name: "Late US Session", time: "22:30 - 01:30 IST", icon: "🌙" },
+                  dead_liquidity: { name: "Dead Liquidity", time: "01:30 - 05:00 IST", icon: "💤" },
+                  weekends: { name: "Weekends", time: "All day Sat/Sun IST", icon: "🏖️" },
+                };
+                const currentSessionInfo = sessionLabels[currentSessionId] || { name: "Normal Hours", time: "IST", icon: "⏰" };
+
+                return (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">Current Active Session:</span>
+                      <span className="px-2.5 py-0.5 rounded font-mono font-bold text-xs uppercase tracking-wide border bg-emerald-100 text-emerald-800 border-emerald-300 flex items-center gap-1.5">
+                        <span>{currentSessionInfo.icon}</span>
+                        <span>{currentSessionInfo.name}</span>
+                        <span className="text-[10px] opacity-75 font-normal">({currentSessionInfo.time})</span>
+                      </span>
+                      <span className="text-[11px] text-slate-500 hidden sm:inline">
+                        — The highlighted column below is currently evaluated for live trade entries.
+                      </span>
+                    </div>
+
+                    {/* Presets Bar */}
+                    <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase font-bold mr-1">Presets:</span>
+                      {[
+                        { id: "QUANT_OPTIMAL", label: "Quant Optimal", title: "Institutional standard: Trend in US/EU overlap & Asia, Mean-reversion in Chop & Weekends" },
+                        { id: "STRICT_PEAK_ONLY", label: "Strict Peak Only", title: "Only allow setups during high-volume sessions (Asia Open, US/EU Overlap, Late US)" },
+                        { id: "MEAN_REVERSION_FOCUS", label: "Mean Reversion", title: "Confines chop, weekends, and dead hours exclusively to SFP, VWAP & Liquidity Sweeps" },
+                        { id: "ALL_PERMISSIVE", label: "All Sessions", title: "Allow every setup across all 6 trading sessions" },
+                      ].map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          title={p.title}
+                          onClick={async () => {
+                            try {
+                              const res = await apiFetch("/api/strategy/session-matrix/preset", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ preset: p.id }),
+                              });
+                              if (res.ok) {
+                                const data = await res.json();
+                                if (data.setup_session_matrix) {
+                                  setMsConfig({ ...msConfig, setup_session_matrix: data.setup_session_matrix });
+                                }
+                              }
+                            } catch (e) {
+                              console.error("Failed to apply session preset:", e);
+                            }
+                          }}
+                          className="px-2 py-1 text-[10px] font-mono font-medium rounded border border-slate-200 bg-white hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 text-slate-600 transition-colors cursor-pointer"
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Matrix Table */}
+              <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-100/80 border-b border-slate-200 text-[10px] font-mono uppercase text-slate-500">
+                      <th className="py-2.5 px-3 font-semibold">Tactical Setup</th>
+                      <th className="py-2.5 px-2 font-semibold">Category</th>
+                      {(() => {
+                        const getCurrentLiveSession = () => {
+                          const windows = generalConfig.timing_windows || [];
+                          const d = new Date();
+                          const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+                          const istOffset = 5.5 * 3600000;
+                          const istDate = new Date(utcMs + istOffset);
+                          const hour = istDate.getHours();
+                          const minute = istDate.getMinutes();
+                          const day = istDate.getDay();
+                          const minutesOfDay = hour * 60 + minute;
+
+                          if (day === 0 || (day === 6 && minutesOfDay > 90)) {
+                            return "weekends";
+                          }
+
+                          const parseTimeToMinutes = (tStr: string) => {
+                            const parts = tStr.split(":");
+                            return parts.length === 2 ? parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10) : 0;
+                          };
+
+                          const match = windows.find((w) => {
+                            if (w.id === "weekends") return false;
+                            const s = parseTimeToMinutes(w.start_time);
+                            const e = parseTimeToMinutes(w.end_time);
+                            return s < e ? minutesOfDay >= s && minutesOfDay < e : minutesOfDay >= s || minutesOfDay < e;
+                          });
+
+                          return match ? match.id : "intraday_chop";
+                        };
+                        const liveSessionId = getCurrentLiveSession();
+
+                        const SESSIONS_COLUMNS = [
+                          { id: "asia_open", label: "Asia Open", time: "05:00-09:30", icon: "🌅" },
+                          { id: "intraday_chop", label: "Intra-day Chop", time: "09:30-18:30", icon: "☕" },
+                          { id: "europe_us_overlap", label: "US/EU Overlap", time: "18:30-22:30", icon: "🗽" },
+                          { id: "late_us_session", label: "Late US", time: "22:30-01:30", icon: "🌙" },
+                          { id: "dead_liquidity", label: "Dead Liquidity", time: "01:30-05:00", icon: "💤" },
+                          { id: "weekends", label: "Weekends", time: "Sat/Sun IST", icon: "🏖️" },
+                        ];
+
+                        return SESSIONS_COLUMNS.map((sess) => {
+                          const isLiveCurrent = liveSessionId === sess.id;
+                          return (
+                            <th
+                              key={sess.id}
+                              className={`py-2 px-2.5 font-semibold text-center ${
+                                isLiveCurrent ? "bg-emerald-100/70 text-emerald-900 border-x-2 border-emerald-400 font-bold" : ""
+                              }`}
+                            >
+                              <div className="flex items-center justify-center gap-1">
+                                <span>{sess.icon}</span>
+                                <span>{sess.label}</span>
+                              </div>
+                              <span className="block text-[8px] opacity-75 font-mono">{sess.time}</span>
+                              {isLiveCurrent && (
+                                <span className="block text-[8px] font-bold text-emerald-600 tracking-wider">LIVE</span>
+                              )}
+                            </th>
+                          );
+                        });
+                      })()}
+                      <th className="py-2.5 px-3 font-semibold text-center">Session Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-sans">
+                    {(() => {
+                      const defaultSessionMatrix: Record<string, string[]> = {
+                        setup_1_pullback_retest: ["asia_open", "europe_us_overlap", "late_us_session"],
+                        setup_2_dynamic_ema_pushback: ["europe_us_overlap", "late_us_session"],
+                        setup_3_liquidity_sweep: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "weekends"],
+                        setup_4_fvg_retest: ["asia_open", "europe_us_overlap", "late_us_session", "intraday_chop"],
+                        setup_9_range_failed_auction: ["asia_open", "intraday_chop", "dead_liquidity", "weekends"],
+                        setup_10_vwap_band_rejection: ["asia_open", "intraday_chop", "dead_liquidity", "weekends"],
+                        setup_11_eqh_eql_double_touch: ["asia_open", "intraday_chop", "europe_us_overlap", "weekends"],
+                        setup_12_cvd_absorption: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session"],
+                        setup_13_oi_flush_cascade: ["asia_open", "europe_us_overlap", "late_us_session"],
+                        setup_14_fresh_momentum_impulse: ["asia_open", "europe_us_overlap", "late_us_session"],
+                        setup_15_trendline_bounce: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session"],
+                      };
+
+                      const activeSessionMatrix = (msConfig as any).setup_session_matrix || defaultSessionMatrix;
+
+                      const setupsList = [
+                        { id: "setup_1_pullback_retest", num: "1", name: "Pullback & Retest", key: "pullback_retest_enabled", category: "Trend Continuation" },
+                        { id: "setup_2_dynamic_ema_pushback", num: "2", name: "EMA Pushback", key: "ema_pushback_enabled", category: "Trend Pullback" },
+                        { id: "setup_3_liquidity_sweep", num: "3", name: "Liquidity Sweep", key: "liquidity_sweep_enabled", category: "Mean Reversion" },
+                        { id: "setup_4_fvg_retest", num: "4", name: "Fair Value Gap", key: "fvg_strategy_enabled", category: "SMC Imbalance" },
+                        { id: "setup_9_range_failed_auction", num: "9", name: "Failed Auction", key: "failed_auction_strategy_enabled", category: "Mean Reversion" },
+                        { id: "setup_10_vwap_band_rejection", num: "10", name: "VWAP Band Rejection", key: "vwap_band_reversal_enabled", category: "Mean Reversion" },
+                        { id: "setup_11_eqh_eql_double_touch", num: "11", name: "EQH / EQL Double Touch", key: "eqh_eql_strategy_enabled", category: "Liquidity Sweep" },
+                        { id: "setup_12_cvd_absorption", num: "12", name: "CVD Absorption", key: "cvd_divergence_strategy_enabled", category: "Order Flow" },
+                        { id: "setup_13_oi_flush_cascade", num: "13", name: "OI Flush Fade", key: "oi_flush_strategy_enabled", category: "Order Flow" },
+                        { id: "setup_14_fresh_momentum_impulse", num: "14", name: "Fresh Momentum Impulse", key: "fresh_momentum_strategy_enabled", category: "Breakout" },
+                        { id: "setup_15_trendline_bounce", num: "15", name: "Trendline Bounce & Retest", key: "trendline_bounce_strategy_enabled", category: "Trend Retest" },
+                      ];
+
+                      const sessionIds = ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity", "weekends"];
+
+                      const getCurrentLiveSession = () => {
+                        const windows = generalConfig.timing_windows || [];
+                        const d = new Date();
+                        const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+                        const istOffset = 5.5 * 3600000;
+                        const istDate = new Date(utcMs + istOffset);
+                        const hour = istDate.getHours();
+                        const minute = istDate.getMinutes();
+                        const day = istDate.getDay();
+                        const minutesOfDay = hour * 60 + minute;
+
+                        if (day === 0 || (day === 6 && minutesOfDay > 90)) {
+                          return "weekends";
+                        }
+
+                        const parseTimeToMinutes = (tStr: string) => {
+                          const parts = tStr.split(":");
+                          return parts.length === 2 ? parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10) : 0;
+                        };
+
+                        const match = windows.find((w) => {
+                          if (w.id === "weekends") return false;
+                          const s = parseTimeToMinutes(w.start_time);
+                          const e = parseTimeToMinutes(w.end_time);
+                          return s < e ? minutesOfDay >= s && minutesOfDay < e : minutesOfDay >= s || minutesOfDay < e;
+                        });
+
+                        return match ? match.id : "intraday_chop";
+                      };
+
+                      const currentSessionId = getCurrentLiveSession();
+
+                      return setupsList.map((setup) => {
+                        const isMasterOn = (msConfig as any)[setup.key] !== false;
+                        const allowedSessions: string[] = activeSessionMatrix[setup.id] || defaultSessionMatrix[setup.id] || [];
+                        const isAllowedInCurrentSession = allowedSessions.includes(currentSessionId);
+                        const isMatrixEnforced = msConfig.dynamic_session_setup_matrix_enabled !== false;
+                        const isLiveSessionActive = isMasterOn && (!isMatrixEnforced || isAllowedInCurrentSession);
+
+                        return (
+                          <tr
+                            key={setup.id}
+                            className={`hover:bg-slate-50/70 transition-colors ${
+                              !isMasterOn ? "opacity-40 bg-slate-50/40" : ""
+                            }`}
+                          >
+                            <td className="py-2.5 px-3">
+                              <div className="font-semibold text-slate-800 text-xs flex items-center gap-1.5">
+                                <span className="font-mono text-[10px] text-slate-400 font-bold">#{setup.num}</span>
+                                <span>{setup.name}</span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-2">
+                              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
+                                setup.category.includes("Trend")
+                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  : setup.category.includes("Reversion")
+                                  ? "bg-amber-50 text-amber-700 border border-amber-200"
+                                  : setup.category.includes("Order")
+                                  ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                  : "bg-blue-50 text-blue-700 border border-blue-200"
+                              }`}>
+                                {setup.category}
+                              </span>
+                            </td>
+
+                            {sessionIds.map((sessId) => {
+                              const isChecked = allowedSessions.includes(sessId);
+                              const isLiveCol = currentSessionId === sessId;
+
+                              return (
+                                <td
+                                  key={sessId}
+                                  className={`py-2 px-2.5 text-center ${
+                                    isLiveCol ? "bg-emerald-50/50 border-x-2 border-emerald-400/60" : ""
+                                  }`}
+                                >
+                                  <button
+                                    type="button"
+                                    disabled={!isMasterOn}
+                                    onClick={async () => {
+                                      const nextList = isChecked
+                                        ? allowedSessions.filter((s) => s !== sessId)
+                                        : [...allowedSessions, sessId];
+
+                                      const nextMatrix = {
+                                        ...activeSessionMatrix,
+                                        [setup.id]: nextList,
+                                      };
+                                      setMsConfig({ ...msConfig, setup_session_matrix: nextMatrix });
+
+                                      try {
+                                        await apiFetch("/api/strategy/session-matrix/toggle-cell", {
+                                          method: "POST",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ setupId: setup.id, session: sessId }),
+                                        });
+                                      } catch (e) {
+                                        console.error("Failed to toggle session cell:", e);
+                                      }
+                                    }}
+                                    className={`inline-flex items-center justify-center w-6 h-6 rounded border transition-all cursor-pointer ${
+                                      isChecked
+                                        ? "bg-emerald-600 border-emerald-700 text-white shadow-xs"
+                                        : "bg-white border-slate-200 text-slate-300 hover:border-slate-300 hover:bg-slate-100"
+                                    }`}
+                                    title={`${isChecked ? "Allowed" : "Blocked"} during ${sessId}. Click to toggle.`}
+                                  >
+                                    {isChecked ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : <X className="w-3 h-3 text-slate-300" />}
+                                  </button>
+                                </td>
+                              );
+                            })}
+
+                            <td className="py-2.5 px-3 text-center">
+                              <span className={`inline-block text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
+                                !isMasterOn
+                                  ? "bg-slate-100 text-slate-500 border border-slate-200"
+                                  : isLiveSessionActive
+                                  ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                  : "bg-amber-100 text-amber-800 border border-amber-300"
+                              }`}>
+                                {!isMasterOn ? "DISABLED" : isLiveSessionActive ? "ELIGIBLE" : "SESSION GATED"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             {/* ================= DYNAMIC QUANTITATIVE CONDITION RULES ================= */}
             <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm" id="dynamic-condition-rules">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">

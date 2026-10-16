@@ -9,7 +9,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { dbManager } from "./db_sim.js";
+import { dbManager, DEFAULT_TIMING_WINDOWS, DEFAULT_SETUP_SESSION_MATRIX } from "./db_sim.js";
 import {
   Candlestick,
   MarketRegime,
@@ -1395,6 +1395,97 @@ class TradingEngine {
       return sum + weight;
     }, 0);
     return totalWeight > 0 ? Number((weightedSum / totalWeight).toFixed(4)) : 0;
+  }
+
+  /**
+   * Identifies the active Trading Session / Timing Window for a given timestamp or current moment.
+   */
+  public getCurrentTradingSession(timestampMs?: number): {
+    id: string;
+    name: string;
+    is_weekend: boolean;
+    allowed: boolean;
+    start_time: string;
+    end_time: string;
+  } {
+    const config = dbManager.getConfig();
+    const windows = (config.general.timing_windows && config.general.timing_windows.length > 0)
+      ? config.general.timing_windows
+      : DEFAULT_TIMING_WINDOWS;
+
+    const d = timestampMs ? new Date(timestampMs) : new Date();
+    const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+    const istOffset = 5.5 * 3600000;
+    const istDate = new Date(utcMs + istOffset);
+
+    const hour = istDate.getHours();
+    const minute = istDate.getMinutes();
+    const day = istDate.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+    const minutesOfDay = hour * 60 + minute;
+
+    const parseTimeToMinutes = (timeStr: string): number => {
+      const parts = timeStr.split(":");
+      if (parts.length !== 2) return 0;
+      const h = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      return (isNaN(h) || isNaN(m)) ? 0 : h * 60 + m;
+    };
+
+    const isTimeInWindow = (minutes: number, startStr: string, endStr: string): boolean => {
+      const start = parseTimeToMinutes(startStr);
+      const end = parseTimeToMinutes(endStr);
+      if (start === end) return false;
+      if (start < end) {
+        return minutes >= start && minutes < end;
+      } else {
+        return minutes >= start || minutes < end;
+      }
+    };
+
+    // 1. Weekend Check: Saturday after 1:30 AM IST & all of Sunday IST
+    let isWeekendNow = false;
+    if (day === 0) {
+      isWeekendNow = true;
+    } else if (day === 6 && minutesOfDay > 90) {
+      isWeekendNow = true;
+    }
+
+    if (isWeekendNow) {
+      const weekendWindow = windows.find((w) => w.id === "weekends");
+      return {
+        id: "weekends",
+        name: weekendWindow?.name || "Weekends",
+        is_weekend: true,
+        allowed: weekendWindow ? weekendWindow.allowed : false,
+        start_time: weekendWindow?.start_time || "00:00",
+        end_time: weekendWindow?.end_time || "23:59",
+      };
+    }
+
+    // 2. Session Match Check
+    const matchingWindow = windows.find(
+      (w) => w.id !== "weekends" && isTimeInWindow(minutesOfDay, w.start_time, w.end_time)
+    );
+
+    if (matchingWindow) {
+      return {
+        id: matchingWindow.id,
+        name: matchingWindow.name,
+        is_weekend: false,
+        allowed: matchingWindow.allowed,
+        start_time: matchingWindow.start_time,
+        end_time: matchingWindow.end_time,
+      };
+    }
+
+    return {
+      id: "normal_hours",
+      name: "Normal Hours",
+      is_weekend: false,
+      allowed: true,
+      start_time: "N/A",
+      end_time: "N/A",
+    };
   }
 
   public getISTTimingStatus(): { met: boolean; status: string; description: string; current_time: string } {
@@ -6448,14 +6539,18 @@ class TradingEngine {
    */
   public isSetupEligibleForConditions(
     setupId: string,
-    direction: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL"
+    direction: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL",
+    candleTimestampMs?: number
   ): {
     eligible: boolean;
     master_enabled: boolean;
     regime_allowed: boolean;
+    session_allowed: boolean;
     conditions_allowed: boolean;
     reason: string;
     allowed_regimes: MarketRegime[];
+    allowed_sessions: string[];
+    current_session: string;
   } {
     const config = dbManager.getConfig();
     const ms = (config.market_structure || {}) as any;
@@ -6473,6 +6568,12 @@ class TradingEngine {
       setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
       setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
     };
+
+    const defaultSessionMatrix: Record<string, string[]> = DEFAULT_SETUP_SESSION_MATRIX;
+    const sessionMatrix = ms.setup_session_matrix || defaultSessionMatrix;
+    const allSessionIds = ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity", "weekends"];
+    const allowed_sessions = sessionMatrix[setupId] || defaultSessionMatrix[setupId] || allSessionIds;
+    const currentSession = this.getCurrentTradingSession(candleTimestampMs);
 
     // 1. Master toggle check
     let master_enabled = true;
@@ -6520,13 +6621,16 @@ class TradingEngine {
         eligible: false,
         master_enabled: false,
         regime_allowed: false,
+        session_allowed: false,
         conditions_allowed: false,
         reason: "Strategy setup is disabled in master configuration.",
         allowed_regimes,
+        allowed_sessions,
+        current_session: currentSession.id,
       };
     }
 
-    // 2. Market Regime Matrix Gating Check
+    // 2a. Market Regime Matrix Gating Check
     const isMatrixEnabled = ms.dynamic_regime_setup_matrix_enabled !== false;
     const regime_allowed = !isMatrixEnabled || allowed_regimes.includes(this.currentRegime);
 
@@ -6535,9 +6639,30 @@ class TradingEngine {
         eligible: false,
         master_enabled: true,
         regime_allowed: false,
+        session_allowed: true,
         conditions_allowed: false,
         reason: `Dynamically gated: Prohibited in current ${this.currentRegime} regime.`,
         allowed_regimes,
+        allowed_sessions,
+        current_session: currentSession.id,
+      };
+    }
+
+    // 2b. Trading Session Matrix Gating Check
+    const isSessionMatrixEnabled = ms.dynamic_session_setup_matrix_enabled !== false;
+    const session_allowed = !isSessionMatrixEnabled || allowed_sessions.includes(currentSession.id);
+
+    if (!session_allowed) {
+      return {
+        eligible: false,
+        master_enabled: true,
+        regime_allowed: true,
+        session_allowed: false,
+        conditions_allowed: false,
+        reason: `Dynamically gated: Prohibited during ${currentSession.name} (${currentSession.id}) by Session x Setup Matrix. Allowed: [${allowed_sessions.join(", ")}].`,
+        allowed_regimes,
+        allowed_sessions,
+        current_session: currentSession.id,
       };
     }
 
@@ -6548,9 +6673,12 @@ class TradingEngine {
         eligible: false,
         master_enabled: true,
         regime_allowed: false,
+        session_allowed: true,
         conditions_allowed: false,
         reason: `Dynamically gated: Bullish mean-reversion counter-trend entry prohibited in ${this.currentRegime}.`,
         allowed_regimes,
+        allowed_sessions,
+        current_session: currentSession.id,
       };
     }
     if (direction === "SHORT" && this.currentRegime === MarketRegime.STRONG_UPTREND && isMeanReversion) {
@@ -6558,9 +6686,12 @@ class TradingEngine {
         eligible: false,
         master_enabled: true,
         regime_allowed: false,
+        session_allowed: true,
         conditions_allowed: false,
         reason: `Dynamically gated: Bearish mean-reversion counter-trend entry prohibited in ${this.currentRegime}.`,
         allowed_regimes,
+        allowed_sessions,
+        current_session: currentSession.id,
       };
     }
 
@@ -6613,9 +6744,12 @@ class TradingEngine {
         eligible: false,
         master_enabled: true,
         regime_allowed: true,
+        session_allowed: true,
         conditions_allowed: false,
         reason: conditionReason,
         allowed_regimes,
+        allowed_sessions,
+        current_session: currentSession.id,
       };
     }
 
@@ -6623,9 +6757,12 @@ class TradingEngine {
       eligible: true,
       master_enabled: true,
       regime_allowed: true,
+      session_allowed: true,
       conditions_allowed: true,
-      reason: `Active & eligible for ${this.currentRegime}`,
+      reason: `Active & eligible for ${this.currentRegime} during ${currentSession.name}`,
       allowed_regimes,
+      allowed_sessions,
+      current_session: currentSession.id,
     };
   }
 
@@ -6659,10 +6796,13 @@ class TradingEngine {
         category: def.category,
         master_enabled: eligibility.master_enabled,
         regime_allowed: eligibility.regime_allowed,
+        session_allowed: eligibility.session_allowed,
         conditions_allowed: eligibility.conditions_allowed,
         active: eligibility.eligible,
         reason: eligibility.reason,
         allowed_regimes: eligibility.allowed_regimes,
+        allowed_sessions: eligibility.allowed_sessions,
+        current_session: eligibility.current_session,
       };
     });
   }

@@ -3,16 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Candlestick, MarketRegime, StrategyConfig } from "../types.js";
+import { Candlestick, MarketRegime, StrategyConfig, TimingWindow } from "../types.js";
 import {
   BacktestRequest,
   BacktestResult,
   BacktestTrade,
   BacktestSetupOption,
   RegimePerformance,
+  SessionPerformance,
   BacktestRankItem,
   BacktestRankResult,
 } from "./types.js";
+import { DEFAULT_TIMING_WINDOWS, DEFAULT_SETUP_SESSION_MATRIX, dbManager } from "../db_sim.js";
 import { fetchBinanceHistoricalKlines } from "./binanceFetcher.js";
 import {
   SetupContext,
@@ -123,23 +125,136 @@ export const DYNAMIC_REGIME_GATING_MATRIX: Record<string, MarketRegime[]> = {
   setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
 };
 
-export function isSetupGatedByRegimeMatrix(
+export function getBacktestTradingSession(
+  timestampMs: number,
+  customWindows?: TimingWindow[]
+): { id: string; name: string; is_weekend: boolean; allowed: boolean } {
+  const windows = customWindows && customWindows.length > 0 ? customWindows : DEFAULT_TIMING_WINDOWS;
+
+  const d = new Date(timestampMs);
+  const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+  const istOffset = 5.5 * 3600000;
+  const istDate = new Date(utcMs + istOffset);
+
+  const hour = istDate.getHours();
+  const minute = istDate.getMinutes();
+  const day = istDate.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  const minutesOfDay = hour * 60 + minute;
+
+  const parseTimeToMinutes = (timeStr: string): number => {
+    const parts = timeStr.split(":");
+    if (parts.length !== 2) return 0;
+    const h = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    return isNaN(h) || isNaN(m) ? 0 : h * 60 + m;
+  };
+
+  const isTimeInWindow = (minutes: number, startStr: string, endStr: string): boolean => {
+    const start = parseTimeToMinutes(startStr);
+    const end = parseTimeToMinutes(endStr);
+    if (start === end) return false;
+    if (start < end) {
+      return minutes >= start && minutes < end;
+    } else {
+      return minutes >= start || minutes < end;
+    }
+  };
+
+  // 1. Weekend check (Saturday after 1:30 AM IST & all of Sunday IST)
+  let isWeekendNow = false;
+  if (day === 0) {
+    isWeekendNow = true;
+  } else if (day === 6 && minutesOfDay > 90) {
+    isWeekendNow = true;
+  }
+
+  if (isWeekendNow) {
+    const weekendWindow = windows.find((w) => w.id === "weekends");
+    return {
+      id: "weekends",
+      name: weekendWindow?.name || "Weekends",
+      is_weekend: true,
+      allowed: weekendWindow ? weekendWindow.allowed : false,
+    };
+  }
+
+  // 2. Session Match Check
+  const matchingWindow = windows.find(
+    (w) => w.id !== "weekends" && isTimeInWindow(minutesOfDay, w.start_time, w.end_time)
+  );
+
+  if (matchingWindow) {
+    return {
+      id: matchingWindow.id,
+      name: matchingWindow.name,
+      is_weekend: false,
+      allowed: matchingWindow.allowed,
+    };
+  }
+
+  return {
+    id: "normal_hours",
+    name: "Normal Hours",
+    is_weekend: false,
+    allowed: true,
+  };
+}
+
+export function isSetupGatedBySessionAndRegime(
   setupId: string,
   direction: "LONG" | "SHORT",
   currentRegime: MarketRegime,
-  currentAdx: number = 25
-): { allowed: boolean; reason?: string } {
-  const allowedRegimes = DYNAMIC_REGIME_GATING_MATRIX[setupId] || Object.values(MarketRegime);
+  currentAdx: number = 25,
+  sessionTimestampMs?: number,
+  respectSessionMatrix: boolean = true,
+  sessionFilter?: string,
+  config?: StrategyConfig
+): { allowed: boolean; reason?: string; sessionId: string; sessionName: string } {
+  const session = sessionTimestampMs !== undefined
+    ? getBacktestTradingSession(sessionTimestampMs, config?.general?.timing_windows)
+    : { id: "normal_hours", name: "Normal Hours", is_weekend: false, allowed: true };
 
-  // 1. Dynamic Market Regime Gating Matrix Check
+  // 0. Session Filter (if user wants to test only a specific session)
+  if (sessionFilter && sessionFilter !== "all" && sessionFilter !== "ALL") {
+    if (session.id !== sessionFilter) {
+      return {
+        allowed: false,
+        reason: `Filtered: Trade in ${session.name} (${session.id}), backtest session filter is ${sessionFilter}.`,
+        sessionId: session.id,
+        sessionName: session.name,
+      };
+    }
+  }
+
+  // 1. Session Matrix Check
+  if (respectSessionMatrix) {
+    const ms = (config?.market_structure || {}) as any;
+    const sessionMatrix = ms.setup_session_matrix || DEFAULT_SETUP_SESSION_MATRIX;
+    const allSessionIds = ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity", "weekends"];
+    const allowedSessions = sessionMatrix[setupId] || DEFAULT_SETUP_SESSION_MATRIX[setupId] || allSessionIds;
+
+    if (!allowedSessions.includes(session.id)) {
+      return {
+        allowed: false,
+        reason: `Prohibited in session ${session.name} (${session.id}) by Session x Setup Matrix. Allowed: [${allowedSessions.join(", ")}].`,
+        sessionId: session.id,
+        sessionName: session.name,
+      };
+    }
+  }
+
+  // 2. Dynamic Market Regime Gating Matrix Check
+  const allowedRegimes = DYNAMIC_REGIME_GATING_MATRIX[setupId] || Object.values(MarketRegime);
   if (!allowedRegimes.includes(currentRegime)) {
     return {
       allowed: false,
       reason: `Prohibited in current ${currentRegime} regime by Dynamic Market Regime Gating Matrix. Allowed: [${allowedRegimes.join(", ")}].`,
+      sessionId: session.id,
+      sessionName: session.name,
     };
   }
 
-  // 2. Directional Counter-trend Safeguard for Mean Reversion setups
+  // 3. Directional Counter-trend Safeguard for Mean Reversion setups
   const isMeanReversion = [
     "setup_3_liquidity_sweep",
     "setup_9_range_failed_auction",
@@ -149,27 +264,35 @@ export function isSetupGatedByRegimeMatrix(
 
   if (isMeanReversion) {
     if (direction === "LONG" && currentRegime === MarketRegime.STRONG_DOWNTREND) {
-      return { allowed: false, reason: "Counter-trend Long prohibited in STRONG_DOWNTREND." };
+      return { allowed: false, reason: "Counter-trend Long prohibited in STRONG_DOWNTREND.", sessionId: session.id, sessionName: session.name };
     }
     if (direction === "SHORT" && currentRegime === MarketRegime.STRONG_UPTREND) {
-      return { allowed: false, reason: "Counter-trend Short prohibited in STRONG_UPTREND." };
+      return { allowed: false, reason: "Counter-trend Short prohibited in STRONG_UPTREND.", sessionId: session.id, sessionName: session.name };
     }
-    // Fix E: Specific sideways ADX ceiling for Setup 10 (ADX <= 22), otherwise 32 for general mean reversion
     const maxMeanRevAdx = setupId === "setup_10_vwap_band_rejection" ? 22 : 32;
     if (currentAdx > maxMeanRevAdx) {
-      return { allowed: false, reason: `ADX (${currentAdx.toFixed(1)}) exceeds mean-reversion ceiling (${maxMeanRevAdx}).` };
+      return { allowed: false, reason: `ADX (${currentAdx.toFixed(1)}) exceeds mean-reversion ceiling (${maxMeanRevAdx}).`, sessionId: session.id, sessionName: session.name };
     }
   }
 
-  // 3. Dynamic Condition Rules: Trend setups minimum momentum requirement
+  // 4. Dynamic Condition Rules: Trend setups minimum momentum requirement
   if (["setup_1_pullback_retest", "setup_2_dynamic_ema_pushback", "setup_15_trendline_bounce"].includes(setupId)) {
     const minAdxReq = setupId === "setup_2_dynamic_ema_pushback" ? 22 : 20;
     if (currentAdx < minAdxReq) {
-      return { allowed: false, reason: `ADX (${currentAdx.toFixed(1)}) below minimum trend threshold (${minAdxReq}).` };
+      return { allowed: false, reason: `ADX (${currentAdx.toFixed(1)}) below minimum trend threshold (${minAdxReq}).`, sessionId: session.id, sessionName: session.name };
     }
   }
 
-  return { allowed: true };
+  return { allowed: true, sessionId: session.id, sessionName: session.name };
+}
+
+export function isSetupGatedByRegimeMatrix(
+  setupId: string,
+  direction: "LONG" | "SHORT",
+  currentRegime: MarketRegime,
+  currentAdx: number = 25
+): { allowed: boolean; reason?: string } {
+  return isSetupGatedBySessionAndRegime(setupId, direction, currentRegime, currentAdx, undefined, false);
 }
 
 export async function runIsolatedBacktest(
@@ -181,6 +304,7 @@ export async function runIsolatedBacktest(
   const positionSizeBtc = request.positionSizeBtc || 0.01;
   const leverage = request.leverage || 20;
   const simulateFees = request.simulateFees !== false;
+  const dbConfig = dbManager.getConfig();
 
   const nowMs = Date.now();
   const endTimeMs = request.endTime || nowMs;
@@ -365,7 +489,7 @@ export async function runIsolatedBacktest(
       config: mockConfig,
     };
 
-    // 4. Evaluate Setup Signals with Strict Dynamic Market Regime Gating Matrix
+    // 4. Evaluate Setup Signals with Strict Dynamic Session & Regime Gating Matrix
     let signal: {
       direction: "LONG" | "SHORT";
       setupId: string;
@@ -373,11 +497,14 @@ export async function runIsolatedBacktest(
       stopLoss: number;
       takeProfit: number;
       description: string;
+      sessionId?: string;
+      sessionName?: string;
     } | null = null;
 
     const targetSetup = request.setupId;
+    const candleTimeMs = currentCandle.time * 1000;
 
-    // Helper to evaluate and apply strict Dynamic Market Regime Gating Matrix
+    // Helper to evaluate and apply strict Dynamic Session & Market Regime Gating Matrix
     const tryEmitSignal = (
       setupId: string,
       direction: "LONG" | "SHORT",
@@ -386,7 +513,16 @@ export async function runIsolatedBacktest(
       takeProfit: number,
       description: string
     ) => {
-      const gate = isSetupGatedByRegimeMatrix(setupId, direction, currentRegime, currentAdx);
+      const gate = isSetupGatedBySessionAndRegime(
+        setupId,
+        direction,
+        currentRegime,
+        currentAdx,
+        candleTimeMs,
+        request.respectSessionMatrix !== false,
+        request.sessionFilter,
+        dbConfig
+      );
       if (gate.allowed) {
         signal = {
           direction,
@@ -395,6 +531,8 @@ export async function runIsolatedBacktest(
           stopLoss,
           takeProfit,
           description,
+          sessionId: gate.sessionId,
+          sessionName: gate.sessionName,
         };
       } else {
         gatedSignalsCount++;
@@ -872,6 +1010,8 @@ export async function runIsolatedBacktest(
         setupId: signal.setupId,
         setupName: signal.setupName,
         direction: signal.direction,
+        sessionId: signal.sessionId,
+        sessionName: signal.sessionName,
         entryPrice,
         exitPrice,
         stopLoss: targetSl,
@@ -969,6 +1109,37 @@ export async function runIsolatedBacktest(
     };
   }
 
+  // Breakdown by Session
+  const SESSIONS_LIST = [
+    { id: "asia_open", name: "Asia Open Front-run" },
+    { id: "intraday_chop", name: "Intra-day Chop" },
+    { id: "europe_us_overlap", name: "US / Europe Overlap" },
+    { id: "late_us_session", name: "Late US Session" },
+    { id: "dead_liquidity", name: "Dead Liquidity" },
+    { id: "weekends", name: "Weekends" },
+  ];
+
+  const sessionBreakdown: Record<string, SessionPerformance> = {};
+  for (const sess of SESSIONS_LIST) {
+    const sTrades = trades.filter((t) => t.sessionId === sess.id);
+    const sWins = sTrades.filter((t) => t.netPnlUsd > 0).length;
+    const sLosses = sTrades.filter((t) => t.netPnlUsd <= 0).length;
+    const sGrossProfit = sTrades.filter((t) => t.grossPnlUsd > 0).reduce((s, t) => s + t.grossPnlUsd, 0);
+    const sGrossLoss = Math.abs(sTrades.filter((t) => t.grossPnlUsd < 0).reduce((s, t) => s + t.grossPnlUsd, 0));
+    const sNetPnl = sTrades.reduce((s, t) => s + t.netPnlUsd, 0);
+
+    sessionBreakdown[sess.id] = {
+      sessionId: sess.id,
+      sessionName: sess.name,
+      tradesCount: sTrades.length,
+      winCount: sWins,
+      lossCount: sLosses,
+      winRate: sTrades.length > 0 ? (sWins / sTrades.length) * 100 : 0,
+      netPnlUsd: Number(sNetPnl.toFixed(2)),
+      profitFactor: sGrossLoss > 0 ? Number((sGrossProfit / sGrossLoss).toFixed(2)) : sGrossProfit > 0 ? 99 : 0,
+    };
+  }
+
   return {
     runId: `run_${Date.now()}`,
     setupId: selectedSetupOption.id,
@@ -1007,6 +1178,7 @@ export async function runIsolatedBacktest(
     shortWinRate: Number(shortWinRate.toFixed(2)),
     gatedSignalsCount,
     regimeBreakdown,
+    sessionBreakdown,
     trades,
     equityCurve,
   };

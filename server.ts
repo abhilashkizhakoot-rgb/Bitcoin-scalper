@@ -8,7 +8,7 @@ import path from "path";
 import crypto from "crypto";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
-import { dbManager } from "./src/db_sim.js";
+import { dbManager, DEFAULT_SETUP_SESSION_MATRIX } from "./src/db_sim.js";
 import { tradingEngine } from "./src/engine.js";
 import { ConnectionStatus, MarketRegime } from "./src/types.js";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -430,6 +430,7 @@ async function startServer() {
       setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
       setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
       setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+      setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
     };
 
     const currentMatrix = { ...(ms.setup_regime_matrix || defaultMatrix) };
@@ -474,6 +475,7 @@ async function startServer() {
         setup_12_cvd_absorption: all,
         setup_13_oi_flush_cascade: all,
         setup_14_fresh_momentum_impulse: all,
+        setup_15_trendline_bounce: all,
       };
     } else if (preset === "STRICT_TREND") {
       matrix = {
@@ -487,6 +489,7 @@ async function startServer() {
         setup_12_cvd_absorption: [],
         setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY],
         setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
+        setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
       };
     } else if (preset === "STRICT_RANGE") {
       matrix = {
@@ -500,6 +503,7 @@ async function startServer() {
         setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND],
         setup_13_oi_flush_cascade: [MarketRegime.RANGE_BOUND],
         setup_14_fresh_momentum_impulse: [],
+        setup_15_trendline_bounce: [MarketRegime.RANGE_BOUND],
       };
     } else {
       // QUANT_OPTIMAL (Default)
@@ -514,6 +518,7 @@ async function startServer() {
         setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
         setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
         setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
+        setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
       };
     }
 
@@ -521,11 +526,105 @@ async function startServer() {
     res.json({ success: true, preset: preset || "QUANT_OPTIMAL", setup_regime_matrix: matrix });
   });
 
+  // REST API: Session x Setup Matrix Controls
+  // ----------------------------------------------------
+  app.post("/api/strategy/session-matrix/toggle-cell", (req, res) => {
+    const { setupId, session, enabled } = req.body || {};
+    if (!setupId || !session) {
+      return res.status(400).json({ success: false, message: "Missing setupId or session" });
+    }
+    const currentConfig = dbManager.getConfig();
+    const ms = (currentConfig.market_structure || {}) as any;
+    const defaultMatrix: Record<string, string[]> = DEFAULT_SETUP_SESSION_MATRIX;
+
+    const currentMatrix = { ...(ms.setup_session_matrix || defaultMatrix) };
+    const currentList: string[] = currentMatrix[setupId] ? [...currentMatrix[setupId]] : (defaultMatrix[setupId] ? [...defaultMatrix[setupId]] : []);
+
+    let updatedList: string[];
+    if (enabled !== undefined) {
+      if (enabled && !currentList.includes(session)) {
+        updatedList = [...currentList, session];
+      } else if (!enabled) {
+        updatedList = currentList.filter(s => s !== session);
+      } else {
+        updatedList = currentList;
+      }
+    } else {
+      if (currentList.includes(session)) {
+        updatedList = currentList.filter(s => s !== session);
+      } else {
+        updatedList = [...currentList, session];
+      }
+    }
+
+    currentMatrix[setupId] = updatedList;
+    dbManager.updateConfig("market_structure", { setup_session_matrix: currentMatrix }, `Session Matrix Toggle ${setupId} - ${session}`);
+    res.json({ success: true, setupId, session, allowed: updatedList.includes(session), setup_session_matrix: currentMatrix });
+  });
+
+  app.post("/api/strategy/session-matrix/preset", (req, res) => {
+    const { preset } = req.body || {};
+    let matrix: Record<string, string[]>;
+    const allSessions = ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity", "weekends"];
+    const peakSessions = ["asia_open", "europe_us_overlap", "late_us_session"];
+
+    if (preset === "ALL_PERMISSIVE") {
+      matrix = {
+        setup_1_pullback_retest: allSessions,
+        setup_2_dynamic_ema_pushback: allSessions,
+        setup_3_liquidity_sweep: allSessions,
+        setup_4_fvg_retest: allSessions,
+        setup_9_range_failed_auction: allSessions,
+        setup_10_vwap_band_rejection: allSessions,
+        setup_11_eqh_eql_double_touch: allSessions,
+        setup_12_cvd_absorption: allSessions,
+        setup_13_oi_flush_cascade: allSessions,
+        setup_14_fresh_momentum_impulse: allSessions,
+        setup_15_trendline_bounce: allSessions,
+      };
+    } else if (preset === "STRICT_PEAK_ONLY") {
+      matrix = {
+        setup_1_pullback_retest: peakSessions,
+        setup_2_dynamic_ema_pushback: ["europe_us_overlap", "late_us_session"],
+        setup_3_liquidity_sweep: peakSessions,
+        setup_4_fvg_retest: peakSessions,
+        setup_9_range_failed_auction: ["asia_open"],
+        setup_10_vwap_band_rejection: ["asia_open"],
+        setup_11_eqh_eql_double_touch: peakSessions,
+        setup_12_cvd_absorption: peakSessions,
+        setup_13_oi_flush_cascade: ["europe_us_overlap", "late_us_session"],
+        setup_14_fresh_momentum_impulse: peakSessions,
+        setup_15_trendline_bounce: peakSessions,
+      };
+    } else if (preset === "MEAN_REVERSION_FOCUS") {
+      matrix = {
+        setup_1_pullback_retest: ["europe_us_overlap", "late_us_session"],
+        setup_2_dynamic_ema_pushback: ["europe_us_overlap"],
+        setup_3_liquidity_sweep: allSessions,
+        setup_4_fvg_retest: ["europe_us_overlap", "late_us_session"],
+        setup_9_range_failed_auction: allSessions,
+        setup_10_vwap_band_rejection: allSessions,
+        setup_11_eqh_eql_double_touch: allSessions,
+        setup_12_cvd_absorption: ["intraday_chop", "dead_liquidity", "weekends"],
+        setup_13_oi_flush_cascade: ["europe_us_overlap", "late_us_session"],
+        setup_14_fresh_momentum_impulse: ["europe_us_overlap"],
+        setup_15_trendline_bounce: ["europe_us_overlap", "late_us_session"],
+      };
+    } else {
+      // QUANT_OPTIMAL (Default)
+      matrix = { ...DEFAULT_SETUP_SESSION_MATRIX };
+    }
+
+    dbManager.updateConfig("market_structure", { setup_session_matrix: matrix }, `Session preset applied: ${preset || "QUANT_OPTIMAL"}`);
+    res.json({ success: true, preset: preset || "QUANT_OPTIMAL", setup_session_matrix: matrix });
+  });
+
   app.post("/api/strategy/dynamic-conditions/update", (req, res) => {
     const payload = req.body || {};
     const updates: any = {};
     const allowedKeys = [
       "dynamic_regime_setup_matrix_enabled",
+      "dynamic_session_setup_matrix_enabled",
       "dynamic_condition_rules_enabled",
       "dynamic_mean_reversion_max_adx",
       "dynamic_trend_min_adx",

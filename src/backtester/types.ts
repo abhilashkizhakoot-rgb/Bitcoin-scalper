@@ -24,6 +24,8 @@ export interface BacktestRequest {
   simulateFees?: boolean; // Default: true
   isolationMode?: boolean; // If true, only the selected setup is allowed to enter trades
   excludeWeekends?: boolean; // If true, weekend candles (Saturday & Sunday UTC) are excluded
+  sessionFilter?: string; // Optional session filter (e.g. 'all', 'asia_open', 'europe_us_overlap')
+  respectSessionMatrix?: boolean; // If true, enforces Session x Setup Matrix during backtest
 }
 
 export interface BacktestTrade {
@@ -34,6 +36,8 @@ export interface BacktestTrade {
   setupId: string;
   setupName: string;
   direction: "LONG" | "SHORT";
+  sessionId?: string;
+  sessionName?: string;
   entryPrice: number;
   exitPrice: number;
   stopLoss: number;
@@ -51,6 +55,17 @@ export interface BacktestTrade {
   pnlPercent: number;
   marketRegime: MarketRegime;
   entryDescription: string;
+}
+
+export interface SessionPerformance {
+  sessionId: string;
+  sessionName: string;
+  tradesCount: number;
+  winCount: number;
+  lossCount: number;
+  winRate: number;
+  netPnlUsd: number;
+  profitFactor: number;
 }
 
 export interface RegimePerformance {
@@ -101,6 +116,7 @@ export interface BacktestResult {
   shortWinRate: number;
   gatedSignalsCount?: number;
   regimeBreakdown: Record<string, RegimePerformance>;
+  sessionBreakdown: Record<string, SessionPerformance>;
   trades: BacktestTrade[];
   equityCurve: { timestamp: string; equity: number }[];
 }

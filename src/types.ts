@@ -490,6 +490,9 @@ export interface StrategyConfig {
     // Dynamic Market Condition & Regime Gating Matrix
     dynamic_regime_setup_matrix_enabled?: boolean; // Dynamically enable/disable setups based on active Market Regime (default: true)
     setup_regime_matrix?: Record<string, MarketRegime[]>; // Map of setupId -> allowed MarketRegime[]
+    // Dynamic Session & Timing Window Gating Matrix
+    dynamic_session_setup_matrix_enabled?: boolean; // Dynamically enable/disable setups based on active Trading Session (default: true)
+    setup_session_matrix?: Record<string, string[]>; // Map of setupId -> allowed session IDs (e.g. ["asia_open", "europe_us_overlap"])
     dynamic_condition_rules_enabled?: boolean; // Dynamically gate setups using real-time ADX, Choppiness Index, and Volatility (default: true)
     dynamic_mean_reversion_max_adx?: number; // Max ADX allowed for mean reversion setups (Setups 3, 9, 10, 11) (default: 32)
     dynamic_trend_min_adx?: number; // Min ADX required for trend continuation setups (Setups 1, 2) (default: 20)
@@ -687,9 +690,12 @@ export interface DynamicSetupStatus {
   category: "TREND" | "MEAN_REVERSION" | "BREAKOUT" | "ORDERFLOW" | "SMC";
   master_enabled: boolean;
   regime_allowed: boolean;
+  session_allowed?: boolean;
   conditions_allowed: boolean;
   active: boolean;
   reason: string;
   allowed_regimes: MarketRegime[];
+  allowed_sessions?: string[];
+  current_session?: string;
 }
 

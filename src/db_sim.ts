@@ -98,6 +98,20 @@ export const DEFAULT_TIMING_WINDOWS: TimingWindow[] = [
   },
 ];
 
+export const DEFAULT_SETUP_SESSION_MATRIX: Record<string, string[]> = {
+  setup_1_pullback_retest: ["asia_open", "europe_us_overlap", "late_us_session"],
+  setup_2_dynamic_ema_pushback: ["europe_us_overlap", "late_us_session"],
+  setup_3_liquidity_sweep: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "weekends"],
+  setup_4_fvg_retest: ["asia_open", "europe_us_overlap", "late_us_session", "intraday_chop"],
+  setup_9_range_failed_auction: ["asia_open", "intraday_chop", "dead_liquidity", "weekends"],
+  setup_10_vwap_band_rejection: ["asia_open", "intraday_chop", "dead_liquidity", "weekends"],
+  setup_11_eqh_eql_double_touch: ["asia_open", "intraday_chop", "europe_us_overlap", "weekends"],
+  setup_12_cvd_absorption: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session"],
+  setup_13_oi_flush_cascade: ["asia_open", "europe_us_overlap", "late_us_session"],
+  setup_14_fresh_momentum_impulse: ["asia_open", "europe_us_overlap", "late_us_session"],
+  setup_15_trendline_bounce: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session"],
+};
+
 interface DatabaseSchema {
   credentials: ExchangeCredentials;
   trades: Trade[];
@@ -396,6 +410,8 @@ const DEFAULT_CONFIG: StrategyConfig = {
       setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
       setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
     },
+    dynamic_session_setup_matrix_enabled: true,
+    setup_session_matrix: DEFAULT_SETUP_SESSION_MATRIX,
     dynamic_condition_rules_enabled: true,
     dynamic_mean_reversion_max_adx: 32,
     dynamic_trend_min_adx: 20,
@@ -1521,6 +1537,8 @@ class DatabaseManager {
       if (ms.ema_pushback_enabled === undefined) { ms.ema_pushback_enabled = def.ema_pushback_enabled !== false; changed = true; }
       if (ms.dynamic_regime_setup_matrix_enabled === undefined) { ms.dynamic_regime_setup_matrix_enabled = def.dynamic_regime_setup_matrix_enabled !== false; changed = true; }
       if (!ms.setup_regime_matrix) { ms.setup_regime_matrix = { ...def.setup_regime_matrix }; changed = true; }
+      if (ms.dynamic_session_setup_matrix_enabled === undefined) { ms.dynamic_session_setup_matrix_enabled = def.dynamic_session_setup_matrix_enabled !== false; changed = true; }
+      if (!ms.setup_session_matrix) { ms.setup_session_matrix = { ...def.setup_session_matrix }; changed = true; }
       if (ms.dynamic_condition_rules_enabled === undefined) { ms.dynamic_condition_rules_enabled = def.dynamic_condition_rules_enabled !== false; changed = true; }
       if (ms.dynamic_mean_reversion_max_adx === undefined) { ms.dynamic_mean_reversion_max_adx = def.dynamic_mean_reversion_max_adx || 32; changed = true; }
       if (ms.dynamic_trend_min_adx === undefined) { ms.dynamic_trend_min_adx = def.dynamic_trend_min_adx || 20; changed = true; }

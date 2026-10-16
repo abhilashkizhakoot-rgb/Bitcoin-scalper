@@ -27,7 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { apiFetch } from "../utils/api.ts";
-import { BacktestResult, BacktestSetupOption, BacktestTrade, RegimePerformance, BacktestRankResult } from "../backtester/types.ts";
+import { BacktestResult, BacktestSetupOption, BacktestTrade, RegimePerformance, SessionPerformance, BacktestRankResult } from "../backtester/types.ts";
 
 export default function BacktestLab() {
   const [setups, setSetups] = useState<BacktestSetupOption[]>([]);
@@ -35,6 +35,8 @@ export default function BacktestLab() {
   const [days, setDays] = useState<number>(3);
   const [isolationMode, setIsolationMode] = useState<boolean>(true);
   const [excludeWeekends, setExcludeWeekends] = useState<boolean>(true);
+  const [sessionFilter, setSessionFilter] = useState<string>("all");
+  const [respectSessionMatrix, setRespectSessionMatrix] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(false);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [result, setResult] = useState<BacktestResult | null>(null);
@@ -144,6 +146,8 @@ export default function BacktestLab() {
           simulateFees: true,
           isolationMode,
           excludeWeekends,
+          sessionFilter,
+          respectSessionMatrix,
         }),
       });
 
@@ -224,6 +228,7 @@ export default function BacktestLab() {
       "Net PnL ($)",
       "PnL (%)",
       "Market Regime",
+      "Trading Session",
     ];
 
     const rows = result.trades.map((t) => [
@@ -245,6 +250,7 @@ export default function BacktestLab() {
       t.netPnlUsd.toFixed(2),
       t.pnlPercent.toFixed(2),
       t.marketRegime,
+      t.sessionName || "Normal Hours",
     ]);
 
     const csvContent =
@@ -519,6 +525,53 @@ export default function BacktestLab() {
               <span className="text-slate-400 font-mono">0.05% Taker Fee</span>
             </div>
           </div>
+
+          {/* Trading Session Window Filter */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-indigo-400" /> Trading Session Filter
+            </label>
+            <select
+              value={sessionFilter}
+              onChange={(e) => setSessionFilter(e.target.value)}
+              disabled={loading}
+              className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors font-medium cursor-pointer"
+            >
+              <option value="all">All Sessions (Global 24/7)</option>
+              <option value="asia_open">🌅 Asia Open Front-run (05:00 - 09:30 IST)</option>
+              <option value="intraday_chop">☕ Intra-day Chop (09:30 - 18:30 IST)</option>
+              <option value="europe_us_overlap">🗽 US / Europe Overlap (18:30 - 22:30 IST)</option>
+              <option value="late_us_session">🌙 Late US Session (22:30 - 01:30 IST)</option>
+              <option value="dead_liquidity">💤 Dead Liquidity (01:30 - 05:00 IST)</option>
+              <option value="weekends">🏖️ Weekends (Sat/Sun IST)</option>
+            </select>
+          </div>
+
+          {/* Session Matrix Gating Toggle */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-emerald-400" /> Session Matrix Gating
+            </label>
+            <div
+              onClick={() => !loading && setRespectSessionMatrix(!respectSessionMatrix)}
+              className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer select-none transition-all ${
+                respectSessionMatrix
+                  ? "bg-emerald-950/20 border-emerald-600/40 text-emerald-300"
+                  : "bg-slate-950 border-slate-800 text-slate-400"
+              }`}
+            >
+              <span className="text-xs font-medium">Respect Session x Setup Matrix</span>
+              <span
+                className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                  respectSessionMatrix
+                    ? "bg-emerald-500 border-emerald-400 text-black font-bold"
+                    : "border-slate-600"
+                }`}
+              >
+                {respectSessionMatrix && "✓"}
+              </span>
+            </div>
+          </div>
         </div>
 
         {error && (
@@ -627,64 +680,138 @@ export default function BacktestLab() {
             </div>
           </div>
 
-          {/* Regime Breakdown */}
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 shadow-lg">
-            <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-indigo-400" /> Performance Breakdown by Market Regime
-            </h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400 font-semibold">
-                    <th className="pb-2">Regime</th>
-                    <th className="pb-2">Trades</th>
-                    <th className="pb-2">Win Rate</th>
-                    <th className="pb-2">Profit Factor</th>
-                    <th className="pb-2 text-right">Net P&L ($)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 font-mono text-slate-300">
-                  {Object.values(result.regimeBreakdown).map((reg: RegimePerformance) => (
-                    <tr key={reg.regime} className="hover:bg-slate-800/20">
-                      <td className="py-2.5 font-sans font-medium text-white flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-slate-500" />
-                        {reg.regime}
-                      </td>
-                      <td className="py-2.5">{reg.tradesCount}</td>
-                      <td className="py-2.5 font-bold">
-                        <span
-                          className={
-                            reg.winRate >= 50
-                              ? "text-emerald-400"
-                              : reg.winRate > 0
-                              ? "text-amber-400"
-                              : "text-slate-500"
-                          }
-                        >
-                          {reg.winRate.toFixed(1)}%
-                        </span>{" "}
-                        <span className="text-slate-500 font-normal">
-                          ({reg.winCount}W / {reg.lossCount}L)
-                        </span>
-                      </td>
-                      <td className="py-2.5">
-                        {reg.profitFactor >= 99 ? "∞" : reg.profitFactor.toFixed(2)}
-                      </td>
-                      <td
-                        className={`py-2.5 text-right font-bold ${
-                          reg.netPnlUsd > 0
-                            ? "text-emerald-400"
-                            : reg.netPnlUsd < 0
-                            ? "text-rose-400"
-                            : "text-slate-500"
-                        }`}
-                      >
-                        {reg.netPnlUsd >= 0 ? "+" : ""}${reg.netPnlUsd.toFixed(2)}
-                      </td>
+          {/* Regime & Session Breakdown Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Regime Breakdown */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 shadow-lg">
+              <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-indigo-400" /> Performance Breakdown by Market Regime
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400 font-semibold">
+                      <th className="pb-2">Regime</th>
+                      <th className="pb-2">Trades</th>
+                      <th className="pb-2">Win Rate</th>
+                      <th className="pb-2">Profit Factor</th>
+                      <th className="pb-2 text-right">Net P&L ($)</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono text-slate-300">
+                    {Object.values(result.regimeBreakdown).map((reg: RegimePerformance) => (
+                      <tr key={reg.regime} className="hover:bg-slate-800/20">
+                        <td className="py-2.5 font-sans font-medium text-white flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-slate-500" />
+                          {reg.regime}
+                        </td>
+                        <td className="py-2.5">{reg.tradesCount}</td>
+                        <td className="py-2.5 font-bold">
+                          <span
+                            className={
+                              reg.winRate >= 50
+                                ? "text-emerald-400"
+                                : reg.winRate > 0
+                                ? "text-amber-400"
+                                : "text-slate-500"
+                            }
+                          >
+                            {reg.winRate.toFixed(1)}%
+                          </span>{" "}
+                          <span className="text-slate-500 font-normal">
+                            ({reg.winCount}W / {reg.lossCount}L)
+                          </span>
+                        </td>
+                        <td className="py-2.5">
+                          {reg.profitFactor >= 99 ? "∞" : reg.profitFactor.toFixed(2)}
+                        </td>
+                        <td
+                          className={`py-2.5 text-right font-bold ${
+                            reg.netPnlUsd > 0
+                              ? "text-emerald-400"
+                              : reg.netPnlUsd < 0
+                              ? "text-rose-400"
+                              : "text-slate-500"
+                          }`}
+                        >
+                          {reg.netPnlUsd >= 0 ? "+" : ""}${reg.netPnlUsd.toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Session Breakdown */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 shadow-lg">
+              <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-400" /> Performance Breakdown by Trading Session
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400 font-semibold">
+                      <th className="pb-2">Session</th>
+                      <th className="pb-2">Trades</th>
+                      <th className="pb-2">Win Rate</th>
+                      <th className="pb-2">Profit Factor</th>
+                      <th className="pb-2 text-right">Net P&L ($)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono text-slate-300">
+                    {result.sessionBreakdown && Object.values(result.sessionBreakdown).map((sess: SessionPerformance) => {
+                      const icons: Record<string, string> = {
+                        asia_open: "🌅",
+                        intraday_chop: "☕",
+                        europe_us_overlap: "🗽",
+                        late_us_session: "🌙",
+                        dead_liquidity: "💤",
+                        weekends: "🏖️",
+                      };
+                      return (
+                        <tr key={sess.sessionId} className="hover:bg-slate-800/20">
+                          <td className="py-2.5 font-sans font-medium text-white flex items-center gap-1.5">
+                            <span>{icons[sess.sessionId] || "⏰"}</span>
+                            <span>{sess.sessionName}</span>
+                          </td>
+                          <td className="py-2.5">{sess.tradesCount}</td>
+                          <td className="py-2.5 font-bold">
+                            <span
+                              className={
+                                sess.winRate >= 50
+                                  ? "text-emerald-400"
+                                  : sess.winRate > 0
+                                  ? "text-amber-400"
+                                  : "text-slate-500"
+                              }
+                            >
+                              {sess.winRate.toFixed(1)}%
+                            </span>{" "}
+                            <span className="text-slate-500 font-normal">
+                              ({sess.winCount}W / {sess.lossCount}L)
+                            </span>
+                          </td>
+                          <td className="py-2.5">
+                            {sess.profitFactor >= 99 ? "∞" : sess.profitFactor.toFixed(2)}
+                          </td>
+                          <td
+                            className={`py-2.5 text-right font-bold ${
+                              sess.netPnlUsd > 0
+                                ? "text-emerald-400"
+                                : sess.netPnlUsd < 0
+                                ? "text-rose-400"
+                                : "text-slate-500"
+                            }`}
+                          >
+                            {sess.netPnlUsd >= 0 ? "+" : ""}${sess.netPnlUsd.toFixed(2)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
@@ -754,6 +881,7 @@ export default function BacktestLab() {
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400 font-semibold">
                       <th className="pb-2.5">Time (UTC)</th>
+                      <th className="pb-2.5">Session</th>
                       <th className="pb-2.5">Direction</th>
                       <th className="pb-2.5">Entry ($)</th>
                       <th className="pb-2.5">Exit ($)</th>
@@ -769,6 +897,12 @@ export default function BacktestLab() {
                       <tr key={t.id} className="hover:bg-slate-800/30 transition-colors">
                         <td className="py-2.5 text-slate-400 font-sans">
                           {t.timestamp.replace("T", " ").replace("Z", "").slice(0, 16)}
+                        </td>
+                        <td className="py-2.5">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-800 text-slate-300 border border-slate-700/60 flex items-center gap-1 w-fit whitespace-nowrap">
+                            <span>{t.sessionId === "asia_open" ? "🌅" : t.sessionId === "intraday_chop" ? "☕" : t.sessionId === "europe_us_overlap" ? "🗽" : t.sessionId === "late_us_session" ? "🌙" : t.sessionId === "dead_liquidity" ? "💤" : t.sessionId === "weekends" ? "🏖️" : "⏰"}</span>
+                            <span>{t.sessionName || t.sessionId || "Normal"}</span>
+                          </span>
                         </td>
                         <td className="py-2.5">
                           <span

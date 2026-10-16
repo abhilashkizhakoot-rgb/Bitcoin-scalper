@@ -293,6 +293,38 @@ Incorporated from **Pro Trading School's** institutional pullback methodology:
 
 ---
 
+## 10. Dynamic Session x Setup Gating Matrix (Institutional Liquidity Profiling)
+
+To eliminate false breakout traps, fee slippage, and low-liquidity whipsaws, the MSC engine gates every tactical setup through the **Session x Setup Matrix** (`dynamic_session_setup_matrix_enabled`).
+
+### Institutional Session Liquidity Profiles
+
+1. **Asia Open Front-run (`asia_open` | 05:00 - 09:30 IST)**:
+   - *Characteristics*: Asian market open (Tokyo, Hong Kong, Singapore). Initial liquidity injection, early directional drift, and sweep of previous New York session extremes.
+   - *Allowed Setups*: Setup 1 (Pullback), Setup 3 (Liquidity Sweep), Setup 4 (FVG), Setup 9 (Failed Auction), Setup 10 (VWAP Band), Setup 11 (Double Touch), Setup 12 (CVD Absorption), Setup 13 (OI Flush), Setup 14 (Momentum Impulse), Setup 15 (Trendline Bounce).
+
+2. **Intra-day Chop (`intraday_chop` | 09:30 - 18:30 IST)**:
+   - *Characteristics*: Lull between Asia close and London/New York session open. Retail stop hunts, low volume, mean-reverting ranges. High risk for trend breakouts.
+   - *Allowed Setups*: Mean-reversion & order flow absorption only — Setup 3 (Liquidity Sweep), Setup 4 (FVG Retest), Setup 9 (Failed Auction), Setup 10 (VWAP Band Reversal), Setup 11 (EQH/EQL), Setup 12 (CVD Absorption Divergence), Setup 15 (Trendline Bounce). *Trend continuation breakouts (Setup 1, 2, 14) are gated*.
+
+3. **US / Europe Overlap (`europe_us_overlap` | 18:30 - 22:30 IST)**:
+   - *Characteristics*: Maximum global crypto liquidity, peak spot & perpetual volume, aggressive institutional momentum expansions, macro economic data releases (CPI/FOMC).
+   - *Allowed Setups*: High-beta trend and continuation setups — Setup 1 (Pullback & Retest), Setup 2 (EMA Pushback), Setup 3 (Liquidity Sweep), Setup 4 (FVG Retest), Setup 11 (EQH/EQL), Setup 12 (CVD Absorption), Setup 13 (OI Flush Fade), Setup 14 (Fresh Momentum Impulse), Setup 15 (Trendline Bounce).
+
+4. **Late US Session (`late_us_session` | 22:30 - 01:30 IST)**:
+   - *Characteristics*: Wall Street afternoon session, day-trader de-risking, end-of-day trend continuations or liquidation squeezes.
+   - *Allowed Setups*: Setup 1, Setup 2, Setup 3, Setup 4, Setup 12, Setup 13, Setup 14, Setup 15.
+
+5. **Dead Liquidity (`dead_liquidity` | 01:30 - 05:00 IST)**:
+   - *Characteristics*: US market close, minimal market depth, wide spreads, high fee drag on small moves.
+   - *Allowed Setups*: Confined strictly to high-edge mean reversion on extreme boundaries — Setup 9 (Range Failed Auction) and Setup 10 (VWAP Band Rejection). All directional trend setups are hard-gated.
+
+6. **Weekends (`weekends` | Sat & Sun IST)**:
+   - *Characteristics*: Absence of institutional CME futures volume and spot ETFs. Choppy, retail-driven ranges with frequent false breaks and low volume sweeps.
+   - *Allowed Setups*: Pure mean-reversion & range boundary sweeps — Setup 3 (Liquidity Sweep), Setup 9 (Failed Auction), Setup 10 (VWAP Band Rejection), Setup 11 (Double Touch). All momentum breakouts and trend impulse setups are gated.
+
+---
+
 ## Summary Decision Matrix
 
 ```
@@ -300,6 +332,8 @@ Incorporated from **Pro Trading School's** institutional pullback methodology:
             │ No
 [Regime Transition Cooldown?] ────► Yes ──► BLOCK (Transition Stabilization)
             │ No
+[Allowed in Active Session?] ─────► No  ──► BLOCK (Session x Setup Matrix Gate)
+            │ Yes
 [Is Multi-Timeframe Aligned?] ───► No  ──► BLOCK (Unless Extreme HF Pressure)
             │ Yes
 [Breakout Body Ratio >= 22%?] ───► No  ──► BLOCK (Wick Sweep Protection)
@@ -316,3 +350,4 @@ Incorporated from **Pro Trading School's** institutional pullback methodology:
             │ No
       [EXECUTE TRADE]
 ```
+

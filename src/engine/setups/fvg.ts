@@ -339,7 +339,11 @@ export function evaluateFairValueGapSetup(
 
       // Current candle close must respect 50% CE if rule is active
       if (ceInvalidationRule && currentCandle.close < ce) continue;
-      if (currentPrice < fvgBottom - 0.10 * currentAtr) continue;
+
+      // Fix B: Strict Zone Proximity Filter
+      // Prevents buying when price has already displaced far above the FVG zone.
+      const isPriceInsideZone = currentPrice <= (fvgTop + 0.20 * currentAtr) && currentPrice >= (fvgBottom - 0.10 * currentAtr);
+      if (!isPriceInsideZone) continue;
 
       // 3. Two-Step Tap & Rejection Confirmation
       const currentTapped = currentCandle.low <= fvgTop && currentCandle.high >= fvgBottom;
@@ -410,9 +414,10 @@ export function evaluateFairValueGapSetup(
         };
       }
 
-      // Structural Stop Loss: Below the FVG Bottom (or below tap swing low) with a protective buffer
-      const tapLow = Math.min(currentCandle.low, prevCandle.low);
-      let stopLoss = Math.min(fvgBottom, tapLow) - Math.max(25, 0.45 * currentAtr);
+      // Fix B: Structural Stop Loss must sit strictly BELOW fvgBottom with protective buffer (never inside the gap)
+      const tapLow = Math.min(currentCandle.low, prevCandle.low, fvgBottom);
+      const minBuffer = Math.max(35, 0.65 * currentAtr);
+      let stopLoss = Math.min(fvgBottom - minBuffer, tapLow - Math.max(25, 0.45 * currentAtr));
       const nearestRoundBelow = Math.floor(currentPrice / 500) * 500;
       if (currentPrice > nearestRoundBelow && stopLoss >= nearestRoundBelow && (stopLoss - nearestRoundBelow) <= 45) {
         stopLoss = nearestRoundBelow - Math.max(35, 0.55 * currentAtr);
@@ -482,7 +487,11 @@ export function evaluateFairValueGapSetup(
 
       // Current candle close must respect 50% CE if rule is active
       if (ceInvalidationRule && currentCandle.close > ce) continue;
-      if (currentPrice > fvgTop + 0.10 * currentAtr) continue;
+
+      // Fix B: Strict Zone Proximity Filter
+      // Prevents shorting when price has already displaced far below the FVG zone.
+      const isPriceInsideZone = currentPrice >= (fvgBottom - 0.20 * currentAtr) && currentPrice <= (fvgTop + 0.10 * currentAtr);
+      if (!isPriceInsideZone) continue;
 
       // 3. Two-Step Tap & Rejection Confirmation
       const currentTapped = currentCandle.high >= fvgBottom && currentCandle.low <= fvgTop;
@@ -553,9 +562,10 @@ export function evaluateFairValueGapSetup(
         };
       }
 
-      // Structural Stop Loss: Above the FVG Top (or above tap swing high) with a protective buffer
-      const tapHigh = Math.max(currentCandle.high, prevCandle.high);
-      let stopLoss = Math.max(fvgTop, tapHigh) + Math.max(25, 0.45 * currentAtr);
+      // Fix B: Structural Stop Loss must sit strictly ABOVE fvgTop with protective buffer (never inside the gap)
+      const tapHigh = Math.max(currentCandle.high, prevCandle.high, fvgTop);
+      const minBuffer = Math.max(35, 0.65 * currentAtr);
+      let stopLoss = Math.max(fvgTop + minBuffer, tapHigh + Math.max(25, 0.45 * currentAtr));
       const nearestRoundAbove = Math.ceil(currentPrice / 500) * 500;
       if (currentPrice < nearestRoundAbove && stopLoss <= nearestRoundAbove && (nearestRoundAbove - stopLoss) <= 45) {
         stopLoss = nearestRoundAbove + Math.max(35, 0.55 * currentAtr);

@@ -63,6 +63,75 @@ export function evaluateCvdAbsorptionSetup(
     };
   }
 
+  // Fix C: Prohibit counter-trend CVD absorption during HIGH_VOLATILITY or strong adverse trending regimes
+  const closes = candles1m.map(c => c.close);
+  const ema50Series = indicators.calculateEMA(closes, 50);
+  const currentEma50 = ema50Series[lastIdx] || currentPrice;
+
+  if (direction === "LONG") {
+    if (currentRegime === MarketRegime.HIGH_VOLATILITY && currentPrice < currentEma50) {
+      return {
+        isValid: false,
+        direction,
+        extremePrice: 0,
+        divergenceType: "",
+        takerBuyRatio: 0,
+        netCVD: 0,
+        rejectionWickPct: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: `Blocked: Long CVD Absorption prohibited during HIGH_VOLATILITY regime with price ($${currentPrice.toFixed(2)}) below 50 EMA ($${currentEma50.toFixed(2)}) due to liquidation cascade risk.`
+      };
+    }
+    if (currentRegime === MarketRegime.STRONG_DOWNTREND) {
+      return {
+        isValid: false,
+        direction,
+        extremePrice: 0,
+        divergenceType: "",
+        takerBuyRatio: 0,
+        netCVD: 0,
+        rejectionWickPct: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Blocked: Long CVD Absorption prohibited during STRONG_DOWNTREND regime."
+      };
+    }
+  } else if (direction === "SHORT") {
+    if (currentRegime === MarketRegime.HIGH_VOLATILITY && currentPrice > currentEma50) {
+      return {
+        isValid: false,
+        direction,
+        extremePrice: 0,
+        divergenceType: "",
+        takerBuyRatio: 0,
+        netCVD: 0,
+        rejectionWickPct: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: `Blocked: Short CVD Absorption prohibited during HIGH_VOLATILITY regime with price ($${currentPrice.toFixed(2)}) above 50 EMA ($${currentEma50.toFixed(2)}) due to short squeeze cascade risk.`
+      };
+    }
+    if (currentRegime === MarketRegime.STRONG_UPTREND) {
+      return {
+        isValid: false,
+        direction,
+        extremePrice: 0,
+        divergenceType: "",
+        takerBuyRatio: 0,
+        netCVD: 0,
+        rejectionWickPct: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        riskReward: 0,
+        description: "Blocked: Short CVD Absorption prohibited during STRONG_UPTREND regime."
+      };
+    }
+  }
+
   const currentCandle = candles1m[lastIdx];
   const atr14 = indicators.calculateATR(candles1m, 14);
   const currentAtr = Math.max(10, atr14[lastIdx] || 50);

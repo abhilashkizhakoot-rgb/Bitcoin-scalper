@@ -53,8 +53,10 @@ import {
   Cell,
   ReferenceLine,
   Legend,
+  ComposedChart,
+  Line,
 } from "recharts";
-import { DailyStats, MarketRegime, Trade, StrategyConfig, SetupPerformanceStats, SetupRankingItem, SetupRankingResponse, SetupProbabilityTier } from "../types.js";
+import { DailyStats, DayOfWeekStats, MarketRegime, Trade, StrategyConfig, SetupPerformanceStats, SetupRankingItem, SetupRankingResponse, SetupProbabilityTier } from "../types.js";
 import { safeFormatDateTimeShort, safeFormatDateShort, safeFormatNumber } from "../utils/format";
 import { getTradeTimingWindow } from "./TradeHistory.tsx";
 import { apiFetch } from "../utils/api.ts";
@@ -65,6 +67,7 @@ interface AnalyticsPageProps {
   dailyStats: DailyStats[];
   regimeStats: Record<string, { trades: number; win_rate: number; pnl: number }>;
   setupStats?: any;
+  dayOfWeekStats?: DayOfWeekStats[];
   trades: Trade[];
   config: StrategyConfig | null;
 }
@@ -75,6 +78,7 @@ export default function AnalyticsPage({
   dailyStats,
   regimeStats,
   setupStats,
+  dayOfWeekStats,
   trades = [],
   config,
 }: AnalyticsPageProps) {
@@ -105,6 +109,32 @@ export default function AnalyticsPage({
   const [calcPositionMargin, setCalcPositionMargin] = useState<number>(1000);
   const [expandedSetupId, setExpandedSetupId] = useState<string | null>(null);
   const [activeLeaderboardTab, setActiveLeaderboardTab] = useState<"leaderboard" | "comparison_chart" | "confluence_matrix" | "calculator">("leaderboard");
+  const [isTuningFromHistory, setIsTuningFromHistory] = useState(false);
+  const [tuneResultMsg, setTuneResultMsg] = useState<string | null>(null);
+
+  const handleTuneFromHistory = async () => {
+    setIsTuningFromHistory(true);
+    setTuneResultMsg(null);
+    try {
+      const res = await apiFetch("/api/strategy/historical-optimization/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTuneResultMsg(`Applied ${data.appliedCount || "all"} optimizations from historical trade data!`);
+        setTimeout(() => setTuneResultMsg(null), 6000);
+      } else {
+        setTuneResultMsg("Failed to auto-tune from historical data.");
+        setTimeout(() => setTuneResultMsg(null), 4000);
+      }
+    } catch (e) {
+      setTuneResultMsg("Error connecting to optimization service.");
+      setTimeout(() => setTuneResultMsg(null), 4000);
+    } finally {
+      setIsTuningFromHistory(false);
+    }
+  };
 
   const fetchRankings = async () => {
     setIsLoadingRankings(true);
@@ -226,6 +256,195 @@ export default function AnalyticsPage({
       avgPnl: Number(avgPnl.toFixed(2)),
     };
   });
+
+  // ----------------------------------------------------
+  // DAY OF THE WEEK (DOW) QUANT CALCULATION
+  // ----------------------------------------------------
+  const [selectedDayDetail, setSelectedDayDetail] = useState<number | null>(null);
+
+  const dayOfWeekStatsCalculated: DayOfWeekStats[] = useMemo(() => {
+    const DAYS_DEF = [
+      {
+        day_index: 1,
+        day_name: "Monday",
+        short_name: "Mon",
+        is_weekend: false,
+        js_day: 1,
+        verdict: "Asia Open Momentum & Institutional Positioning",
+      },
+      {
+        day_index: 2,
+        day_name: "Tuesday",
+        short_name: "Tue",
+        is_weekend: false,
+        js_day: 2,
+        verdict: "High-Volume Trend Continuation & Volatility Expansion",
+      },
+      {
+        day_index: 3,
+        day_name: "Wednesday",
+        short_name: "Wed",
+        is_weekend: false,
+        js_day: 3,
+        verdict: "Mid-Week Macro Catalysts & Peak Liquidations",
+      },
+      {
+        day_index: 4,
+        day_name: "Thursday",
+        short_name: "Thu",
+        is_weekend: false,
+        js_day: 4,
+        verdict: "Breakout Expansion & Reversal Traps",
+      },
+      {
+        day_index: 5,
+        day_name: "Friday",
+        short_name: "Fri",
+        is_weekend: false,
+        js_day: 5,
+        verdict: "CME Settlement, Afternoon De-risking & Trend Exhaustion",
+      },
+      {
+        day_index: 6,
+        day_name: "Saturday",
+        short_name: "Sat",
+        is_weekend: true,
+        js_day: 6,
+        verdict: "Retail Choppiness, Range Boundary & SFP Sweeps",
+      },
+      {
+        day_index: 7,
+        day_name: "Sunday",
+        short_name: "Sun",
+        is_weekend: true,
+        js_day: 0,
+        verdict: "Weekly Close Volatility & Sunday Evening Front-running",
+      },
+    ];
+
+    if (completedTrades.length === 0 && dayOfWeekStats && dayOfWeekStats.length > 0) {
+      return dayOfWeekStats;
+    }
+
+    return DAYS_DEF.map((day) => {
+      const dTrades = completedTrades.filter((t) => {
+        const d = new Date(t.entry_timestamp);
+        return d.getUTCDay() === day.js_day;
+      });
+
+      const wins = dTrades.filter((t) => t.is_win);
+      const losses = dTrades.filter((t) => t.is_win === false);
+      const totalTrades = dTrades.length;
+      const winRate = totalTrades > 0 ? (wins.length / totalTrades) * 100 : 0;
+
+      const longTrades = dTrades.filter((t) => t.direction === "LONG");
+      const longWins = longTrades.filter((t) => t.is_win).length;
+      const longWinRate = longTrades.length > 0 ? (longWins / longTrades.length) * 100 : 0;
+
+      const shortTrades = dTrades.filter((t) => t.direction === "SHORT");
+      const shortWins = shortTrades.filter((t) => t.is_win).length;
+      const shortWinRate = shortTrades.length > 0 ? (shortWins / shortTrades.length) * 100 : 0;
+
+      const grossProfit = wins.reduce((acc, t) => acc + Math.max(0, t.pnl_usdt || 0), 0);
+      const grossLoss = Math.abs(losses.reduce((acc, t) => acc + Math.min(0, t.pnl_usdt || 0), 0));
+      const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 99.9 : 0;
+      const netProfit = dTrades.reduce((acc, t) => acc + (t.pnl_usdt || 0), 0);
+      const avgPnl = totalTrades > 0 ? netProfit / totalTrades : 0;
+
+      const totalHoldSeconds = dTrades.reduce((acc, t) => acc + (t.hold_duration_seconds || 0), 0);
+      const avgHoldMinutes = totalTrades > 0 ? Math.round(totalHoldSeconds / totalTrades / 60) : 0;
+
+      // Find top setup
+      const setupCounts: Record<string, { wins: number; total: number }> = {};
+      dTrades.forEach((t) => {
+        const sName = t.setup_triggered || "Standard SMC Setup";
+        if (!setupCounts[sName]) setupCounts[sName] = { wins: 0, total: 0 };
+        setupCounts[sName].total += 1;
+        if (t.is_win) setupCounts[sName].wins += 1;
+      });
+      let topSetup = "N/A";
+      let maxSetupWins = -1;
+      Object.entries(setupCounts).forEach(([sName, data]) => {
+        if (data.wins > maxSetupWins) {
+          maxSetupWins = data.wins;
+          topSetup = sName;
+        }
+      });
+
+      // Find top regime
+      const regimeCounts: Record<string, number> = {};
+      dTrades.forEach((t) => {
+        const r = t.regime_at_entry;
+        regimeCounts[r] = (regimeCounts[r] || 0) + 1;
+      });
+      let topRegime = "N/A";
+      let maxRegimeTrades = -1;
+      Object.entries(regimeCounts).forEach(([r, count]) => {
+        if (count > maxRegimeTrades) {
+          maxRegimeTrades = count;
+          topRegime = r;
+        }
+      });
+
+      return {
+        day_index: day.day_index,
+        day_name: day.day_name,
+        short_name: day.short_name,
+        is_weekend: day.is_weekend,
+        total_trades: totalTrades,
+        wins: wins.length,
+        losses: losses.length,
+        win_rate: Number(winRate.toFixed(1)),
+        long_trades: longTrades.length,
+        long_wins: longWins,
+        long_win_rate: Number(longWinRate.toFixed(1)),
+        short_trades: shortTrades.length,
+        short_wins: shortWins,
+        short_win_rate: Number(shortWinRate.toFixed(1)),
+        gross_profit_usdt: Number(grossProfit.toFixed(2)),
+        gross_loss_usdt: Number(grossLoss.toFixed(2)),
+        profit_factor: Number(profitFactor.toFixed(2)),
+        net_profit_usdt: Number(netProfit.toFixed(2)),
+        average_pnl_usdt: Number(avgPnl.toFixed(2)),
+        avg_hold_duration_minutes: avgHoldMinutes,
+        top_setup: topSetup,
+        top_regime: topRegime,
+        verdict: day.verdict,
+      };
+    });
+  }, [completedTrades, dayOfWeekStats]);
+
+  const bestAlphaDay = useMemo(() => {
+    const activeDays = dayOfWeekStatsCalculated.filter((d) => d.total_trades > 0);
+    if (activeDays.length === 0) return null;
+    return [...activeDays].sort((a, b) => b.net_profit_usdt - a.net_profit_usdt)[0];
+  }, [dayOfWeekStatsCalculated]);
+
+  const highestWinRateDay = useMemo(() => {
+    const activeDays = dayOfWeekStatsCalculated.filter((d) => d.total_trades > 0);
+    if (activeDays.length === 0) return null;
+    return [...activeDays].sort((a, b) => b.win_rate - a.win_rate)[0];
+  }, [dayOfWeekStatsCalculated]);
+
+  const weekdayStats = useMemo(() => {
+    const weekdays = dayOfWeekStatsCalculated.filter((d) => !d.is_weekend);
+    const total = weekdays.reduce((s, d) => s + d.total_trades, 0);
+    const wins = weekdays.reduce((s, d) => s + d.wins, 0);
+    const losses = weekdays.reduce((s, d) => s + d.losses, 0);
+    const netProfit = weekdays.reduce((s, d) => s + d.net_profit_usdt, 0);
+    const winRate = total > 0 ? Number(((wins / total) * 100).toFixed(1)) : 0;
+    return { total, wins, losses, netProfit, winRate };
+  }, [dayOfWeekStatsCalculated]);
+
+  const weekendStats = useMemo(() => {
+    const weekends = dayOfWeekStatsCalculated.filter((d) => d.is_weekend);
+    const total = weekends.reduce((s, d) => s + d.total_trades, 0);
+    const wins = weekends.reduce((s, d) => s + d.wins, 0);
+    const losses = weekends.reduce((s, d) => s + d.losses, 0);
+    const netProfit = weekends.reduce((s, d) => s + d.net_profit_usdt, 0);
+    const winRate = total > 0 ? Number(((wins / total) * 100).toFixed(1)) : 0;
+    return { total, wins, losses, netProfit, winRate };
+  }, [dayOfWeekStatsCalculated]);
 
   // ----------------------------------------------------
   // ENRICHED MARKET REGIME STATS CALCULATION
@@ -822,6 +1041,460 @@ export default function AnalyticsPage({
               </table>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* ==================================================== */}
+      {/* DAY-OF-THE-WEEK QUANT PERFORMANCE & CALENDAR ALPHA */}
+      {/* ==================================================== */}
+      <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 space-y-6" id="quant-day-of-week-performance">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center text-white shadow-md shadow-indigo-100 shrink-0">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-sans font-extrabold text-slate-800 text-base">
+                  Day-of-the-Week Quant Performance & Calendar Alpha
+                </h3>
+                <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center gap-1">
+                  <Activity className="w-3 h-3 text-indigo-500" />
+                  Monday – Sunday Seasonality
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 font-sans mt-0.5">
+                Institutional calendar distribution analyzing Monday open expansions, mid-week momentum continuations, Friday de-risking, and weekend retail chop.
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Filter / Summary Badge & Auto-Tune Button */}
+          <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+            <span className="text-[11px] font-mono font-semibold text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 flex items-center gap-1.5">
+              <span>📅</span> Active Calendar Trades: <strong>{completedTrades.length} Trades</strong>
+            </span>
+            <button
+              type="button"
+              onClick={handleTuneFromHistory}
+              disabled={isTuningFromHistory}
+              className="inline-flex items-center gap-1.5 text-[11px] font-mono font-bold text-white bg-gradient-to-r from-emerald-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 rounded-lg px-3 py-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+              title="Calibrate stop-loss, risk multipliers, and day-session gating dynamically based on historical closed trades"
+            >
+              <Sparkles className={`w-3.5 h-3.5 text-amber-300 ${isTuningFromHistory ? "animate-spin" : ""}`} />
+              <span>{isTuningFromHistory ? "Tuning..." : "Auto-Tune from Trades"}</span>
+            </button>
+            {tuneResultMsg && (
+              <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2.5 py-1 animate-fadeIn">
+                ✓ {tuneResultMsg}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* 4 Summary Calendar KPI Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Best Alpha Day */}
+          <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono uppercase font-bold text-slate-400">Top Alpha Day</span>
+              <span className="text-sm">🏆</span>
+            </div>
+            <div className="text-lg font-bold text-slate-900 mt-1 flex items-baseline gap-1.5">
+              <span>{bestAlphaDay ? bestAlphaDay.day_name : "N/A"}</span>
+              <span className="text-xs font-mono font-bold text-emerald-600">
+                {bestAlphaDay && bestAlphaDay.net_profit_usdt >= 0 ? "+" : ""}${bestAlphaDay ? bestAlphaDay.net_profit_usdt.toFixed(2) : "0.00"}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1 font-mono">
+              {bestAlphaDay ? `${bestAlphaDay.wins}W / ${bestAlphaDay.losses}L (${bestAlphaDay.win_rate}% Win Rate)` : "No trades logged"}
+            </p>
+          </div>
+
+          {/* Highest Win Rate Day */}
+          <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono uppercase font-bold text-slate-400">Peak Win Rate Day</span>
+              <span className="text-sm">🎯</span>
+            </div>
+            <div className="text-lg font-bold text-slate-900 mt-1 flex items-baseline gap-1.5">
+              <span>{highestWinRateDay ? highestWinRateDay.day_name : "N/A"}</span>
+              <span className="text-xs font-mono font-bold text-indigo-600">
+                {highestWinRateDay ? `${highestWinRateDay.win_rate}%` : "0%"}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1 font-mono">
+              {highestWinRateDay ? `Profit Factor: ${highestWinRateDay.profit_factor >= 99 ? "∞" : highestWinRateDay.profit_factor}` : "No trade history"}
+            </p>
+          </div>
+
+          {/* Weekday Institutional Alpha (Mon-Fri) */}
+          <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono uppercase font-bold text-slate-400">Institutional Weekdays</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">Mon-Fri</span>
+            </div>
+            <div className="text-lg font-bold text-slate-900 mt-1 flex items-baseline gap-1.5">
+              <span className={weekdayStats.netProfit >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                {weekdayStats.netProfit >= 0 ? "+" : ""}${weekdayStats.netProfit.toFixed(2)}
+              </span>
+              <span className="text-xs font-mono text-slate-500">
+                ({weekdayStats.winRate}%)
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1 font-mono">
+              {weekdayStats.total} Trades ({weekdayStats.wins}W / {weekdayStats.losses}L)
+            </p>
+          </div>
+
+          {/* Weekend Retail Alpha (Sat-Sun) */}
+          <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono uppercase font-bold text-slate-400">Weekend Performance</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-bold">Sat-Sun</span>
+            </div>
+            <div className="text-lg font-bold text-slate-900 mt-1 flex items-baseline gap-1.5">
+              <span className={weekendStats.netProfit >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                {weekendStats.netProfit >= 0 ? "+" : ""}${weekendStats.netProfit.toFixed(2)}
+              </span>
+              <span className="text-xs font-mono text-slate-500">
+                ({weekendStats.winRate}%)
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1 font-mono">
+              {weekendStats.total} Trades ({weekendStats.wins}W / {weekendStats.losses}L)
+            </p>
+          </div>
+        </div>
+
+        {/* Day-of-Week Chart: Net PnL & Win Rate % */}
+        <div className="bg-slate-50/50 border border-slate-200 rounded-xl p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+            <div>
+              <h4 className="font-sans font-bold text-slate-800 text-sm flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-indigo-600" />
+                Day-by-Day Net Profit (USDT) & Empirical Win Rate (%)
+              </h4>
+              <p className="text-[11px] text-slate-500 font-sans mt-0.5">
+                Displays net realized profit and loss alongside win rate across all 7 days of the trading week.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 text-xs font-mono">
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded bg-emerald-500" />
+                <span className="text-slate-600 text-[11px]">Net Gain</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded bg-rose-500" />
+                <span className="text-slate-600 text-[11px]">Net Loss</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-1 bg-indigo-600 rounded-full" />
+                <span className="text-slate-600 text-[11px]">Win Rate %</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="h-[260px] w-full">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <ComposedChart data={dayOfWeekStatsCalculated} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                <XAxis dataKey="day_name" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis
+                  yAxisId="left"
+                  stroke="#94a3b8"
+                  fontSize={10}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(val) => `$${val}`}
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  stroke="#6366f1"
+                  domain={[0, 100]}
+                  fontSize={10}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(val) => `${val}%`}
+                />
+                <Tooltip
+                  contentStyle={{ backgroundColor: "#ffffff", borderColor: "#e2e8f0", borderRadius: "8px", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }}
+                  formatter={(val: any, name: string) => {
+                    if (name === "net_profit_usdt") return [`$${Number(val).toFixed(2)}`, "Net PnL"];
+                    if (name === "win_rate") return [`${Number(val).toFixed(1)}%`, "Win Rate"];
+                    return [val, name];
+                  }}
+                  labelFormatter={(label) => `${label} Quant Analysis`}
+                />
+                <ReferenceLine y={0} yAxisId="left" stroke="#cbd5e1" strokeWidth={1} />
+                <ReferenceLine y={50} yAxisId="right" stroke="#94a3b8" strokeDasharray="3 3" />
+                <Bar yAxisId="left" dataKey="net_profit_usdt" radius={[4, 4, 0, 0]} maxBarSize={48}>
+                  {dayOfWeekStatsCalculated.map((entry, index) => (
+                    <Cell key={`day-cell-${index}`} fill={entry.net_profit_usdt >= 0 ? "#10b981" : "#ef4444"} />
+                  ))}
+                </Bar>
+                <Line
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey="win_rate"
+                  stroke="#4f46e5"
+                  strokeWidth={2.5}
+                  dot={{ r: 4, fill: "#4f46e5", strokeWidth: 1, stroke: "#ffffff" }}
+                  activeDot={{ r: 6 }}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Detailed Quant Day-of-Week Table */}
+        <div className="overflow-x-auto border border-slate-200 rounded-xl">
+          <table className="w-full text-left border-collapse text-xs font-sans">
+            <thead>
+              <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider text-[10px]">
+                <th className="py-3 px-3.5 font-bold">Day of Week</th>
+                <th className="py-3 px-2 text-center font-bold">Category</th>
+                <th className="py-3 px-2 text-center font-bold">Trades</th>
+                <th className="py-3 px-2 text-center font-bold">W / L</th>
+                <th className="py-3 px-3 text-center font-bold">Win Rate</th>
+                <th className="py-3 px-2.5 text-center font-bold">Long vs Short</th>
+                <th className="py-3 px-2 text-center font-bold">Profit Factor</th>
+                <th className="py-3 px-2.5 text-right font-bold">Avg Trade</th>
+                <th className="py-3 px-3 text-right font-bold">Net PnL (USDT)</th>
+                <th className="py-3 px-3 font-bold">Top Setup & Regime</th>
+                <th className="py-3 px-3 font-bold">Institutional Alpha Verdict</th>
+                <th className="py-3 px-2 text-center font-bold">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {dayOfWeekStatsCalculated.map((day) => {
+                const dayIcons: Record<string, string> = {
+                  Monday: "📅",
+                  Tuesday: "⚡",
+                  Wednesday: "🚀",
+                  Thursday: "🏛️",
+                  Friday: "🎯",
+                  Saturday: "🏖️",
+                  Sunday: "☀️",
+                };
+                const icon = dayIcons[day.day_name] || "📅";
+                const isSelected = selectedDayDetail === day.day_index;
+
+                return (
+                  <React.Fragment key={day.day_name}>
+                    <tr
+                      className={`hover:bg-slate-50/80 transition-colors ${
+                        isSelected ? "bg-indigo-50/40" : ""
+                      }`}
+                    >
+                      <td className="py-3 px-3.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">{icon}</span>
+                          <div>
+                            <div className="font-bold text-slate-900 text-xs">{day.day_name}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              {day.total_trades > 0
+                                ? `${((day.total_trades / Math.max(1, completedTrades.length)) * 100).toFixed(0)}% of total trades`
+                                : "No activity"}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-2 text-center">
+                        <span
+                          className={`text-[9px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
+                            day.is_weekend
+                              ? "bg-amber-50 text-amber-800 border border-amber-200"
+                              : "bg-blue-50 text-blue-700 border border-blue-200"
+                          }`}
+                        >
+                          {day.is_weekend ? "Weekend" : "Weekday"}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-2 text-center font-mono font-semibold text-slate-700">
+                        {day.total_trades}
+                      </td>
+
+                      <td className="py-3 px-2 text-center">
+                        {day.total_trades > 0 ? (
+                          <div className="flex items-center justify-center gap-1 font-mono text-[11px] font-bold">
+                            <span className="text-emerald-600">{day.wins}W</span>
+                            <span className="text-slate-300">/</span>
+                            <span className="text-rose-600">{day.losses}L</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-300 font-mono">-</span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-3">
+                        <div className="flex flex-col items-center justify-center">
+                          <span className={`font-mono font-bold text-xs ${
+                            day.win_rate >= 60
+                              ? "text-emerald-600"
+                              : day.win_rate >= 50
+                              ? "text-blue-600"
+                              : day.total_trades === 0
+                              ? "text-slate-400"
+                              : "text-rose-600"
+                          }`}>
+                            {day.total_trades > 0 ? `${day.win_rate}%` : "0.0%"}
+                          </span>
+                          {day.total_trades > 0 && (
+                            <div className="w-16 bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1">
+                              <div
+                                className={`h-full ${
+                                  day.win_rate >= 60
+                                    ? "bg-emerald-500"
+                                    : day.win_rate >= 50
+                                    ? "bg-blue-500"
+                                    : "bg-rose-500"
+                                }`}
+                                style={{ width: `${day.win_rate}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-2.5 text-center font-mono text-[10px]">
+                        {day.total_trades > 0 ? (
+                          <div className="flex flex-col items-center gap-0.5">
+                            <span className="text-emerald-700 font-medium">L: {day.long_win_rate}% ({day.long_wins}/{day.long_trades})</span>
+                            <span className="text-rose-700 font-medium">S: {day.short_win_rate}% ({day.short_wins}/{day.short_trades})</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-300">-</span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-2 text-center font-mono font-semibold text-slate-700">
+                        {day.total_trades > 0 ? (day.profit_factor >= 99 ? "∞" : day.profit_factor.toFixed(2)) : "-"}
+                      </td>
+
+                      <td className="py-3 px-2.5 text-right font-mono font-medium text-slate-600">
+                        {day.total_trades > 0 ? `${day.average_pnl_usdt >= 0 ? "+" : ""}$${day.average_pnl_usdt.toFixed(2)}` : "-"}
+                      </td>
+
+                      <td className="py-3 px-3 text-right font-mono font-extrabold text-sm">
+                        {day.total_trades > 0 ? (
+                          <span className={day.net_profit_usdt >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                            {day.net_profit_usdt >= 0 ? "+" : ""}${day.net_profit_usdt.toFixed(2)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-normal">$0.00</span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-3">
+                        <div className="text-[11px] font-semibold text-slate-800 truncate max-w-[160px]" title={day.top_setup}>
+                          {day.top_setup}
+                        </div>
+                        <div className="text-[9px] text-slate-400 font-mono mt-0.5">
+                          {day.top_regime}
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-3">
+                        <span className="text-[10px] text-slate-600 block leading-tight font-sans">
+                          {day.verdict}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDayDetail(isSelected ? null : day.day_index)}
+                          className={`px-2 py-1 text-[10px] font-mono rounded border transition-colors cursor-pointer ${
+                            isSelected
+                              ? "bg-indigo-600 text-white border-indigo-600"
+                              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300"
+                          }`}
+                        >
+                          {isSelected ? "Hide" : "Trades"}
+                        </button>
+                      </td>
+                    </tr>
+
+                    {/* Collapsible Trades on this day */}
+                    {isSelected && (
+                      <tr className="bg-slate-50/70 border-b border-slate-200">
+                        <td colSpan={12} className="p-4">
+                          <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <h5 className="font-bold text-xs text-slate-800 font-sans flex items-center gap-1.5">
+                                <span>{icon}</span> {day.day_name} Executed Trade Log
+                              </h5>
+                              <span className="text-[10px] font-mono text-slate-500">
+                                {completedTrades.filter((t) => new Date(t.entry_timestamp).getUTCDay() === (day.day_index === 7 ? 0 : day.day_index)).length} trades on {day.day_name}
+                              </span>
+                            </div>
+
+                            {completedTrades.filter((t) => new Date(t.entry_timestamp).getUTCDay() === (day.day_index === 7 ? 0 : day.day_index)).length === 0 ? (
+                              <p className="text-xs text-slate-400 py-2">No historical trades found on {day.day_name}.</p>
+                            ) : (
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-left text-[11px] font-mono border-collapse">
+                                  <thead>
+                                    <tr className="border-b border-slate-100 text-slate-400 uppercase text-[9px]">
+                                      <th className="py-1.5">Entry Time</th>
+                                      <th className="py-1.5">Setup</th>
+                                      <th className="py-1.5">Direction</th>
+                                      <th className="py-1.5">Entry Price</th>
+                                      <th className="py-1.5">Exit Price</th>
+                                      <th className="py-1.5">Exit Reason</th>
+                                      <th className="py-1.5 text-right">Net PnL</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {completedTrades
+                                      .filter((t) => new Date(t.entry_timestamp).getUTCDay() === (day.day_index === 7 ? 0 : day.day_index))
+                                      .map((trade) => (
+                                        <tr key={trade.id} className="hover:bg-slate-50">
+                                          <td className="py-1.5 text-slate-600">
+                                            {safeFormatDateTimeShort(trade.entry_timestamp)}
+                                          </td>
+                                          <td className="py-1.5 font-sans font-medium text-slate-800">
+                                            {trade.setup_triggered || "Standard SMC Setup"}
+                                          </td>
+                                          <td className="py-1.5">
+                                            <span
+                                              className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                                trade.direction === "LONG"
+                                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                                  : "bg-rose-50 text-rose-700 border border-rose-200"
+                                              }`}
+                                            >
+                                              {trade.direction}
+                                            </span>
+                                          </td>
+                                          <td className="py-1.5 text-slate-700">${trade.entry_price?.toFixed(2)}</td>
+                                          <td className="py-1.5 text-slate-700">${trade.exit_price?.toFixed(2)}</td>
+                                          <td className="py-1.5 text-slate-500">{trade.exit_reason || "-"}</td>
+                                          <td className="py-1.5 text-right font-bold">
+                                            <span className={(trade.pnl_usdt || 0) >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                                              {(trade.pnl_usdt || 0) >= 0 ? "+" : ""}${(trade.pnl_usdt || 0).toFixed(2)}
+                                            </span>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 

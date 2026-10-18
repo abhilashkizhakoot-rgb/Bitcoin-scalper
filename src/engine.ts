@@ -9,7 +9,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { dbManager, DEFAULT_TIMING_WINDOWS, DEFAULT_SETUP_SESSION_MATRIX } from "./db_sim.js";
+import { dbManager, DEFAULT_TIMING_WINDOWS, DEFAULT_SETUP_SESSION_MATRIX, DEFAULT_DAY_SESSION_MATRIX } from "./db_sim.js";
 import {
   Candlestick,
   MarketRegime,
@@ -210,7 +210,28 @@ class TradingEngine {
         mult *= 0.25;
       }
     }
-    return mult;
+
+    // Institutional Calendar & Session Risk Scaling:
+    if (config.risk_management?.enable_session_risk_scaling !== false) {
+      const activeSession = this.getCurrentTradingSession();
+      if (activeSession.id === "europe_us_overlap") {
+        const overlapMult = config.risk_management?.session_overlap_risk_multiplier || 1.25;
+        mult *= overlapMult;
+      }
+
+      const d = new Date();
+      const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+      const istDate = new Date(utcMs + 5.5 * 3600000);
+      const day = istDate.getDay();
+      if (day === 4) { // Thursday
+        const thuMult = config.risk_management?.thursday_risk_multiplier || 0.85;
+        mult *= thuMult;
+      } else if (day === 5) { // Friday
+        const friMult = config.risk_management?.friday_risk_multiplier || 0.70;
+        mult *= friMult;
+      }
+    }
+    return Number(mult.toFixed(3));
   }
 
   public getActiveMLModelName(): string {
@@ -1488,6 +1509,45 @@ class TradingEngine {
     };
   }
 
+  /**
+   * Returns current day ID, day name, session ID, and session name according to IST reference.
+   */
+  public getCurrentDayAndSession(timestampMs?: number): {
+    dayId: string;
+    dayName: string;
+    sessionId: string;
+    sessionName: string;
+    is_weekend: boolean;
+    allowed: boolean;
+  } {
+    const session = this.getCurrentTradingSession(timestampMs);
+    const d = timestampMs ? new Date(timestampMs) : new Date();
+    const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+    const istOffset = 5.5 * 3600000;
+    const istDate = new Date(utcMs + istOffset);
+    const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const dayDisplay = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const dayIdx = istDate.getDay();
+    const dayId = dayNames[dayIdx];
+    const dayName = dayDisplay[dayIdx];
+
+    const config = dbManager.getConfig();
+    const ms = (config.market_structure || {}) as any;
+    const isDayMatrixEnabled = ms.day_session_matrix_enabled !== false;
+    const dayMatrix = ms.day_session_matrix || DEFAULT_DAY_SESSION_MATRIX;
+    const allowedSessionsForDay = dayMatrix[dayId] || DEFAULT_DAY_SESSION_MATRIX[dayId] || [];
+    const isDaySessionAllowed = !isDayMatrixEnabled || allowedSessionsForDay.includes(session.id);
+
+    return {
+      dayId,
+      dayName,
+      sessionId: session.id,
+      sessionName: session.name,
+      is_weekend: session.is_weekend,
+      allowed: isDaySessionAllowed && session.allowed,
+    };
+  }
+
   public getISTTimingStatus(): { met: boolean; status: string; description: string; current_time: string } {
     const config = dbManager.getConfig();
     const windows = config.general.timing_windows || [];
@@ -1556,6 +1616,25 @@ class TradingEngine {
     const matchingWindow = windows.find(
       (w) => w.id !== "weekends" && isTimeInWindow(minutesOfDay, w.start_time, w.end_time)
     );
+
+    const currentSessionId = isWeekendNow ? "weekends" : matchingWindow ? matchingWindow.id : "intraday_chop";
+    const currentSessionName = isWeekendNow ? "Weekends" : matchingWindow ? matchingWindow.name : "Intra-day Chop";
+    const ms = config.market_structure as any;
+
+    // 3. Day of Week x Trading Session Matrix Check
+    if (ms && ms.day_session_matrix_enabled !== false) {
+      const dayId = days[day].toLowerCase();
+      const dayMatrix = ms.day_session_matrix || DEFAULT_DAY_SESSION_MATRIX;
+      const allowedInDay = dayMatrix[dayId] || DEFAULT_DAY_SESSION_MATRIX[dayId] || [];
+      if (!allowedInDay.includes(currentSessionId)) {
+        return {
+          met: false,
+          status: `RESTRICTED (${days[day]} ${currentSessionName} Gated)`,
+          description: `Trading on ${days[day]} during ${currentSessionName} (${currentSessionId}) is restricted by Day of Week x Session Matrix.`,
+          current_time: `${dayStr}, ${timeStr}`
+        };
+      }
+    }
 
     if (matchingWindow) {
       return {
@@ -6666,6 +6745,36 @@ class TradingEngine {
       };
     }
 
+    // 2c. Day of Week x Trading Session Matrix Gating Check
+    const isDaySessionMatrixEnabled = ms.day_session_matrix_enabled !== false;
+    const defaultDayMatrix: Record<string, string[]> = DEFAULT_DAY_SESSION_MATRIX;
+    const daySessionMatrix = ms.day_session_matrix || defaultDayMatrix;
+
+    const dNow = candleTimestampMs ? new Date(candleTimestampMs) : new Date();
+    const utcMs = dNow.getTime() + dNow.getTimezoneOffset() * 60000;
+    const istOffset = 5.5 * 3600000;
+    const istDate = new Date(utcMs + istOffset);
+    const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const currentDayId = dayNames[istDate.getDay()];
+    const currentDayDisplayName = currentDayId.charAt(0).toUpperCase() + currentDayId.slice(1);
+
+    const allowedSessionsForDay = daySessionMatrix[currentDayId] || defaultDayMatrix[currentDayId] || allSessionIds;
+    const day_session_allowed = !isDaySessionMatrixEnabled || allowedSessionsForDay.includes(currentSession.id);
+
+    if (!day_session_allowed) {
+      return {
+        eligible: false,
+        master_enabled: true,
+        regime_allowed: true,
+        session_allowed: false,
+        conditions_allowed: false,
+        reason: `Dynamically gated: ${currentDayDisplayName} ${currentSession.name} (${currentSession.id}) is disabled by Day of Week x Session Matrix. Allowed on ${currentDayDisplayName}: [${allowedSessionsForDay.join(", ")}].`,
+        allowed_regimes,
+        allowed_sessions,
+        current_session: currentSession.id,
+      };
+    }
+
     // 3. Directional Counter-trend Safeguard
     const isMeanReversion = ["setup_3_liquidity_sweep", "setup_9_range_failed_auction", "setup_10_vwap_band_rejection", "setup_11_eqh_eql_double_touch"].includes(setupId);
     if (direction === "LONG" && this.currentRegime === MarketRegime.STRONG_DOWNTREND && isMeanReversion) {
@@ -6735,6 +6844,21 @@ class TradingEngine {
             conditions_allowed = false;
             conditionReason = `Dynamically gated: Current ATR ($${currentAtr.toFixed(1)}) is below breakout impulse minimum ($${minAtr}).`;
           }
+        }
+      }
+
+      // Institutional Research Optimization: Asian Session (00:00–08:00 UTC) Noise & False Breakout Filtering
+      if (currentSession.id === "asia_open" && ms.asian_session_strict_filtering !== false) {
+        const minAsianAtr = ms.asian_session_min_atr || 28.0;
+        const minAsianRvol = ms.asian_session_min_rvol || 1.35;
+        const currentRvol = this.calculateAccurateRelativeVolume();
+
+        if (currentAtr < minAsianAtr) {
+          conditions_allowed = false;
+          conditionReason = `Dynamically gated: Asian Session ATR ($${currentAtr.toFixed(1)}) is below noise floor ($${minAsianAtr}). Thin order book risk of false sweeps on 1m.`;
+        } else if (currentRvol < minAsianRvol && !isMeanReversion) {
+          conditions_allowed = false;
+          conditionReason = `Dynamically gated: Asian Session requires Relative Volume >= ${minAsianRvol}x for trend breakouts (Current: ${currentRvol.toFixed(2)}x) to prevent 1m false wick fakeouts.`;
         }
       }
     }

@@ -373,6 +373,11 @@ export interface StrategyConfig {
     estimated_slippage_pct?: number; // Estimated one-way slippage percentage (default: 0.02%)
     maker_post_only_enabled?: boolean; // In MAKER mode, strictly place passive post-only limit orders inside spread
     hybrid_regime_switching_enabled?: boolean; // Enforce strict regime separation: Momentum mode in trends vs Reversion mode in chop/ranges
+    // Institutional Calendar & Session Risk Scaling:
+    enable_session_risk_scaling?: boolean; // Enables dynamic calendar risk scaling (1.25x in Europe/US Overlap, 0.85x on Thursday, 0.70x on Friday)
+    session_overlap_risk_multiplier?: number; // Sizing multiplier during Europe/US Overlap (default: 1.25)
+    thursday_risk_multiplier?: number; // Sizing multiplier on Thursdays (default: 0.85)
+    friday_risk_multiplier?: number; // Sizing multiplier on Fridays (default: 0.70)
   };
   market_structure: {
     min_breakout_body_ratio: number; // e.g. 0.22 (22% body ratio)
@@ -493,11 +498,19 @@ export interface StrategyConfig {
     // Dynamic Session & Timing Window Gating Matrix
     dynamic_session_setup_matrix_enabled?: boolean; // Dynamically enable/disable setups based on active Trading Session (default: true)
     setup_session_matrix?: Record<string, string[]>; // Map of setupId -> allowed session IDs (e.g. ["asia_open", "europe_us_overlap"])
+    // Day of the Week x Trading Session Gating Matrix
+    day_session_matrix_enabled?: boolean; // Dynamically enable/disable trading sessions per day of week (default: true)
+    day_session_matrix?: Record<string, string[]>; // Map of dayId (e.g. "monday", "friday") -> allowed session IDs (e.g. ["asia_open", "europe_us_overlap"])
     dynamic_condition_rules_enabled?: boolean; // Dynamically gate setups using real-time ADX, Choppiness Index, and Volatility (default: true)
     dynamic_mean_reversion_max_adx?: number; // Max ADX allowed for mean reversion setups (Setups 3, 9, 10, 11) (default: 32)
     dynamic_trend_min_adx?: number; // Min ADX required for trend continuation setups (Setups 1, 2) (default: 20)
     dynamic_trend_max_chop_index?: number; // Max Chop Index allowed for trend setups (Setups 1, 2) (default: 58)
     dynamic_breakout_min_atr?: number; // Min ATR required for fresh momentum breakout (Setup 14) (default: 12)
+    // Institutional Research Optimizations:
+    asian_session_strict_filtering?: boolean; // When in Asian session, strictly enforces minimum ATR floor & Relative Volume confirmation to filter 1m false wicks
+    asian_session_min_rvol?: number; // Minimum Relative Volume required during Asian session (default: 1.35x)
+    asian_session_min_atr?: number; // Minimum ATR floor during Asian session (default: 28.0)
+    europe_us_overlap_aggressive_mode?: boolean; // Enable Aggressive Mode during Europe/US Overlap (boosted position size & tighter FVG / Order Flow confirmation)
   };
   gate_scoring?: {
     enabled: boolean;
@@ -577,6 +590,32 @@ export interface DailyStats {
   profit_factor: number;
   net_profit_usdt: number;
   max_drawdown_usdt: number;
+}
+
+export interface DayOfWeekStats {
+  day_index: number; // 1 = Monday, ..., 7 = Sunday
+  day_name: string; // "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
+  short_name: string; // "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
+  is_weekend: boolean;
+  total_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  long_trades: number;
+  long_wins: number;
+  long_win_rate: number;
+  short_trades: number;
+  short_wins: number;
+  short_win_rate: number;
+  gross_profit_usdt: number;
+  gross_loss_usdt: number;
+  profit_factor: number;
+  net_profit_usdt: number;
+  average_pnl_usdt: number;
+  avg_hold_duration_minutes: number;
+  top_setup: string;
+  top_regime: string;
+  verdict: string;
 }
 
 export interface Candlestick {
@@ -699,3 +738,26 @@ export interface DynamicSetupStatus {
   current_session?: string;
 }
 
+export interface HistoricalOptimizationRecommendation {
+  id: string;
+  category: "CALENDAR_SEASONALITY" | "SESSION_MATRIX" | "RISK_SIZING" | "SL_TP_CALIBRATION" | "NOISE_FILTER";
+  title: string;
+  evidence: string;
+  current_value: string;
+  recommended_value: string;
+  impact_verdict: string;
+  confidence: "HIGH" | "VERY_HIGH" | "MODERATE";
+  applied_section: "market_structure" | "risk_management" | "general";
+  proposed_update: Record<string, any>;
+  is_selected: boolean;
+}
+
+export interface HistoricalOptimizationReport {
+  total_trades_analyzed: number;
+  sample_span: string;
+  overall_win_rate: number;
+  overall_profit_factor: number;
+  net_profit_usdt: number;
+  recommendations: HistoricalOptimizationRecommendation[];
+  suggested_config: Partial<StrategyConfig>;
+}

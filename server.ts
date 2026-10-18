@@ -8,7 +8,7 @@ import path from "path";
 import crypto from "crypto";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
-import { dbManager, DEFAULT_SETUP_SESSION_MATRIX } from "./src/db_sim.js";
+import { dbManager, DEFAULT_TIMING_WINDOWS, DEFAULT_SETUP_SESSION_MATRIX, DEFAULT_DAY_SESSION_MATRIX } from "./src/db_sim.js";
 import { tradingEngine } from "./src/engine.js";
 import { ConnectionStatus, MarketRegime } from "./src/types.js";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -619,17 +619,157 @@ async function startServer() {
     res.json({ success: true, preset: preset || "QUANT_OPTIMAL", setup_session_matrix: matrix });
   });
 
+  // ----------------------------------------------------
+  // REST API: Days of Week vs Trading Sessions Matrix
+  // ----------------------------------------------------
+
+  app.post("/api/strategy/day-session-matrix/toggle-cell", (req, res) => {
+    const { dayId, session, enabled } = req.body || {};
+    if (!dayId || !session) {
+      return res.status(400).json({ error: "Missing dayId or session parameter." });
+    }
+
+    const config = dbManager.getConfig();
+    const ms = (config.market_structure || {}) as any;
+    const defaultMatrix = DEFAULT_DAY_SESSION_MATRIX;
+    const currentMatrix = { ...(ms.day_session_matrix || defaultMatrix) };
+    const currentList: string[] = currentMatrix[dayId] ? [...currentMatrix[dayId]] : (defaultMatrix[dayId] ? [...defaultMatrix[dayId]] : []);
+
+    let updatedList: string[];
+    if (enabled !== undefined) {
+      if (enabled && !currentList.includes(session)) {
+        updatedList = [...currentList, session];
+      } else if (!enabled) {
+        updatedList = currentList.filter(s => s !== session);
+      } else {
+        updatedList = currentList;
+      }
+    } else {
+      if (currentList.includes(session)) {
+        updatedList = currentList.filter(s => s !== session);
+      } else {
+        updatedList = [...currentList, session];
+      }
+    }
+
+    currentMatrix[dayId] = updatedList;
+    dbManager.updateConfig("market_structure", { day_session_matrix: currentMatrix }, `Day-Session Matrix Toggle ${dayId} - ${session}`);
+    res.json({ success: true, dayId, session, allowed: updatedList.includes(session), day_session_matrix: currentMatrix });
+  });
+
+  app.post("/api/strategy/day-session-matrix/toggle-day", (req, res) => {
+    const { dayId, allowAll } = req.body || {};
+    if (!dayId) {
+      return res.status(400).json({ error: "Missing dayId parameter." });
+    }
+
+    const allSessions = ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity", "weekends"];
+    const config = dbManager.getConfig();
+    const ms = (config.market_structure || {}) as any;
+    const defaultMatrix = DEFAULT_DAY_SESSION_MATRIX;
+    const currentMatrix = { ...(ms.day_session_matrix || defaultMatrix) };
+
+    currentMatrix[dayId] = allowAll ? allSessions : [];
+    dbManager.updateConfig("market_structure", { day_session_matrix: currentMatrix }, `Day-Session Matrix ${allowAll ? "Allow All" : "Block All"} on ${dayId}`);
+    res.json({ success: true, dayId, allowedSessions: currentMatrix[dayId], day_session_matrix: currentMatrix });
+  });
+
+  app.post("/api/strategy/day-session-matrix/preset", (req, res) => {
+    const { preset } = req.body || {};
+    let matrix: Record<string, string[]>;
+    const allSessions = ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity", "weekends"];
+    const peakSessions = ["asia_open", "europe_us_overlap", "late_us_session"];
+
+    if (preset === "ALL_PERMISSIVE") {
+      matrix = {
+        monday: allSessions,
+        tuesday: allSessions,
+        wednesday: allSessions,
+        thursday: allSessions,
+        friday: allSessions,
+        saturday: allSessions,
+        sunday: allSessions,
+      };
+    } else if (preset === "PEAK_HOURS_ONLY") {
+      matrix = {
+        monday: ["asia_open", "europe_us_overlap"],
+        tuesday: ["asia_open", "europe_us_overlap"],
+        wednesday: ["asia_open", "europe_us_overlap"],
+        thursday: ["asia_open", "europe_us_overlap"],
+        friday: ["europe_us_overlap"], // Friday Asian open disabled
+        saturday: [],
+        sunday: [],
+      };
+    } else if (preset === "NO_WEEKENDS") {
+      matrix = {
+        monday: allSessions,
+        tuesday: allSessions,
+        wednesday: allSessions,
+        thursday: allSessions,
+        friday: ["intraday_chop", "europe_us_overlap", "late_us_session"], // Friday Asian open disabled
+        saturday: [],
+        sunday: [],
+      };
+    } else if (preset === "INSTITUTIONAL_HIERARCHY") {
+      matrix = { ...DEFAULT_DAY_SESSION_MATRIX };
+    } else {
+      // QUANT_SEASONALITY (Default): Friday Asian Open & Sunday Dead Liquidity disabled
+      matrix = { ...DEFAULT_DAY_SESSION_MATRIX };
+    }
+
+    dbManager.updateConfig("market_structure", { day_session_matrix: matrix }, `Day-Session preset applied: ${preset || "QUANT_SEASONALITY"}`);
+    res.json({ success: true, preset: preset || "QUANT_SEASONALITY", day_session_matrix: matrix });
+  });
+
+  // Dedicated One-Click Institutional Research Hierarchy Preset Applier
+  app.post("/api/strategy/institutional-preset/apply", (req, res) => {
+    // 1. Timing Windows aligned with UTC/IST Research
+    dbManager.updateConfig("general", { timing_windows: DEFAULT_TIMING_WINDOWS }, "Applied Institutional Research Timing Windows (UTC/IST Hierarchy)");
+
+    // 2. Setup Session Matrix (FVG & Order Flow in Overlap, SMC Sweeps in London Open, Mean Reversion in Asian/Chop)
+    dbManager.updateConfig("market_structure", {
+      setup_session_matrix: DEFAULT_SETUP_SESSION_MATRIX,
+      day_session_matrix: DEFAULT_DAY_SESSION_MATRIX,
+      day_session_matrix_enabled: true,
+      dynamic_session_setup_matrix_enabled: true,
+      dynamic_condition_rules_enabled: true,
+      asian_session_strict_filtering: true,
+      asian_session_min_rvol: 1.35,
+      asian_session_min_atr: 28.0,
+      europe_us_overlap_aggressive_mode: true,
+    }, "Applied Institutional Research Setup & Day Seasonality Matrices");
+
+    // 3. Risk Management: Overlap 1.25x sizing, Thursday 0.85x de-risking, Friday 0.70x close protection
+    dbManager.updateConfig("risk_management", {
+      enable_session_risk_scaling: true,
+      session_overlap_risk_multiplier: 1.25,
+      thursday_risk_multiplier: 0.85,
+      friday_risk_multiplier: 0.70,
+    }, "Applied Institutional Calendar Risk Multipliers (Overlap 1.25x, Thu 0.85x, Fri 0.70x)");
+
+    res.json({
+      success: true,
+      message: "Institutional Research Hierarchy Preset applied successfully across all modules.",
+      config: dbManager.getConfig(),
+    });
+  });
+
   app.post("/api/strategy/dynamic-conditions/update", (req, res) => {
     const payload = req.body || {};
     const updates: any = {};
     const allowedKeys = [
       "dynamic_regime_setup_matrix_enabled",
       "dynamic_session_setup_matrix_enabled",
+      "day_session_matrix_enabled",
       "dynamic_condition_rules_enabled",
       "dynamic_mean_reversion_max_adx",
       "dynamic_trend_min_adx",
       "dynamic_trend_max_chop_index",
       "dynamic_breakout_min_atr",
+      "asian_session_strict_filtering",
+      "asian_session_min_rvol",
+      "asian_session_min_atr",
+      "europe_us_overlap_aggressive_mode",
     ];
 
     for (const key of allowedKeys) {
@@ -646,6 +786,31 @@ async function startServer() {
 
     dbManager.updateConfig("market_structure", updates, "Dynamic Conditions Rules Update");
     res.json({ success: true, updates, config: dbManager.getConfig() });
+  });
+
+  // ----------------------------------------------------
+  // REST API: Historical Data-Driven Auto-Tuner & Optimization
+  // ----------------------------------------------------
+
+  app.get("/api/strategy/historical-optimization/analysis", (req, res) => {
+    try {
+      const report = dbManager.generateHistoricalOptimizationReport();
+      res.json(report);
+    } catch (e: any) {
+      console.error("Failed to generate historical optimization report:", e);
+      res.status(500).json({ error: e.message || "Failed to generate report" });
+    }
+  });
+
+  app.post("/api/strategy/historical-optimization/apply", (req, res) => {
+    try {
+      const { selected_recommendations } = req.body || {};
+      const result = dbManager.applyHistoricalOptimization(selected_recommendations);
+      res.json(result);
+    } catch (e: any) {
+      console.error("Failed to apply historical optimization:", e);
+      res.status(500).json({ error: e.message || "Failed to apply optimization" });
+    }
   });
 
   // ----------------------------------------------------
@@ -804,6 +969,10 @@ async function startServer() {
 
   app.get("/api/analytics/setup-performance", (req, res) => {
     res.json(dbManager.getPerformanceBySetup());
+  });
+
+  app.get("/api/analytics/day-of-week", (req, res) => {
+    res.json(dbManager.getDayOfWeekBreakdown());
   });
 
   // ----------------------------------------------------
@@ -1182,9 +1351,65 @@ Provide a confidence score (0-100) for each recommendation based on how strongly
           let html = fs.readFileSync(path.join(process.cwd(), "index.html"), "utf-8");
           html = await vite.transformIndexHtml(url, html);
           
-          // Inject dynamic API Base URL
+          // Inject dynamic API Base URL and neutralize Vite HMR WebSocket in AI Studio
           const baseUrl = getRequestBaseUrl(req);
-          const injection = `<script>window.__API_BASE_URL__ = ${JSON.stringify(baseUrl)};</script>`;
+          const injection = `<script>
+            window.__API_BASE_URL__ = ${JSON.stringify(baseUrl)};
+            (function() {
+              try {
+                var OriginalWebSocket = window.WebSocket;
+                function MockWebSocket(url, protocols) {
+                  if (protocols === 'vite-hmr' || (typeof url === 'string' && (url.includes('token=') || url.includes('/@vite/') || url.includes('24678')))) {
+                    var listeners = {};
+                    return {
+                      readyState: 1,
+                      OPEN: 1,
+                      CONNECTING: 0,
+                      CLOSING: 2,
+                      CLOSED: 3,
+                      send: function() {},
+                      close: function() {},
+                      addEventListener: function(event, cb) {
+                        listeners[event] = listeners[event] || [];
+                        listeners[event].push(cb);
+                      },
+                      removeEventListener: function(event, cb) {
+                        if (listeners[event]) listeners[event] = listeners[event].filter(function(fn) { return fn !== cb; });
+                      },
+                      dispatchEvent: function() { return true; }
+                    };
+                  }
+                  return OriginalWebSocket ? new OriginalWebSocket(url, protocols) : {};
+                }
+                if (OriginalWebSocket) {
+                  MockWebSocket.prototype = OriginalWebSocket.prototype;
+                }
+                MockWebSocket.CONNECTING = 0;
+                MockWebSocket.OPEN = 1;
+                MockWebSocket.CLOSING = 2;
+                MockWebSocket.CLOSED = 3;
+                window.WebSocket = MockWebSocket;
+              } catch (e) {}
+
+              window.addEventListener('unhandledrejection', function(event) {
+                var reason = event.reason;
+                var msg = (reason && (reason.message || String(reason))) || '';
+                if (msg.includes('WebSocket') || msg.includes('@vite/client') || msg.includes('vite:ws')) {
+                  event.preventDefault();
+                  event.stopImmediatePropagation && event.stopImmediatePropagation();
+                }
+              }, true);
+
+              window.addEventListener('error', function(event) {
+                var msg = event.message || '';
+                var filename = event.filename || '';
+                if (msg.includes('WebSocket') || filename.includes('@vite/client')) {
+                  event.preventDefault();
+                  event.stopImmediatePropagation && event.stopImmediatePropagation();
+                }
+              }, true);
+            })();
+          </script>`;
           html = html.replace("<head>", `<head>${injection}`);
           
           return res.status(200).set({ "Content-Type": "text/html" }).end(html);

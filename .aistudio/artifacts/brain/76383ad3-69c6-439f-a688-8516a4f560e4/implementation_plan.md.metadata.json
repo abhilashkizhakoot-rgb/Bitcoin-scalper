@@ -1,0 +1,6 @@
+{
+  "summary": "Architectural and implementation plan for the Days of the Week vs Trading Sessions Gating Matrix. Features interactive 7x6 matrix configuration in the Strategy Control Panel, real-time IST day/session evaluation in the live execution engine, pre-loaded institutional defaults (restricting Friday Asian Open and Sunday Dead Liquidity), and simulation support in the Backtest Lab.",
+  "updatedAt": "2026-10-17T11:13:41.987995928Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

@@ -14,7 +14,7 @@ import {
   BacktestRankItem,
   BacktestRankResult,
 } from "./types.js";
-import { DEFAULT_TIMING_WINDOWS, DEFAULT_SETUP_SESSION_MATRIX, dbManager } from "../db_sim.js";
+import { DEFAULT_TIMING_WINDOWS, DEFAULT_SETUP_SESSION_MATRIX, DEFAULT_DAY_SESSION_MATRIX, dbManager } from "../db_sim.js";
 import { fetchBinanceHistoricalKlines } from "./binanceFetcher.js";
 import {
   SetupContext,
@@ -208,7 +208,8 @@ export function isSetupGatedBySessionAndRegime(
   sessionTimestampMs?: number,
   respectSessionMatrix: boolean = true,
   sessionFilter?: string,
-  config?: StrategyConfig
+  config?: StrategyConfig,
+  respectDaySessionMatrix: boolean = true
 ): { allowed: boolean; reason?: string; sessionId: string; sessionName: string } {
   const session = sessionTimestampMs !== undefined
     ? getBacktestTradingSession(sessionTimestampMs, config?.general?.timing_windows)
@@ -226,7 +227,7 @@ export function isSetupGatedBySessionAndRegime(
     }
   }
 
-  // 1. Session Matrix Check
+  // 1a. Session x Setup Matrix Check
   if (respectSessionMatrix) {
     const ms = (config?.market_structure || {}) as any;
     const sessionMatrix = ms.setup_session_matrix || DEFAULT_SETUP_SESSION_MATRIX;
@@ -240,6 +241,31 @@ export function isSetupGatedBySessionAndRegime(
         sessionId: session.id,
         sessionName: session.name,
       };
+    }
+  }
+
+  // 1b. Day of Week x Trading Session Matrix Check
+  if (respectDaySessionMatrix && sessionTimestampMs !== undefined) {
+    const ms = (config?.market_structure || {}) as any;
+    if (ms.day_session_matrix_enabled !== false) {
+      const d = new Date(sessionTimestampMs);
+      const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+      const istOffset = 5.5 * 3600000;
+      const istDate = new Date(utcMs + istOffset);
+      const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+      const currentDayId = dayNames[istDate.getDay()];
+      const dayMatrix = ms.day_session_matrix || DEFAULT_DAY_SESSION_MATRIX;
+      const allowedInDay = dayMatrix[currentDayId] || DEFAULT_DAY_SESSION_MATRIX[currentDayId] || [];
+
+      if (!allowedInDay.includes(session.id)) {
+        const dayDisplay = currentDayId.charAt(0).toUpperCase() + currentDayId.slice(1);
+        return {
+          allowed: false,
+          reason: `Prohibited on ${dayDisplay} during ${session.name} (${session.id}) by Day of Week x Session Matrix. Allowed on ${dayDisplay}: [${allowedInDay.join(", ")}].`,
+          sessionId: session.id,
+          sessionName: session.name,
+        };
+      }
     }
   }
 
@@ -499,6 +525,8 @@ export async function runIsolatedBacktest(
       description: string;
       sessionId?: string;
       sessionName?: string;
+      dayId?: string;
+      dayName?: string;
     } | null = null;
 
     const targetSetup = request.setupId;
@@ -521,9 +549,18 @@ export async function runIsolatedBacktest(
         candleTimeMs,
         request.respectSessionMatrix !== false,
         request.sessionFilter,
-        dbConfig
+        dbConfig,
+        request.respectDaySessionMatrix !== false
       );
       if (gate.allowed) {
+        const d = new Date(candleTimeMs);
+        const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+        const istOffset = 5.5 * 3600000;
+        const istDate = new Date(utcMs + istOffset);
+        const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+        const dayDisplay = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+        const dayIdx = istDate.getDay();
+
         signal = {
           direction,
           setupId,
@@ -533,6 +570,8 @@ export async function runIsolatedBacktest(
           description,
           sessionId: gate.sessionId,
           sessionName: gate.sessionName,
+          dayId: dayNames[dayIdx],
+          dayName: dayDisplay[dayIdx],
         };
       } else {
         gatedSignalsCount++;
@@ -1012,6 +1051,8 @@ export async function runIsolatedBacktest(
         direction: signal.direction,
         sessionId: signal.sessionId,
         sessionName: signal.sessionName,
+        dayId: signal.dayId,
+        dayName: signal.dayName,
         entryPrice,
         exitPrice,
         stopLoss: targetSl,

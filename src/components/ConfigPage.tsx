@@ -34,8 +34,21 @@ import {
   ToggleLeft,
   ToggleRight,
   Info,
+  Calendar,
+  Database,
+  BarChart3,
+  CheckSquare,
+  Square,
+  Wrench,
 } from "lucide-react";
-import { StrategyConfig, ConfigHistoryEntry, NewsSource, MarketRegime } from "../types.js";
+import {
+  StrategyConfig,
+  ConfigHistoryEntry,
+  NewsSource,
+  MarketRegime,
+  HistoricalOptimizationReport,
+  HistoricalOptimizationRecommendation,
+} from "../types.js";
 
 const AVAILABLE_GATES = [
   { id: "catboost", label: "CatBoost AI Prediction Threshold", supportsWeight: true },
@@ -228,6 +241,80 @@ export default function ConfigPage({
     if (config.market_structure) setMsConfig(config.market_structure);
     if (config.gate_scoring) setGateScoringConfig(config.gate_scoring);
   }, [configJson]);
+
+  // Historical Trading Data Auto-Tuner & Dynamic Optimization
+  const [historicalReport, setHistoricalReport] = useState<HistoricalOptimizationReport | null>(null);
+  const [isLoadingHistoricalReport, setIsLoadingHistoricalReport] = useState(false);
+  const [isApplyingHistoricalOpt, setIsApplyingHistoricalOpt] = useState(false);
+  const [selectedRecIds, setSelectedRecIds] = useState<string[]>([]);
+  const [historicalOptSuccessMsg, setHistoricalOptSuccessMsg] = useState<string | null>(null);
+  const [historicalOptErrorMsg, setHistoricalOptErrorMsg] = useState<string | null>(null);
+
+  const fetchHistoricalOptimizationReport = async () => {
+    setIsLoadingHistoricalReport(true);
+    setHistoricalOptErrorMsg(null);
+    try {
+      const res = await apiFetch("/api/strategy/historical-optimization/analysis");
+      if (res.ok) {
+        const data: HistoricalOptimizationReport = await res.json();
+        setHistoricalReport(data);
+        if (data.recommendations && data.recommendations.length > 0) {
+          setSelectedRecIds(data.recommendations.map((r) => r.id));
+        }
+      } else {
+        setHistoricalOptErrorMsg("Failed to generate historical trading optimization analysis.");
+      }
+    } catch (e: any) {
+      setHistoricalOptErrorMsg("Error loading historical trading report.");
+    } finally {
+      setIsLoadingHistoricalReport(false);
+    }
+  };
+
+  const handleApplyHistoricalOptimizations = async (idsToApply?: string[]) => {
+    const ids = idsToApply || selectedRecIds;
+    if (ids.length === 0) {
+      alert("Please select at least one optimization recommendation to apply.");
+      return;
+    }
+    setIsApplyingHistoricalOpt(true);
+    setHistoricalOptSuccessMsg(null);
+    setHistoricalOptErrorMsg(null);
+    try {
+      const res = await apiFetch("/api/strategy/historical-optimization/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selected_recommendations: ids }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.config) {
+          if (data.config.market_structure) setMsConfig(data.config.market_structure);
+          if (data.config.risk_management) setRiskConfig(data.config.risk_management);
+          if (data.config.general) setGeneralConfig(data.config.general);
+        }
+        setHistoricalOptSuccessMsg(
+          `Successfully applied ${data.appliedCount || ids.length} dynamic calibrations based on historical closed trades! Settings saved to disk.`
+        );
+        onRefresh();
+        fetchHistoricalOptimizationReport();
+        setTimeout(() => setHistoricalOptSuccessMsg(null), 8000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setHistoricalOptErrorMsg(err.error || "Failed to apply historical optimization.");
+      }
+    } catch (e: any) {
+      setHistoricalOptErrorMsg(e.message || "Error applying historical optimization.");
+    } finally {
+      setIsApplyingHistoricalOpt(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "market_structure" && !historicalReport && !isLoadingHistoricalReport) {
+      fetchHistoricalOptimizationReport();
+    }
+  }, [activeTab]);
 
   const sanitizeCategoryData = (category: string, data: any) => {
     const cleaned = { ...data };
@@ -3537,6 +3624,499 @@ export default function ConfigPage({
               </button>
             </div>
 
+            {/* ================= INSTITUTIONAL RESEARCH HIERARCHY OPTIMIZATION HUB ================= */}
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-xl p-5 shadow-md text-white space-y-4" id="institutional-research-hub">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-3 border-b border-indigo-800/50 gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                      BTC 1M Scalping Hierarchy
+                    </span>
+                    <h4 className="text-sm font-sans font-bold tracking-wide text-white">
+                      Institutional Trading Sessions & Finer Windows Architecture
+                    </h4>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-1">
+                    Calibrates all 15 setups, finer 1-minute execution windows, and calendar risk multipliers based on historical Bitcoin order book depth, institutional volume, and spot ETF liquidity flows.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    id="btn-apply-institutional-hierarchy"
+                    onClick={async () => {
+                      try {
+                        const res = await apiFetch("/api/strategy/institutional-preset/apply", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                        });
+                        if (res.ok) {
+                          const data = await res.json();
+                          if (data.config?.market_structure) {
+                            setMsConfig(data.config.market_structure);
+                          }
+                          if (data.config?.risk_management) {
+                            setRiskConfig(data.config.risk_management);
+                          }
+                          if (data.config?.general) {
+                            setGeneralConfig(data.config.general);
+                          }
+                          alert("Institutional Research Hierarchy Preset applied successfully across all modules!");
+                        }
+                      } catch (e) {
+                        console.error("Failed to apply institutional preset:", e);
+                      }
+                    }}
+                    className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 font-sans text-xs font-semibold tracking-wide shadow-sm transition-all shrink-0 cursor-pointer border border-slate-700 hover:border-slate-600 hover:scale-[1.02] active:scale-[0.98]"
+                    title="Applies static theoretical institutional research settings (fixed 13:00-17:00 overlap, 1.25x sizing, 0.85x Thu, 0.70x Fri)"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                    <div className="text-left">
+                      <div className="text-[11px] font-bold text-white leading-tight">Apply Static Research Preset</div>
+                      <div className="text-[9px] text-slate-400 font-mono">Macro Institutional Defaults</div>
+                    </div>
+                  </button>
+
+                  <a
+                    href="#historical-data-optimizer-hub"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      document.getElementById("historical-data-optimizer-hub")?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 text-white font-sans text-xs font-bold tracking-wide shadow-md transition-all shrink-0 cursor-pointer border border-emerald-400/30 hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <Database className="w-4 h-4 text-emerald-200 animate-pulse" />
+                    <div className="text-left">
+                      <div className="text-[11px] font-bold text-white leading-tight flex items-center gap-1.5">
+                        <span>Adjust from Historical Trades</span>
+                        <span className="px-1.5 py-0.2 rounded bg-emerald-400/20 text-emerald-200 text-[8px] font-mono uppercase">Dynamic</span>
+                      </div>
+                      <div className="text-[9px] text-emerald-100 font-mono">Empirical Quant Optimization</div>
+                    </div>
+                  </a>
+                </div>
+              </div>
+
+              {/* Research Hierarchy Matrix Table */}
+              <div className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/60">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-900/90 text-slate-400 border-b border-slate-800 text-[10px] font-mono uppercase">
+                      <th className="py-2 px-3">Rank &amp; Window</th>
+                      <th className="py-2 px-3">Day(s)</th>
+                      <th className="py-2 px-3">UTC Time</th>
+                      <th className="py-2 px-3">IST Time</th>
+                      <th className="py-2 px-3">Activity Profile &amp; Engine Calibration</th>
+                      <th className="py-2 px-3 text-center">Engine Rules</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/80 font-mono text-[11px]">
+                    <tr className="hover:bg-slate-900/50">
+                      <td className="py-2.5 px-3 font-bold text-amber-300">
+                        <span className="inline-block px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] mr-1.5 font-sans">
+                          RANK 1
+                        </span>
+                        Europe / US Overlap
+                      </td>
+                      <td className="py-2.5 px-3 text-emerald-400 font-semibold font-sans">Wednesday &amp; Monday</td>
+                      <td className="py-2.5 px-3 text-slate-300">13:00 – 17:00</td>
+                      <td className="py-2.5 px-3 text-indigo-300 font-semibold">18:30 – 22:30</td>
+                      <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">
+                        <strong>Maximum Volatility &amp; Returns:</strong> Peak institutional depth, tightest spreads, lowest 1m slippage.
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-sans font-bold">
+                          1.25x SIZING + FVG/CVD
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-slate-900/50">
+                      <td className="py-2.5 px-3 font-bold text-indigo-300">
+                        <span className="inline-block px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[9px] mr-1.5 font-sans">
+                          RANK 2
+                        </span>
+                        Europe / US Overlap
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-300 font-sans">Tuesday, Thursday, Friday</td>
+                      <td className="py-2.5 px-3 text-slate-300">13:00 – 17:00</td>
+                      <td className="py-2.5 px-3 text-indigo-300 font-semibold">18:30 – 22:30</td>
+                      <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">
+                        <strong>Very High Catalysts:</strong> US Macro releases (13:30 UTC CPI/NFP) &amp; Spot ETF pricing volume.
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[9px] font-sans font-bold">
+                          AGGRESSIVE MOMENTUM
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-slate-900/50">
+                      <td className="py-2.5 px-3 font-bold text-sky-300">
+                        <span className="inline-block px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[9px] mr-1.5 font-sans">
+                          RANK 3
+                        </span>
+                        London Open / Pre-NY
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-300 font-sans">Mon – Fri</td>
+                      <td className="py-2.5 px-3 text-slate-300">08:00 – 13:00</td>
+                      <td className="py-2.5 px-3 text-sky-300 font-semibold">13:30 – 18:30</td>
+                      <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">
+                        <strong>High SMC Profile:</strong> European desks sweep Asian highs/lows; ideal for Setups 3 (SFP), 11, 15.
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[9px] font-sans font-bold">
+                          SMC LIQUIDITY SWEEPS
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-slate-900/50">
+                      <td className="py-2.5 px-3 font-bold text-purple-300">
+                        <span className="inline-block px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[9px] mr-1.5 font-sans">
+                          RANK 4
+                        </span>
+                        Late US / Wall St Close
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-300 font-sans">Mon – Fri</td>
+                      <td className="py-2.5 px-3 text-slate-300">17:00 – 21:00</td>
+                      <td className="py-2.5 px-3 text-purple-300 font-semibold">22:30 – 02:30</td>
+                      <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">
+                        <strong>Moderate:</strong> 21:00 UTC Wall St close creates algorithmic cross-asset rebalancing spikes.
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[9px] font-sans font-bold">
+                          IMPULSE CONTINUATION
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-slate-900/50">
+                      <td className="py-2.5 px-3 font-bold text-amber-400">
+                        <span className="inline-block px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] mr-1.5 font-sans">
+                          RANK 5
+                        </span>
+                        Asian Session
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-300 font-sans">Mon – Fri</td>
+                      <td className="py-2.5 px-3 text-slate-300">00:00 – 08:00</td>
+                      <td className="py-2.5 px-3 text-amber-300 font-semibold">05:30 – 13:30</td>
+                      <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">
+                        <strong>Low Volatility Chop:</strong> Thinner books cause 1m false wicks. Gated with ATR floor ($28) &amp; RVol (1.35x).
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-sans font-bold">
+                          STRICT NOISE GATED
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-slate-900/50">
+                      <td className="py-2.5 px-3 font-bold text-rose-300">
+                        <span className="inline-block px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] mr-1.5 font-sans">
+                          RANK 6
+                        </span>
+                        Weekend Market
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-300 font-sans">Saturday &amp; Sunday</td>
+                      <td className="py-2.5 px-3 text-slate-300">24/7</td>
+                      <td className="py-2.5 px-3 text-rose-300 font-semibold">24/7 Sat &amp; Sun</td>
+                      <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">
+                        <strong>Lowest Volume &amp; Widest Spreads:</strong> Trend breakouts prohibited. Confined to range-bound fades.
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] font-sans font-bold">
+                          RANGE BOUND ONLY
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Three Algorithmic Rules Summary Pills */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-lg">
+                  <div className="text-[10px] font-mono uppercase text-emerald-400 font-bold flex items-center gap-1.5">
+                    <span>⚡ Rule 1: Aggressive Mode (13:00–17:00 UTC)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 mt-1 font-sans">
+                    Deepest order book. Boosts position sizing to <strong>1.25x</strong>, lowers Imbalance Ratio to 1.5, and prioritizes FVG (Setup 4) &amp; CVD Absorption (Setup 12).
+                  </p>
+                </div>
+
+                <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-lg">
+                  <div className="text-[10px] font-mono uppercase text-amber-400 font-bold flex items-center gap-1.5">
+                    <span>🛡️ Rule 2: Asian Session Noise Shield</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 mt-1 font-sans">
+                    Requires 1m ATR &ge; <strong>$28.0</strong> and Relative Volume &ge; <strong>1.35x</strong> during Asian hours (00:00–08:00 UTC) to eliminate false wick stop-outs.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-lg">
+                  <div className="text-[10px] font-mono uppercase text-rose-400 font-bold flex items-center gap-1.5">
+                    <span>📉 Rule 3: Late-Week De-risking</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 mt-1 font-sans">
+                    Scales account risk to <strong>0.85x on Thursday</strong> and <strong>0.70x on Friday</strong>. Keeps Friday Asian Open blocked to defend accumulated weekly profits.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* ================= HISTORICAL DATA-DRIVEN AUTO-TUNER & DYNAMIC OPTIMIZER ================= */}
+            <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/80 border border-emerald-500/40 rounded-xl p-5 shadow-lg text-white space-y-5" id="historical-data-optimizer-hub">
+              {/* Header */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-4 border-b border-slate-800 gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-md shadow-emerald-950/50 shrink-0">
+                    <Database className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                        Historical Closed-Trades Auto-Tuner
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                        Dynamic Calibration
+                      </span>
+                      <h4 className="text-sm font-sans font-bold tracking-wide text-white">
+                        Optimize Strategy Settings from Historical Trading Data
+                      </h4>
+                    </div>
+                    <p className="text-xs text-slate-300 mt-1">
+                      Inspects your actual recorded trade journal (win rates, adverse pullbacks MAE, favorable runs MFE, and day-of-week returns) to dynamically auto-tune stop loss, risk multipliers, session gating, and tactical setups.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-start lg:self-auto shrink-0">
+                  <button
+                    type="button"
+                    onClick={fetchHistoricalOptimizationReport}
+                    disabled={isLoadingHistoricalReport}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono font-semibold transition-colors border border-slate-700 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 text-slate-400 ${isLoadingHistoricalReport ? "animate-spin" : ""}`} />
+                    <span>{isLoadingHistoricalReport ? "Analyzing..." : "Re-Scan Trades"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Clarification Alert: Static Preset vs. Dynamic Optimization */}
+              <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-3.5 text-xs font-sans text-slate-300 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-indigo-300 font-bold text-[11px] font-mono uppercase">
+                    <Info className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <span>Preset Settings vs. Dynamic Historical Optimization</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    <strong className="text-amber-300 font-normal">Static Preset:</strong> Applies theoretical institutional research benchmarks (fixed 13:00–17:00 UTC overlap, 1.25x sizing, fixed 0.85x Thu / 0.70x Fri).<br />
+                    <strong className="text-emerald-300 font-normal">Dynamic Auto-Tuning:</strong> Reads your actual closed trades database, computes observed win rates, empirical MAE/MFE excursions, and identifies your real high-alpha days and weak windows to auto-tune parameters dynamically.
+                  </p>
+                </div>
+              </div>
+
+              {/* Empirical Trade Metrics Strip */}
+              {historicalReport && (
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3">
+                    <div className="text-[10px] font-mono text-slate-400 uppercase font-semibold">Analyzed Trades</div>
+                    <div className="text-lg font-bold font-mono text-white mt-0.5">
+                      {historicalReport.total_trades_analyzed}
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-mono truncate" title={historicalReport.sample_span}>
+                      {historicalReport.sample_span.split("(")[0].trim()}
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3">
+                    <div className="text-[10px] font-mono text-slate-400 uppercase font-semibold">Win Rate</div>
+                    <div className={`text-lg font-bold font-mono mt-0.5 ${historicalReport.overall_win_rate >= 50 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {historicalReport.overall_win_rate}%
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-mono">Empirical Edge</div>
+                  </div>
+
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3">
+                    <div className="text-[10px] font-mono text-slate-400 uppercase font-semibold">Profit Factor</div>
+                    <div className={`text-lg font-bold font-mono mt-0.5 ${historicalReport.overall_profit_factor >= 1.2 ? "text-emerald-400" : "text-amber-400"}`}>
+                      {historicalReport.overall_profit_factor.toFixed(2)}
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-mono">Gross Gain / Loss</div>
+                  </div>
+
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3">
+                    <div className="text-[10px] font-mono text-slate-400 uppercase font-semibold">Net Closed PnL</div>
+                    <div className={`text-lg font-bold font-mono mt-0.5 ${historicalReport.net_profit_usdt >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {historicalReport.net_profit_usdt >= 0 ? "+" : ""}${historicalReport.net_profit_usdt.toFixed(2)}
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-mono">Realized USDT</div>
+                  </div>
+
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3 col-span-2 sm:col-span-1">
+                    <div className="text-[10px] font-mono text-slate-400 uppercase font-semibold">Recommendations</div>
+                    <div className="text-lg font-bold font-mono text-indigo-300 mt-0.5">
+                      {historicalReport.recommendations?.length || 0} Calibrations
+                    </div>
+                    <div className="text-[9px] text-emerald-400 font-mono">Ready to Apply</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Status Notifications */}
+              {historicalOptSuccessMsg && (
+                <div className="bg-emerald-950/80 border border-emerald-500/50 rounded-lg p-3.5 text-xs text-emerald-200 flex items-center gap-2.5 animate-fadeIn">
+                  <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <span className="font-sans font-medium">{historicalOptSuccessMsg}</span>
+                </div>
+              )}
+              {historicalOptErrorMsg && (
+                <div className="bg-rose-950/80 border border-rose-500/50 rounded-lg p-3.5 text-xs text-rose-200 flex items-center gap-2.5">
+                  <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+                  <span className="font-sans font-medium">{historicalOptErrorMsg}</span>
+                </div>
+              )}
+
+              {/* Recommendations Checkable List */}
+              {historicalReport && historicalReport.recommendations && historicalReport.recommendations.length > 0 ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs text-slate-300 border-b border-slate-800/80 pb-2">
+                    <div className="font-mono text-[11px] font-bold text-slate-300 flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-emerald-400" />
+                      <span>Empirical Adjustments Proposed from Closed Trades ({historicalReport.recommendations.length})</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] font-mono">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRecIds(historicalReport.recommendations.map(r => r.id))}
+                        className="text-indigo-400 hover:text-indigo-300 cursor-pointer"
+                      >
+                        Select All
+                      </button>
+                      <span className="text-slate-600">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRecIds([])}
+                        className="text-slate-400 hover:text-slate-200 cursor-pointer"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    {historicalReport.recommendations.map((rec) => {
+                      const isSelected = selectedRecIds.includes(rec.id);
+                      return (
+                        <div
+                          key={rec.id}
+                          onClick={() => {
+                            setSelectedRecIds((prev) =>
+                              prev.includes(rec.id) ? prev.filter((id) => id !== rec.id) : [...prev, rec.id]
+                            );
+                          }}
+                          className={`p-4 rounded-xl border transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-slate-900/95 border-emerald-500/50 shadow-sm"
+                              : "bg-slate-950/60 border-slate-800/80 opacity-70 hover:opacity-100"
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="mt-0.5 shrink-0 text-emerald-400">
+                              {isSelected ? (
+                                <CheckSquare className="w-5 h-5 text-emerald-400" />
+                              ) : (
+                                <Square className="w-5 h-5 text-slate-500" />
+                              )}
+                            </div>
+                            <div className="flex-1 space-y-2">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-xs font-sans font-bold text-white">{rec.title}</span>
+                                  <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700">
+                                    {rec.category.replace(/_/g, " ")}
+                                  </span>
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-bold uppercase ${
+                                      rec.confidence === "VERY_HIGH"
+                                        ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                        : "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
+                                    }`}
+                                  >
+                                    Confidence: {rec.confidence}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] font-mono text-slate-400 uppercase">
+                                  Module: {rec.applied_section}
+                                </span>
+                              </div>
+
+                              {/* Evidence Box */}
+                              <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800/80 text-[11px] font-sans text-slate-300">
+                                <strong className="text-amber-300 font-semibold font-mono text-[10px] uppercase block mb-0.5">
+                                  Empirical Evidence:
+                                </strong>
+                                {rec.evidence}
+                              </div>
+
+                              {/* Comparison Grid */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono">
+                                <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-400">
+                                  <span className="text-[9px] uppercase block font-semibold text-slate-500">Current Setting:</span>
+                                  <span className="text-slate-300">{rec.current_value}</span>
+                                </div>
+                                <div className="p-2 rounded bg-emerald-950/40 border border-emerald-500/30 text-emerald-200">
+                                  <span className="text-[9px] uppercase block font-semibold text-emerald-400">Calibrated Setting:</span>
+                                  <span className="text-emerald-300 font-bold">{rec.recommended_value}</span>
+                                </div>
+                              </div>
+
+                              {/* Impact Verdict */}
+                              <p className="text-[11px] text-slate-400 font-sans italic">
+                                &bull; {rec.impact_verdict}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Apply Actions Bar */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-800">
+                    <span className="text-xs font-mono text-slate-400">
+                      Selected: <strong>{selectedRecIds.length}</strong> of {historicalReport.recommendations.length} calibrations
+                    </span>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleApplyHistoricalOptimizations(selectedRecIds)}
+                        disabled={isApplyingHistoricalOpt || selectedRecIds.length === 0}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-600 to-indigo-600 hover:from-emerald-400 hover:to-indigo-500 text-white font-sans text-xs font-bold tracking-wide shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.02] active:scale-[0.98]"
+                      >
+                        <Wrench className={`w-4 h-4 ${isApplyingHistoricalOpt ? "animate-spin" : ""}`} />
+                        <span>
+                          {isApplyingHistoricalOpt
+                            ? "Applying Calibrations..."
+                            : `Apply Selected Historical Optimizations (${selectedRecIds.length})`}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-6 text-center text-slate-400 font-mono text-xs border border-slate-800 rounded-lg bg-slate-900/50">
+                  {isLoadingHistoricalReport ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+                      <span>Scanning historical closed trades database and calculating empirical MAE/MFE excursions...</span>
+                    </div>
+                  ) : (
+                    <span>No closed trades currently available for historical calibration. Take live or paper trades to populate empirical metrics.</span>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* ================= TACTICAL STRATEGY SETUPS MASTER ACTIVATION HUB ================= */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm text-white" id="strategy-setups-master-hub">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800 gap-3">
@@ -4037,6 +4617,378 @@ export default function ConfigPage({
               </div>
             </div>
 
+            {/* ================= DAYS OF WEEK x TRADING SESSIONS MATRIX ================= */}
+            <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm" id="day-session-matrix">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-3 border-b border-slate-100 gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-indigo-600" />
+                    <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-sans">
+                      Days of the Week × Trading Sessions Matrix (Calendar Gating)
+                    </h4>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">
+                      Institutional Seasonality Guard
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Control which trading sessions are permitted on each day of the week (Mon–Sun). Blocks low-edge windows such as <strong className="text-slate-600 font-medium">Friday Asian Open</strong> (Asia de-risking before weekend) and <strong className="text-slate-600 font-medium">Sunday Dead Liquidity</strong> before market open.
+                  </p>
+                </div>
+
+                {/* Master Switch for Day-Session Matrix */}
+                <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/70 px-3 py-2 rounded-lg shrink-0">
+                  <div className="text-right">
+                    <p className="text-[11px] font-semibold text-slate-800">Enforce Day-Session Filter</p>
+                    <p className="text-[9px] font-mono text-slate-400">
+                      {msConfig.day_session_matrix_enabled !== false ? "STRICT CALENDAR GATING ACTIVE" : "BYPASSED (ALL DAYS)"}
+                    </p>
+                  </div>
+                  <button
+                    id="toggle-day-session-matrix"
+                    type="button"
+                    onClick={async () => {
+                      const next = msConfig.day_session_matrix_enabled === false ? true : false;
+                      setMsConfig({ ...msConfig, day_session_matrix_enabled: next });
+                      try {
+                        await apiFetch("/api/strategy/dynamic-conditions/update", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ day_session_matrix_enabled: next }),
+                        });
+                      } catch (e) {
+                        console.error("Failed to toggle day-session matrix master:", e);
+                      }
+                    }}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      msConfig.day_session_matrix_enabled !== false ? "bg-indigo-600" : "bg-slate-300"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        msConfig.day_session_matrix_enabled !== false ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* Day-Session Live Info Banner & Presets */}
+              {(() => {
+                const now = new Date();
+                const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+                const istOffset = 5.5 * 3600000;
+                const istDate = new Date(utcMs + istOffset);
+                const dayIndex = istDate.getDay();
+                const dayKeys = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+                const dayDisplayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+                const todayId = dayKeys[dayIndex];
+                const todayName = dayDisplayNames[dayIndex];
+
+                const defaultDayMatrix: Record<string, string[]> = {
+                  monday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
+                  tuesday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
+                  wednesday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
+                  thursday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
+                  friday: ["intraday_chop", "europe_us_overlap", "late_us_session"],
+                  saturday: ["weekends", "intraday_chop"],
+                  sunday: ["weekends", "late_us_session"],
+                };
+
+                const activeDayMatrix: Record<string, string[]> = (msConfig as any).day_session_matrix || defaultDayMatrix;
+                const todayAllowed = activeDayMatrix[todayId] || [];
+
+                return (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">Today (IST):</span>
+                      <span className="px-2.5 py-0.5 rounded font-mono font-bold text-xs uppercase tracking-wide border bg-indigo-100 text-indigo-800 border-indigo-300 flex items-center gap-1.5">
+                        <span>📅</span>
+                        <span>{todayName}</span>
+                        <span className="text-[10px] opacity-75 font-normal">({todayAllowed.length} sessions permitted)</span>
+                      </span>
+                      <span className="text-[11px] text-slate-500 hidden md:inline">
+                        — Click any cell below to permit or restrict trade executions during that day and session.
+                      </span>
+                    </div>
+
+                    {/* Presets Bar */}
+                    <div className="flex items-center gap-1.5 self-end sm:self-auto flex-wrap">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase font-bold mr-1">Presets:</span>
+                      {[
+                        { id: "INSTITUTIONAL_HIERARCHY", label: "⚡ Institutional Research", title: "Apply full BTC research hierarchy: Overlap aggressive, London SMC sweeps, Asian noise gated, Friday close protected" },
+                        { id: "QUANT_SEASONALITY", label: "Quant Seasonality", title: "Default: Restrict Friday Asian open & Sunday dead liquidity" },
+                        { id: "WEEKDAYS_ONLY", label: "Weekdays Only", title: "Allow Monday-Friday sessions, block all Saturday & Sunday trading" },
+                        { id: "PEAK_ONLY", label: "Strict Peak Only", title: "Only allow Asia Open, US/EU Overlap & Late US on Mon-Thu; restricted Friday" },
+                        { id: "ALL_PERMISSIVE", label: "Allow All", title: "Allow every session across all 7 days without restrictions" },
+                      ].map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          title={p.title}
+                          onClick={async () => {
+                            try {
+                              const res = await apiFetch("/api/strategy/day-session-matrix/preset", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ preset: p.id }),
+                              });
+                              if (res.ok) {
+                                const data = await res.json();
+                                if (data.day_session_matrix) {
+                                  setMsConfig({ ...msConfig, day_session_matrix: data.day_session_matrix });
+                                }
+                              }
+                            } catch (e) {
+                              console.error("Failed to apply day-session preset:", e);
+                            }
+                          }}
+                          className="px-2 py-1 rounded bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[10px] font-semibold transition-all hover:border-slate-300 shadow-2xs"
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Day x Session Interactive Grid */}
+              <div className="overflow-x-auto border border-slate-200/80 rounded-lg">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-100/80 text-slate-600 border-b border-slate-200 text-[10px] font-mono uppercase">
+                      <th className="py-2.5 px-3 font-semibold sticky left-0 bg-slate-100/90 z-10 w-44">
+                        Day of Week
+                      </th>
+                      <th className="py-2.5 px-2 text-center font-semibold">
+                        <div>🌅 Asia Open</div>
+                        <div className="text-[9px] font-normal text-slate-400">05:00 - 09:30</div>
+                      </th>
+                      <th className="py-2.5 px-2 text-center font-semibold">
+                        <div>☕ Intra-day Chop</div>
+                        <div className="text-[9px] font-normal text-slate-400">09:30 - 18:30</div>
+                      </th>
+                      <th className="py-2.5 px-2 text-center font-semibold">
+                        <div>🗽 US/EU Overlap</div>
+                        <div className="text-[9px] font-normal text-slate-400">18:30 - 22:30</div>
+                      </th>
+                      <th className="py-2.5 px-2 text-center font-semibold">
+                        <div>🌙 Late US Session</div>
+                        <div className="text-[9px] font-normal text-slate-400">22:30 - 01:30</div>
+                      </th>
+                      <th className="py-2.5 px-2 text-center font-semibold">
+                        <div>💤 Dead Liquidity</div>
+                        <div className="text-[9px] font-normal text-slate-400">01:30 - 05:00</div>
+                      </th>
+                      <th className="py-2.5 px-2 text-center font-semibold">
+                        <div>🏖️ Weekends</div>
+                        <div className="text-[9px] font-normal text-slate-400">Sat / Sun</div>
+                      </th>
+                      <th className="py-2.5 px-3 text-center font-semibold w-36">
+                        Day Status / Quick Action
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
+                    {(() => {
+                      const allSessions = [
+                        { id: "asia_open", name: "Asia Open" },
+                        { id: "intraday_chop", name: "Intra-day Chop" },
+                        { id: "europe_us_overlap", name: "US/EU Overlap" },
+                        { id: "late_us_session", name: "Late US" },
+                        { id: "dead_liquidity", name: "Dead Liquidity" },
+                        { id: "weekends", name: "Weekends" },
+                      ];
+
+                      const daysList = [
+                        { id: "monday", name: "Monday", short: "Mon", icon: "💼", note: "Asia Open expansion & weekly open positioning" },
+                        { id: "tuesday", name: "Tuesday", short: "Tue", icon: "📈", note: "High-volume institutional trend continuation" },
+                        { id: "wednesday", name: "Wednesday", short: "Wed", icon: "⚡", note: "Mid-week macro catalysts & peak momentum" },
+                        { id: "thursday", name: "Thursday", short: "Thu", icon: "🏛️", note: "Expansion continuation & reversal traps" },
+                        { id: "friday", name: "Friday", short: "Fri", icon: "🎯", note: "Friday Asian open disabled by default to avoid de-risking flush" },
+                        { id: "saturday", name: "Saturday", short: "Sat", icon: "🏖️", note: "Weekend retail choppiness & SFP sweeps" },
+                        { id: "sunday", name: "Sunday", short: "Sun", icon: "☀️", note: "Sunday dead liquidity disabled before weekly open" },
+                      ];
+
+                      const defaultDayMatrix: Record<string, string[]> = {
+                        monday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
+                        tuesday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
+                        wednesday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
+                        thursday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
+                        friday: ["intraday_chop", "europe_us_overlap", "late_us_session"],
+                        saturday: ["weekends", "intraday_chop"],
+                        sunday: ["weekends", "late_us_session"],
+                      };
+
+                      const activeDayMatrix: Record<string, string[]> = (msConfig as any).day_session_matrix || defaultDayMatrix;
+                      const isMasterOn = msConfig.day_session_matrix_enabled !== false;
+
+                      const now = new Date();
+                      const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+                      const istOffset = 5.5 * 3600000;
+                      const istDate = new Date(utcMs + istOffset);
+                      const currentDayIndex = istDate.getDay();
+                      const dayKeys = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+                      const currentTodayId = dayKeys[currentDayIndex];
+
+                      return daysList.map((day) => {
+                        const allowedSessions = activeDayMatrix[day.id] !== undefined ? activeDayMatrix[day.id] : (defaultDayMatrix[day.id] || []);
+                        const isToday = currentTodayId === day.id;
+                        const restrictionsCount = allSessions.length - allowedSessions.length;
+
+                        return (
+                          <tr
+                            key={day.id}
+                            className={`hover:bg-slate-50/70 transition-colors ${isToday ? "bg-indigo-50/30" : ""}`}
+                          >
+                            <td className="py-2.5 px-3 sticky left-0 bg-white z-10 border-r border-slate-100">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">{day.icon}</span>
+                                <div>
+                                  <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                                    <span>{day.name}</span>
+                                    {isToday && (
+                                      <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold uppercase">
+                                        TODAY
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 font-sans line-clamp-1" title={day.note}>
+                                    {day.note}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+
+                            {allSessions.map((session) => {
+                              const isChecked = allowedSessions.includes(session.id);
+                              return (
+                                <td key={session.id} className="py-2 px-2 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const nextList = isChecked
+                                        ? allowedSessions.filter((s) => s !== session.id)
+                                        : [...allowedSessions, session.id];
+
+                                      const nextMatrix = {
+                                        ...activeDayMatrix,
+                                        [day.id]: nextList,
+                                      };
+                                      setMsConfig({ ...msConfig, day_session_matrix: nextMatrix });
+
+                                      try {
+                                        await apiFetch("/api/strategy/day-session-matrix/toggle-cell", {
+                                          method: "POST",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({
+                                            dayId: day.id,
+                                            session: session.id,
+                                            enabled: !isChecked,
+                                          }),
+                                        });
+                                      } catch (e) {
+                                        console.error("Failed to toggle day-session cell:", e);
+                                      }
+                                    }}
+                                    className={`w-7 h-7 rounded-md inline-flex items-center justify-center transition-all cursor-pointer border ${
+                                      isChecked
+                                        ? "bg-indigo-50 border-indigo-200 text-indigo-600 hover:bg-indigo-100 shadow-2xs font-bold"
+                                        : "bg-slate-50 border-slate-200 text-slate-300 hover:border-slate-300 hover:bg-slate-100"
+                                    }`}
+                                    title={`${day.name} during ${session.name}: ${isChecked ? "Allowed" : "RESTRICTED (Trades Blocked)"}. Click to toggle.`}
+                                  >
+                                    {isChecked ? (
+                                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                    ) : (
+                                      <X className="w-3 h-3 text-rose-400 stroke-[2.5]" />
+                                    )}
+                                  </button>
+                                </td>
+                              );
+                            })}
+
+                            <td className="py-2.5 px-3 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <span
+                                  className={`inline-block text-[9px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
+                                    !isMasterOn
+                                      ? "bg-slate-100 text-slate-500 border border-slate-200"
+                                      : restrictionsCount === 0
+                                      ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                      : restrictionsCount >= allSessions.length
+                                      ? "bg-rose-100 text-rose-800 border border-rose-300"
+                                      : "bg-amber-100 text-amber-800 border border-amber-300"
+                                  }`}
+                                >
+                                  {!isMasterOn
+                                    ? "BYPASSED"
+                                    : restrictionsCount === 0
+                                    ? "ALL ALLOWED"
+                                    : restrictionsCount >= allSessions.length
+                                    ? "ALL BLOCKED"
+                                    : `${restrictionsCount} RESTRICTED`}
+                                </span>
+
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const nextMatrix = {
+                                        ...activeDayMatrix,
+                                        [day.id]: allSessions.map((s) => s.id),
+                                      };
+                                      setMsConfig({ ...msConfig, day_session_matrix: nextMatrix });
+                                      try {
+                                        await apiFetch("/api/strategy/day-session-matrix/toggle-day", {
+                                          method: "POST",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ dayId: day.id, allowAll: true }),
+                                        });
+                                      } catch (e) {
+                                        console.error("Failed to allow all sessions for day:", e);
+                                      }
+                                    }}
+                                    title={`Allow all sessions on ${day.name}`}
+                                    className="px-1.5 py-0.5 text-[9px] rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 font-sans"
+                                  >
+                                    All
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const nextMatrix = {
+                                        ...activeDayMatrix,
+                                        [day.id]: [],
+                                      };
+                                      setMsConfig({ ...msConfig, day_session_matrix: nextMatrix });
+                                      try {
+                                        await apiFetch("/api/strategy/day-session-matrix/toggle-day", {
+                                          method: "POST",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ dayId: day.id, allowAll: false }),
+                                        });
+                                      } catch (e) {
+                                        console.error("Failed to block all sessions for day:", e);
+                                      }
+                                    }}
+                                    title={`Block all sessions on ${day.name}`}
+                                    className="px-1.5 py-0.5 text-[9px] rounded bg-white hover:bg-rose-50 border border-slate-200 text-rose-600 font-sans"
+                                  >
+                                    None
+                                  </button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             {/* ================= DYNAMIC TRADING SESSION x SETUP GATING MATRIX ================= */}
             <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm" id="dynamic-session-matrix">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-3 border-b border-slate-100 gap-3">
@@ -4153,6 +5105,7 @@ export default function ConfigPage({
                     <div className="flex items-center gap-1.5 self-end sm:self-auto">
                       <span className="text-[10px] font-mono text-slate-400 uppercase font-bold mr-1">Presets:</span>
                       {[
+                        { id: "INSTITUTIONAL_HIERARCHY", label: "⚡ Institutional Research", title: "Institutional BTC research hierarchy: Overlap aggressive, London SMC sweeps, Asian noise gated, Friday close protected" },
                         { id: "QUANT_OPTIMAL", label: "Quant Optimal", title: "Institutional standard: Trend in US/EU overlap & Asia, Mean-reversion in Chop & Weekends" },
                         { id: "STRICT_PEAK_ONLY", label: "Strict Peak Only", title: "Only allow setups during high-volume sessions (Asia Open, US/EU Overlap, Late US)" },
                         { id: "MEAN_REVERSION_FOCUS", label: "Mean Reversion", title: "Confines chop, weekends, and dead hours exclusively to SFP, VWAP & Liquidity Sweeps" },
@@ -4473,7 +5426,7 @@ export default function ConfigPage({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* Rule 1: Mean Reversion Max ADX */}
                 <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-3 space-y-1.5">
                   <label className="text-xs font-mono text-slate-500 uppercase font-semibold">
@@ -4547,6 +5500,73 @@ export default function ConfigPage({
                   />
                   <p className="text-[10px] text-slate-400 leading-tight">
                     Requires minimum volatility expansion for Setup 14 (Fresh Momentum Breakout). Avoids low-liquidity false breakouts (Standard: $15).
+                  </p>
+                </div>
+
+                {/* Rule 5: Asian Session False Wick Filter */}
+                <div className="bg-amber-50/60 border border-amber-200/80 rounded-lg p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-mono text-amber-900 uppercase font-bold flex items-center gap-1">
+                      <span>🛡️ Asian Noise Filter</span>
+                    </label>
+                    <input
+                      type="checkbox"
+                      checked={msConfig.asian_session_strict_filtering !== false}
+                      onChange={(e) => setMsConfig({ ...msConfig, asian_session_strict_filtering: e.target.checked })}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-400 h-3.5 w-3.5 cursor-pointer"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 pt-1">
+                    <div>
+                      <span className="text-[9px] font-mono text-slate-500 uppercase">Min ATR ($)</span>
+                      <input
+                        type="number"
+                        step="1"
+                        min="10"
+                        max="80"
+                        value={msConfig.asian_session_min_atr ?? 28}
+                        onChange={(e) => setMsConfig({ ...msConfig, asian_session_min_atr: parseInputNumber(e.target.value) })}
+                        className="w-full bg-white border border-amber-200 rounded p-1 text-[11px] font-mono outline-none"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-mono text-slate-500 uppercase">Min RVol (x)</span>
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="1.0"
+                        max="3.0"
+                        value={msConfig.asian_session_min_rvol ?? 1.35}
+                        onChange={(e) => setMsConfig({ ...msConfig, asian_session_min_rvol: parseInputNumber(e.target.value, true) })}
+                        className="w-full bg-white border border-amber-200 rounded p-1 text-[11px] font-mono outline-none"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-amber-800 leading-tight">
+                    Enforces strict ATR floor &amp; RVol confirmation during 00:00–08:00 UTC (05:30–13:30 IST) to block thin-liquidity 1m false wicks.
+                  </p>
+                </div>
+
+                {/* Rule 6: Europe / US Overlap Aggressive Mode */}
+                <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-lg p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-mono text-emerald-900 uppercase font-bold flex items-center gap-1">
+                      <span>⚡ Overlap Aggressive Mode</span>
+                    </label>
+                    <input
+                      type="checkbox"
+                      checked={msConfig.europe_us_overlap_aggressive_mode !== false}
+                      onChange={(e) => setMsConfig({ ...msConfig, europe_us_overlap_aggressive_mode: e.target.checked })}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-400 h-3.5 w-3.5 cursor-pointer"
+                    />
+                  </div>
+                  <div className="pt-1">
+                    <span className="inline-block px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-mono font-bold">
+                      1.25x Sizing + FVG/Order Flow
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-emerald-800 leading-tight">
+                    During 13:00–17:00 UTC (18:30–22:30 IST), institutional volume is deepest. Prioritizes Setups 4 (FVG), 12 (CVD), 13 (OI Flush), and 14 (Momentum).
                   </p>
                 </div>
               </div>

@@ -8,25 +8,61 @@
     <meta property="og:title" content="Bitcoin Futures 29-Minute AI Scalping Bot" />
     <meta property="og:description" content="CatBoost + FinBERT + Multi-Timeframe Regime Detection scalping simulator and dashboard for Delta Exchange BTC futures." />
     <script>
-      // Suppress benign Vite HMR websocket disconnection errors in sandboxed iframes
-      window.addEventListener('unhandledrejection', function (event) {
-        if (
-          event.reason &&
-          (event.reason.message?.includes('WebSocket') ||
-           event.reason.message?.includes('vite') ||
-           String(event.reason).includes('WebSocket'))
-        ) {
-          event.preventDefault();
-        }
-      });
-      window.addEventListener('error', function (event) {
-        if (
-          event.message?.includes('WebSocket') ||
-          (event.filename && event.filename.includes('@vite/client'))
-        ) {
-          event.preventDefault();
-        }
-      });
+      // Neutralize Vite HMR WebSocket in AI Studio iframe environment where HMR is disabled
+      (function() {
+        try {
+          var OriginalWebSocket = window.WebSocket;
+          function MockWebSocket(url, protocols) {
+            if (protocols === 'vite-hmr' || (typeof url === 'string' && (url.includes('token=') || url.includes('/@vite/') || url.includes('24678')))) {
+              var listeners = {};
+              return {
+                readyState: 1,
+                OPEN: 1,
+                CONNECTING: 0,
+                CLOSING: 2,
+                CLOSED: 3,
+                send: function() {},
+                close: function() {},
+                addEventListener: function(event, cb) {
+                  listeners[event] = listeners[event] || [];
+                  listeners[event].push(cb);
+                },
+                removeEventListener: function(event, cb) {
+                  if (listeners[event]) listeners[event] = listeners[event].filter(function(fn) { return fn !== cb; });
+                },
+                dispatchEvent: function() { return true; }
+              };
+            }
+            return OriginalWebSocket ? new OriginalWebSocket(url, protocols) : {};
+          }
+          if (OriginalWebSocket) {
+            MockWebSocket.prototype = OriginalWebSocket.prototype;
+          }
+          MockWebSocket.CONNECTING = 0;
+          MockWebSocket.OPEN = 1;
+          MockWebSocket.CLOSING = 2;
+          MockWebSocket.CLOSED = 3;
+          window.WebSocket = MockWebSocket;
+        } catch (e) {}
+
+        window.addEventListener('unhandledrejection', function(event) {
+          var reason = event.reason;
+          var msg = (reason && (reason.message || String(reason))) || '';
+          if (msg.includes('WebSocket') || msg.includes('@vite/client') || msg.includes('vite:ws')) {
+            event.preventDefault();
+            event.stopImmediatePropagation && event.stopImmediatePropagation();
+          }
+        }, true);
+
+        window.addEventListener('error', function(event) {
+          var msg = event.message || '';
+          var filename = event.filename || '';
+          if (msg.includes('WebSocket') || filename.includes('@vite/client')) {
+            event.preventDefault();
+            event.stopImmediatePropagation && event.stopImmediatePropagation();
+          }
+        }, true);
+      })();
     </script>
   </head>
   <body>

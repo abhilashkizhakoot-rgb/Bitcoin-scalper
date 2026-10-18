@@ -26,6 +26,7 @@ export interface BacktestRequest {
   excludeWeekends?: boolean; // If true, weekend candles (Saturday & Sunday UTC) are excluded
   sessionFilter?: string; // Optional session filter (e.g. 'all', 'asia_open', 'europe_us_overlap')
   respectSessionMatrix?: boolean; // If true, enforces Session x Setup Matrix during backtest
+  respectDaySessionMatrix?: boolean; // If true, enforces Days vs Sessions Matrix during backtest
 }
 
 export interface BacktestTrade {
@@ -38,6 +39,8 @@ export interface BacktestTrade {
   direction: "LONG" | "SHORT";
   sessionId?: string;
   sessionName?: string;
+  dayId?: string;
+  dayName?: string;
   entryPrice: number;
   exitPrice: number;
   stopLoss: number;

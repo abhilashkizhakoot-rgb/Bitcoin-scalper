@@ -31,6 +31,7 @@ import {
   ConfigHistoryEntry,
   ExchangeCredentials,
   ConnectionStatus,
+  DayOfWeekStats,
 } from "./types.js";
 import { safeFormatTime } from "./utils/format";
 import { getApiBaseUrl, apiFetch } from "./utils/api.ts";
@@ -117,6 +118,7 @@ export default function App() {
   const [dailyStats, setDailyStats] = useState<any[]>([]);
   const [regimeStats, setRegimeStats] = useState<any>({});
   const [setupStats, setSetupStats] = useState<any[]>([]);
+  const [dayOfWeekStats, setDayOfWeekStats] = useState<DayOfWeekStats[]>([]);
 
   // Exchange Config Panel visibility
   const [showExchangePanel, setShowExchangePanel] = useState(false);
@@ -200,6 +202,9 @@ export default function App() {
 
       const setupRes = await apiFetch("/api/analytics/setup-performance");
       if (setupRes.ok) setSetupStats(await setupRes.json());
+
+      const dayOfWeekRes = await apiFetch("/api/analytics/day-of-week");
+      if (dayOfWeekRes.ok) setDayOfWeekStats(await dayOfWeekRes.json());
     } catch (e) {
       console.warn("Backend offline. Retrying synchronization loop in background...", e);
     } finally {
@@ -685,6 +690,7 @@ export default function App() {
                 dailyStats={dailyStats}
                 regimeStats={regimeStats}
                 setupStats={setupStats}
+                dayOfWeekStats={dayOfWeekStats}
                 trades={trades}
                 config={config}
               />

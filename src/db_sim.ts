@@ -26,6 +26,8 @@ import {
   SetupPerformanceStats,
   HistoricalOptimizationRecommendation,
   HistoricalOptimizationReport,
+  ConfluenceRule,
+  UnifiedConfluenceConfig,
 } from "./types.js";
 
 export const MOCK_SETUPS = [
@@ -123,6 +125,412 @@ export const DEFAULT_DAY_SESSION_MATRIX: Record<string, string[]> = {
   friday: ["intraday_chop", "europe_us_overlap"], // Friday Asian open disabled per research! Late US disabled before weekend
   saturday: ["weekends"], // Low volatility, SFP sweeps only
   sunday: ["weekends", "late_us_session"], // Sunday dead liquidity disabled
+};
+
+/**
+ * 25 Empirically Validated Robust Confluence Rules
+ * Extracted from walk-forward backtest discovery & validation clusters.
+ * Evaluates Setup x Day x UTC Hour x Trading Session x Market Regime simultaneously.
+ */
+export const DEFAULT_UNIFIED_CONFLUENCE_RULES: ConfluenceRule[] = [
+  {
+    id: "rule_1_s3_thu_12_16",
+    name: "Setup 3 (Liquidity Sweep) on Thursday 12–16 UTC",
+    setup_id: "setup_3_liquidity_sweep",
+    regimes: "ALL",
+    sessions: "ALL",
+    days: ["thursday"],
+    hours_utc: ["12-16"],
+    discovery_trades: 60,
+    discovery_win_rate: 60.0,
+    validation_trades: 36,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.25,
+  },
+  {
+    id: "rule_2_s14_high_vol",
+    name: "Setup 14 (Fresh Momentum) in High Volatility",
+    setup_id: "setup_14_fresh_momentum_impulse",
+    regimes: [MarketRegime.HIGH_VOLATILITY],
+    sessions: "ALL",
+    days: "ALL",
+    hours_utc: "ALL",
+    discovery_trades: 60,
+    discovery_win_rate: 80.0,
+    validation_trades: 24,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.25,
+  },
+  {
+    id: "rule_3_highvol_chop_thu",
+    name: "High Volatility Intraday Chop on Thursday",
+    setup_id: "all",
+    regimes: [MarketRegime.HIGH_VOLATILITY],
+    sessions: ["intraday_chop"],
+    days: ["thursday"],
+    hours_utc: "ALL",
+    discovery_trades: 48,
+    discovery_win_rate: 75.0,
+    validation_trades: 24,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.25,
+  },
+  {
+    id: "rule_4_s3_lowvol_16_20",
+    name: "Setup 3 (Liquidity Sweep) Low Volatility 16–20 UTC",
+    setup_id: "setup_3_liquidity_sweep",
+    regimes: [MarketRegime.LOW_VOLATILITY],
+    sessions: "ALL",
+    days: "ALL",
+    hours_utc: ["16-20"],
+    discovery_trades: 36,
+    discovery_win_rate: 66.7,
+    validation_trades: 24,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.25,
+  },
+  {
+    id: "rule_5_lowvol_lateus_16_20",
+    name: "Low Volatility Late US Session 16–20 UTC",
+    setup_id: "all",
+    regimes: [MarketRegime.LOW_VOLATILITY],
+    sessions: ["late_us_session"],
+    days: "ALL",
+    hours_utc: ["16-20"],
+    discovery_trades: 36,
+    discovery_win_rate: 66.7,
+    validation_trades: 24,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+  },
+  {
+    id: "rule_6_lowvol_lateus",
+    name: "Low Volatility Late US Session Continuation",
+    setup_id: "all",
+    regimes: [MarketRegime.LOW_VOLATILITY],
+    sessions: ["late_us_session"],
+    days: "ALL",
+    hours_utc: "ALL",
+    discovery_trades: 96,
+    discovery_win_rate: 50.0,
+    validation_trades: 24,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+  },
+  {
+    id: "rule_7_s3_lowvol_lateus",
+    name: "Setup 3 (Liquidity Sweep) in Low Volatility Late US",
+    setup_id: "setup_3_liquidity_sweep",
+    regimes: [MarketRegime.LOW_VOLATILITY],
+    sessions: ["late_us_session"],
+    days: "ALL",
+    hours_utc: "ALL",
+    discovery_trades: 72,
+    discovery_win_rate: 50.0,
+    validation_trades: 24,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.25,
+  },
+  {
+    id: "rule_8_s12_chop_fri",
+    name: "Setup 12 (CVD Absorption) Friday Intraday Chop",
+    setup_id: "setup_12_cvd_absorption",
+    regimes: "ALL",
+    sessions: ["intraday_chop"],
+    days: ["friday"],
+    hours_utc: "ALL",
+    discovery_trades: 60,
+    discovery_win_rate: 40.0,
+    validation_trades: 24,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.20,
+  },
+  {
+    id: "rule_9_s14_lateus_wed",
+    name: "Setup 14 (Fresh Momentum) Wednesday Late US",
+    setup_id: "setup_14_fresh_momentum_impulse",
+    regimes: "ALL",
+    sessions: ["late_us_session"],
+    days: ["wednesday"],
+    hours_utc: "ALL",
+    discovery_trades: 48,
+    discovery_win_rate: 75.0,
+    validation_trades: 12,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.25,
+  },
+  {
+    id: "rule_10_s2_mon_16_20",
+    name: "Setup 2 (Dynamic EMA) Monday 16–20 UTC",
+    setup_id: "setup_2_dynamic_ema_pushback",
+    regimes: "ALL",
+    sessions: "ALL",
+    days: ["monday"],
+    hours_utc: ["16-20"],
+    discovery_trades: 48,
+    discovery_win_rate: 75.0,
+    validation_trades: 12,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.25,
+  },
+  {
+    id: "rule_11_mon_04_08",
+    name: "Monday Asian Open Early Window (04–08 UTC)",
+    setup_id: "all",
+    regimes: "ALL",
+    sessions: "ALL",
+    days: ["monday"],
+    hours_utc: ["04-08"],
+    discovery_trades: 156,
+    discovery_win_rate: 61.5,
+    validation_trades: 12,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+  },
+  {
+    id: "rule_12_s9_mon_04_08",
+    name: "Setup 9 (Range Failed Auction) Monday 04–08 UTC",
+    setup_id: "setup_9_range_failed_auction",
+    regimes: "ALL",
+    sessions: "ALL",
+    days: ["monday"],
+    hours_utc: ["04-08"],
+    discovery_trades: 156,
+    discovery_win_rate: 61.5,
+    validation_trades: 12,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.25,
+  },
+  {
+    id: "rule_13_asia_mon_04_08",
+    name: "Asia Open Session Monday 04–08 UTC",
+    setup_id: "all",
+    regimes: "ALL",
+    sessions: ["asia_open"],
+    days: ["monday"],
+    hours_utc: ["04-08"],
+    discovery_trades: 156,
+    discovery_win_rate: 61.5,
+    validation_trades: 12,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+  },
+  {
+    id: "rule_14_range_mon_04_08",
+    name: "Range Bound Monday 04–08 UTC",
+    setup_id: "all",
+    regimes: [MarketRegime.RANGE_BOUND],
+    sessions: "ALL",
+    days: ["monday"],
+    hours_utc: ["04-08"],
+    discovery_trades: 144,
+    discovery_win_rate: 58.3,
+    validation_trades: 12,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+  },
+  {
+    id: "rule_15_highvol_lateus_tue",
+    name: "High Volatility Tuesday Late US Session",
+    setup_id: "all",
+    regimes: [MarketRegime.HIGH_VOLATILITY],
+    sessions: ["late_us_session"],
+    days: ["tuesday"],
+    hours_utc: "ALL",
+    discovery_trades: 108,
+    discovery_win_rate: 55.6,
+    validation_trades: 12,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+  },
+  {
+    id: "rule_16_lowvol_tue",
+    name: "Low Volatility Tuesday Mean Reversion",
+    setup_id: "all",
+    regimes: [MarketRegime.LOW_VOLATILITY],
+    sessions: "ALL",
+    days: ["tuesday"],
+    hours_utc: "ALL",
+    discovery_trades: 48,
+    discovery_win_rate: 50.0,
+    validation_trades: 12,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+  },
+  {
+    id: "rule_17_highvol_tue_16_20",
+    name: "High Volatility Tuesday 16–20 UTC",
+    setup_id: "all",
+    regimes: [MarketRegime.HIGH_VOLATILITY],
+    sessions: "ALL",
+    days: ["tuesday"],
+    hours_utc: ["16-20"],
+    discovery_trades: 84,
+    discovery_win_rate: 42.9,
+    validation_trades: 12,
+    validation_win_rate: 100.0,
+    verdict: "Robust",
+    is_enabled: true,
+  },
+  {
+    id: "rule_18_s14_overlap_thu",
+    name: "Setup 14 (Fresh Momentum) Thursday Overlap (Core Edge)",
+    setup_id: "setup_14_fresh_momentum_impulse",
+    regimes: "ALL",
+    sessions: ["europe_us_overlap"],
+    days: ["thursday"],
+    hours_utc: "ALL",
+    discovery_trades: 60,
+    discovery_win_rate: 100.0,
+    validation_trades: 84,
+    validation_win_rate: 85.7,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.25,
+  },
+  {
+    id: "rule_19_s14_thu_12_16",
+    name: "Setup 14 (Fresh Momentum) Thursday 12–16 UTC",
+    setup_id: "setup_14_fresh_momentum_impulse",
+    regimes: "ALL",
+    sessions: "ALL",
+    days: ["thursday"],
+    hours_utc: ["12-16"],
+    discovery_trades: 60,
+    discovery_win_rate: 80.0,
+    validation_trades: 84,
+    validation_win_rate: 85.7,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.25,
+  },
+  {
+    id: "rule_20_s3_overlap_thu",
+    name: "Setup 3 (Liquidity Sweep) Thursday Overlap",
+    setup_id: "setup_3_liquidity_sweep",
+    regimes: "ALL",
+    sessions: ["europe_us_overlap"],
+    days: ["thursday"],
+    hours_utc: "ALL",
+    discovery_trades: 96,
+    discovery_win_rate: 50.0,
+    validation_trades: 72,
+    validation_win_rate: 83.3,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.20,
+  },
+  {
+    id: "rule_21_s12_range_fri",
+    name: "Setup 12 (CVD Absorption) Range Bound Friday",
+    setup_id: "setup_12_cvd_absorption",
+    regimes: [MarketRegime.RANGE_BOUND],
+    sessions: "ALL",
+    days: ["friday"],
+    hours_utc: "ALL",
+    discovery_trades: 72,
+    discovery_win_rate: 50.0,
+    validation_trades: 60,
+    validation_win_rate: 80.0,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.20,
+  },
+  {
+    id: "rule_22_uptrend_overlap_thu",
+    name: "Strong Uptrend Thursday Overlap Macro Flow",
+    setup_id: "all",
+    regimes: [MarketRegime.STRONG_UPTREND],
+    sessions: ["europe_us_overlap"],
+    days: ["thursday"],
+    hours_utc: "ALL",
+    discovery_trades: 192,
+    discovery_win_rate: 43.8,
+    validation_trades: 180,
+    validation_win_rate: 73.3,
+    verdict: "Robust",
+    is_enabled: true,
+  },
+  {
+    id: "rule_23_s14_thu_broad",
+    name: "Setup 14 (Fresh Momentum) Thursday Daily Session",
+    setup_id: "setup_14_fresh_momentum_impulse",
+    regimes: "ALL",
+    sessions: "ALL",
+    days: ["thursday"],
+    hours_utc: "ALL",
+    discovery_trades: 144,
+    discovery_win_rate: 83.3,
+    validation_trades: 132,
+    validation_win_rate: 72.7,
+    verdict: "Robust",
+    is_enabled: true,
+  },
+  {
+    id: "rule_24_s14_uptrend_overlap",
+    name: "Setup 14 (Fresh Momentum) Strong Uptrend Overlap",
+    setup_id: "setup_14_fresh_momentum_impulse",
+    regimes: [MarketRegime.STRONG_UPTREND],
+    sessions: ["europe_us_overlap"],
+    days: "ALL",
+    hours_utc: "ALL",
+    discovery_trades: 144,
+    discovery_win_rate: 75.0,
+    validation_trades: 48,
+    validation_win_rate: 75.0,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.15,
+  },
+  {
+    id: "rule_25_s12_overlap_16_20",
+    name: "Setup 12 (CVD Absorption) Overlap Close 16–20 UTC",
+    setup_id: "setup_12_cvd_absorption",
+    regimes: "ALL",
+    sessions: ["europe_us_overlap"],
+    days: "ALL",
+    hours_utc: ["16-20"],
+    discovery_trades: 72,
+    discovery_win_rate: 50.0,
+    validation_trades: 48,
+    validation_win_rate: 75.0,
+    verdict: "Robust",
+    is_enabled: true,
+    risk_multiplier: 1.15,
+  },
+];
+
+export const DEFAULT_UNIFIED_CONFLUENCE_CONFIG: UnifiedConfluenceConfig = {
+  enabled: true, // Master toggle: use Unified Confluence Matrix
+  strict_mode: true, // Strictly require matching an active confluence rule
+  fallback_to_legacy: false, // In strict mode, block if no rule matches
+  min_validation_win_rate: 70.0, // Minimum backtest win rate threshold (70%+)
+  rules: DEFAULT_UNIFIED_CONFLUENCE_RULES,
 };
 
 interface DatabaseSchema {
@@ -432,6 +840,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     dynamic_trend_min_adx: 20,
     dynamic_trend_max_chop_index: 58,
     dynamic_breakout_min_atr: 12,
+    unified_confluence: DEFAULT_UNIFIED_CONFLUENCE_CONFIG,
   },
   gate_scoring: {
     enabled: true,
@@ -1561,6 +1970,13 @@ class DatabaseManager {
       if (ms.dynamic_trend_min_adx === undefined) { ms.dynamic_trend_min_adx = def.dynamic_trend_min_adx || 20; changed = true; }
       if (ms.dynamic_trend_max_chop_index === undefined) { ms.dynamic_trend_max_chop_index = def.dynamic_trend_max_chop_index || 58; changed = true; }
       if (ms.dynamic_breakout_min_atr === undefined) { ms.dynamic_breakout_min_atr = def.dynamic_breakout_min_atr || 12; changed = true; }
+      if (!ms.unified_confluence) {
+        ms.unified_confluence = {
+          ...DEFAULT_UNIFIED_CONFLUENCE_CONFIG,
+          rules: DEFAULT_UNIFIED_CONFLUENCE_RULES.map((r) => ({ ...r })),
+        };
+        changed = true;
+      }
     }
 
     if (!this.cache?.config?.gate_scoring) {
@@ -2249,6 +2665,87 @@ class DatabaseManager {
 
   public getApiLogs() {
     return this.apiLogs;
+  }
+
+  public getUnifiedConfluenceConfig(): UnifiedConfluenceConfig {
+    const config = this.getConfig();
+    if (!config.market_structure?.unified_confluence) {
+      if (!config.market_structure) {
+        config.market_structure = {} as any;
+      }
+      config.market_structure.unified_confluence = {
+        ...DEFAULT_UNIFIED_CONFLUENCE_CONFIG,
+        rules: DEFAULT_UNIFIED_CONFLUENCE_RULES.map((r) => ({ ...r })),
+      };
+      this.save();
+    }
+    return config.market_structure.unified_confluence;
+  }
+
+  public updateUnifiedConfluenceConfig(updates: Partial<UnifiedConfluenceConfig>): UnifiedConfluenceConfig {
+    const current = this.getUnifiedConfluenceConfig();
+    const updated: UnifiedConfluenceConfig = {
+      ...current,
+      ...updates,
+      rules: updates.rules ? [...updates.rules] : current.rules,
+    };
+    const currentMs = this.getConfig().market_structure || ({} as any);
+    this.updateConfig(
+      "market_structure",
+      {
+        ...currentMs,
+        unified_confluence: updated,
+      },
+      "Unified Confluence Manager"
+    );
+    return updated;
+  }
+
+  public resetUnifiedConfluenceToPreset(): UnifiedConfluenceConfig {
+    const resetConfig: UnifiedConfluenceConfig = {
+      ...DEFAULT_UNIFIED_CONFLUENCE_CONFIG,
+      rules: DEFAULT_UNIFIED_CONFLUENCE_RULES.map((r) => ({ ...r })),
+    };
+    const currentMs = this.getConfig().market_structure || ({} as any);
+    this.updateConfig(
+      "market_structure",
+      {
+        ...currentMs,
+        unified_confluence: resetConfig,
+      },
+      "Unified Confluence Empirical Preset Reset"
+    );
+    return resetConfig;
+  }
+
+  public toggleConfluenceRule(ruleId: string, isEnabled?: boolean): UnifiedConfluenceConfig {
+    const current = this.getUnifiedConfluenceConfig();
+    const rules = current.rules.map((r) => {
+      if (r.id === ruleId) {
+        return { ...r, is_enabled: isEnabled !== undefined ? isEnabled : !r.is_enabled };
+      }
+      return r;
+    });
+    return this.updateUnifiedConfluenceConfig({ rules });
+  }
+
+  public addConfluenceRule(rule: ConfluenceRule): UnifiedConfluenceConfig {
+    const current = this.getUnifiedConfluenceConfig();
+    const existingIdx = current.rules.findIndex((r) => r.id === rule.id);
+    let rules: ConfluenceRule[];
+    if (existingIdx >= 0) {
+      rules = [...current.rules];
+      rules[existingIdx] = rule;
+    } else {
+      rules = [rule, ...current.rules];
+    }
+    return this.updateUnifiedConfluenceConfig({ rules });
+  }
+
+  public deleteConfluenceRule(ruleId: string): UnifiedConfluenceConfig {
+    const current = this.getUnifiedConfluenceConfig();
+    const rules = current.rules.filter((r) => r.id !== ruleId);
+    return this.updateUnifiedConfluenceConfig({ rules });
   }
 }
 

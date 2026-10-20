@@ -25,29 +25,46 @@ import {
   Sparkles,
   ChevronRight,
   X,
+  Grid,
+  Search,
+  RefreshCw,
 } from "lucide-react";
 import { apiFetch } from "../utils/api.ts";
-import { BacktestResult, BacktestSetupOption, BacktestTrade, RegimePerformance, SessionPerformance, BacktestRankResult } from "../backtester/types.ts";
+import {
+  BacktestResult,
+  BacktestSetupOption,
+  BacktestTrade,
+  RegimePerformance,
+  SessionPerformance,
+  WeekdayPerformance,
+  BacktestRankResult,
+  DEFAULT_AVAILABLE_SETUPS,
+} from "../backtester/types.ts";
 
 export default function BacktestLab() {
-  const [setups, setSetups] = useState<BacktestSetupOption[]>([]);
-  const [selectedSetup, setSelectedSetup] = useState<string>("setup_15_trendline_bounce");
+  const [setups, setSetups] = useState<BacktestSetupOption[]>(DEFAULT_AVAILABLE_SETUPS);
+  const [selectedSetup, setSelectedSetup] = useState<string>("all");
   const [days, setDays] = useState<number>(3);
   const [isolationMode, setIsolationMode] = useState<boolean>(true);
   const [excludeWeekends, setExcludeWeekends] = useState<boolean>(true);
   const [sessionFilter, setSessionFilter] = useState<string>("all");
   const [respectSessionMatrix, setRespectSessionMatrix] = useState<boolean>(true);
+  const [respectUnifiedConfluence, setRespectUnifiedConfluence] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(false);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filterDirection, setFilterDirection] = useState<"ALL" | "LONG" | "SHORT">("ALL");
   const [filterOutcome, setFilterOutcome] = useState<"ALL" | "WIN" | "LOSS">("ALL");
+  const [filterWeekday, setFilterWeekday] = useState<string>("ALL");
   const [bufferStatus, setBufferStatus] = useState<any>(null);
   const [isSyncingBuffer, setIsSyncingBuffer] = useState<boolean>(false);
   const [rankResult, setRankResult] = useState<BacktestRankResult | null>(null);
   const [rankingLoading, setRankingLoading] = useState<boolean>(false);
   const [showRankModal, setShowRankModal] = useState<boolean>(false);
+  const [showSetupModal, setShowSetupModal] = useState<boolean>(false);
+  const [setupCategoryFilter, setSetupCategoryFilter] = useState<string>("ALL");
+  const [setupSearchQuery, setSetupSearchQuery] = useState<string>("");
 
   useEffect(() => {
     loadSetups();
@@ -120,12 +137,12 @@ export default function BacktestLab() {
       const res = await apiFetch("/api/backtest/setups");
       if (res.ok) {
         const data = await res.json();
-        if (data && data.setups) {
+        if (data && Array.isArray(data.setups) && data.setups.length > 0) {
           setSetups(data.setups);
         }
       }
     } catch (e) {
-      console.warn("Could not load backtest setups:", e);
+      console.warn("Could not load backtest setups from API, retaining default catalog:", e);
     }
   };
 
@@ -148,6 +165,7 @@ export default function BacktestLab() {
           excludeWeekends,
           sessionFilter,
           respectSessionMatrix,
+          respectUnifiedConfluenceMatrix: respectUnifiedConfluence,
         }),
       });
 
@@ -274,6 +292,16 @@ export default function BacktestLab() {
         if (filterDirection === "SHORT" && t.direction !== "SHORT") return false;
         if (filterOutcome === "WIN" && t.netPnlUsd <= 0) return false;
         if (filterOutcome === "LOSS" && t.netPnlUsd > 0) return false;
+        if (filterWeekday !== "ALL") {
+          const tDay = (t.dayId || "").toLowerCase();
+          if (tDay !== filterWeekday.toLowerCase()) {
+            const d = new Date(t.entryTimestampMs || Date.parse(t.timestamp));
+            const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+            const istDate = new Date(utcMs + 5.5 * 3600000);
+            const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+            if (dayNames[istDate.getDay()] !== filterWeekday.toLowerCase()) return false;
+          }
+        }
         return true;
       })
     : [];
@@ -433,44 +461,138 @@ export default function BacktestLab() {
         {/* Configuration Bar */}
         <div className="mt-6 pt-5 border-t border-slate-800/80 grid grid-cols-1 md:grid-cols-4 gap-4">
           {/* Target Setup */}
-          <div className="space-y-1.5 md:col-span-2">
-            <label className="text-xs font-semibold text-slate-400 flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-indigo-400" /> Target Tactical Setup ({setups.length} Available)
-              </span>
-              <span className="text-[10px] text-slate-500 font-mono">
-                {setups.find((s) => s.id === selectedSetup)?.category.toUpperCase()}
-              </span>
-            </label>
+          <div className="space-y-2 md:col-span-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Target Tactical Setup</span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  {setups.length} Available
+                </span>
+              </label>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSetupModal(true)}
+                  className="inline-flex items-center gap-1 text-[11px] font-mono text-indigo-400 hover:text-indigo-300 bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-500/40 rounded px-2 py-0.5 transition-colors cursor-pointer"
+                  title="Browse full catalog of tactical setups"
+                >
+                  <Grid className="w-3 h-3" />
+                  <span>Browse Catalog</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={loadSetups}
+                  className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Refresh setups from engine"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Selection Dropdown with optgroups */}
             <select
               value={selectedSetup}
               onChange={(e) => setSelectedSetup(e.target.value)}
               disabled={loading}
-              className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors font-medium"
+              className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors font-medium cursor-pointer"
             >
-              {setups.map((s) => (
-                <option key={s.id} value={s.id} className="bg-slate-950 text-white py-1">
-                  {s.name}
-                </option>
-              ))}
+              <optgroup label="Collective / Global Multi-Regime" className="bg-slate-900 text-slate-400 font-mono text-xs">
+                {setups.filter((s) => s.id === "all").map((s) => (
+                  <option key={s.id} value={s.id} className="bg-slate-950 text-indigo-300 font-bold py-1">
+                    🌟 {s.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Trend Continuation Setups" className="bg-slate-900 text-slate-400 font-mono text-xs">
+                {setups.filter((s) => s.category === "trend" && s.id !== "all").map((s) => (
+                  <option key={s.id} value={s.id} className="bg-slate-950 text-white py-1">
+                    📈 {s.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="SMC & Liquidity Sweep Reversals" className="bg-slate-900 text-slate-400 font-mono text-xs">
+                {setups.filter((s) => s.category === "reversal").map((s) => (
+                  <option key={s.id} value={s.id} className="bg-slate-950 text-white py-1">
+                    🎯 {s.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Order Flow & Microstructure" className="bg-slate-900 text-slate-400 font-mono text-xs">
+                {setups.filter((s) => s.category === "orderflow").map((s) => (
+                  <option key={s.id} value={s.id} className="bg-slate-950 text-white py-1">
+                    ⚡ {s.name}
+                  </option>
+                ))}
+              </optgroup>
             </select>
-            <p className="text-[11px] text-slate-400 leading-relaxed mt-1">
-              {setups.find((s) => s.id === selectedSetup)?.description || "Select a tactical setup to backtest in isolation."}
-            </p>
+
+            {/* Active Setup Description Pill */}
+            {(() => {
+              const current = setups.find((s) => s.id === selectedSetup) || setups[0];
+              if (!current) return null;
+              return (
+                <div className="p-2 rounded-lg bg-slate-950/70 border border-slate-800 text-[11px] text-slate-300 leading-relaxed flex items-start gap-2">
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase shrink-0 bg-slate-800 text-slate-300 border border-slate-700 mt-0.5">
+                    {current.category}
+                  </span>
+                  <div className="flex-1">
+                    <strong className="text-white font-medium">{current.name}: </strong>
+                    <span className="text-slate-400">{current.description}</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Quick Horizontal Chips for Fast Switching */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5 no-scrollbar">
+              <span className="text-[10px] font-mono text-slate-500 uppercase shrink-0">Quick:</span>
+              {[
+                { id: "all", label: "All Combined" },
+                { id: "setup_1_pullback_retest", label: "Setup 1" },
+                { id: "setup_2_dynamic_ema_pushback", label: "Setup 2" },
+                { id: "setup_3_liquidity_sweep", label: "Setup 3" },
+                { id: "setup_4_fvg_retest", label: "Setup 4" },
+                { id: "setup_12_cvd_absorption", label: "Setup 12" },
+                { id: "setup_15_trendline_bounce", label: "Setup 15" },
+              ].map((chip) => (
+                <button
+                  key={chip.id}
+                  type="button"
+                  onClick={() => setSelectedSetup(chip.id)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono whitespace-nowrap transition-colors cursor-pointer border ${
+                    selectedSetup === chip.id
+                      ? "bg-indigo-600/30 border-indigo-400 text-indigo-200 font-bold"
+                      : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                  }`}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Timeframe Period */}
           <div className="space-y-1.5 md:col-span-2">
-            <label className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-indigo-400" /> Historical Lookback Period
-            </label>
-            <div className="grid grid-cols-5 gap-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-indigo-400" /> Historical Lookback Period
+              </label>
+              <span className="text-[10px] font-mono text-indigo-400">
+                Up to 6 Months (180 Days)
+              </span>
+            </div>
+            <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
               {[
                 { label: "1D", val: 1 },
                 { label: "3D", val: 3 },
                 { label: "7D", val: 7 },
                 { label: "14D", val: 14 },
                 { label: "30D (1M)", val: 30 },
+                { label: "90D (3M)", val: 90 },
+                { label: "180D (6M)", val: 180 },
               ].map((p) => (
                 <button
                   key={p.val}
@@ -479,7 +601,7 @@ export default function BacktestLab() {
                   disabled={loading}
                   className={`py-2 text-xs font-medium rounded-lg border transition-all ${
                     days === p.val
-                      ? "bg-indigo-600/20 border-indigo-500 text-indigo-300 font-bold"
+                      ? "bg-indigo-600/20 border-indigo-500 text-indigo-300 font-bold shadow-xs"
                       : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
                   }`}
                 >
@@ -569,6 +691,35 @@ export default function BacktestLab() {
                 }`}
               >
                 {respectSessionMatrix && "✓"}
+              </span>
+            </div>
+          </div>
+
+          {/* Unified Confluence Matrix Gating Toggle */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+              <Zap className="w-3.5 h-3.5 text-indigo-400" /> Unified Confluence Matrix
+            </label>
+            <div
+              onClick={() => !loading && setRespectUnifiedConfluence(!respectUnifiedConfluence)}
+              className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer select-none transition-all ${
+                respectUnifiedConfluence
+                  ? "bg-indigo-950/20 border-indigo-600/40 text-indigo-300"
+                  : "bg-slate-950 border-slate-800 text-slate-400"
+              }`}
+            >
+              <div className="flex flex-col">
+                <span className="text-xs font-medium">Enforce Confluence Matrix</span>
+                <span className="text-[10px] text-slate-500">25 Empirical Validated Clusters</span>
+              </div>
+              <span
+                className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                  respectUnifiedConfluence
+                    ? "bg-indigo-500 border-indigo-400 text-white font-bold"
+                    : "border-slate-600"
+                }`}
+              >
+                {respectUnifiedConfluence && "✓"}
               </span>
             </div>
           </div>
@@ -679,6 +830,199 @@ export default function BacktestLab() {
               </span>
             </div>
           </div>
+
+          {/* Weekday-Specific Win Rate & Performance Hub */}
+          {(() => {
+            const WEEKDAYS_ORDER = [
+              { id: "monday", name: "Monday", short: "Mon" },
+              { id: "tuesday", name: "Tuesday", short: "Tue" },
+              { id: "wednesday", name: "Wednesday", short: "Wed" },
+              { id: "thursday", name: "Thursday", short: "Thu" },
+              { id: "friday", name: "Friday", short: "Fri" },
+              { id: "saturday", name: "Saturday", short: "Sat" },
+              { id: "sunday", name: "Sunday", short: "Sun" },
+            ];
+
+            const weekdayMap: Record<string, WeekdayPerformance> = result.weekdayBreakdown || (() => {
+              const map: Record<string, WeekdayPerformance> = {};
+              for (const day of WEEKDAYS_ORDER) {
+                const dTrades = (result.trades || []).filter((t) => {
+                  if (t.dayId) return t.dayId.toLowerCase() === day.id;
+                  const d = new Date(t.entryTimestampMs || Date.parse(t.timestamp));
+                  const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+                  const istDate = new Date(utcMs + 5.5 * 3600000);
+                  const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+                  return dayNames[istDate.getDay()] === day.id;
+                });
+                const dWins = dTrades.filter((t) => t.netPnlUsd > 0).length;
+                const dLosses = dTrades.filter((t) => t.netPnlUsd <= 0).length;
+                const dGrossProfit = dTrades.filter((t) => t.grossPnlUsd > 0).reduce((s, t) => s + t.grossPnlUsd, 0);
+                const dGrossLoss = Math.abs(dTrades.filter((t) => t.grossPnlUsd < 0).reduce((s, t) => s + t.grossPnlUsd, 0));
+                const dNetPnl = dTrades.reduce((s, t) => s + t.netPnlUsd, 0);
+                const dAvgHold = dTrades.length > 0 ? dTrades.reduce((s, t) => s + t.holdDurationSeconds, 0) / dTrades.length : 0;
+                map[day.id] = {
+                  dayId: day.id,
+                  dayName: day.name,
+                  tradesCount: dTrades.length,
+                  winCount: dWins,
+                  lossCount: dLosses,
+                  winRate: dTrades.length > 0 ? Number(((dWins / dTrades.length) * 100).toFixed(1)) : 0,
+                  netPnlUsd: Number(dNetPnl.toFixed(2)),
+                  profitFactor: dGrossLoss > 0 ? Number((dGrossProfit / dGrossLoss).toFixed(2)) : dGrossProfit > 0 ? 99 : 0,
+                  averageHoldDurationSeconds: Math.round(dAvgHold),
+                };
+              }
+              return map;
+            })();
+
+            const activeDays = WEEKDAYS_ORDER.map((d) => weekdayMap[d.id]).filter(Boolean);
+            const daysWithTrades = activeDays.filter((d) => d.tradesCount > 0);
+            const bestWinRateDay = daysWithTrades.length > 0
+              ? [...daysWithTrades].sort((a, b) => b.winRate - a.winRate || b.tradesCount - a.tradesCount)[0]
+              : null;
+            const mostProfitableDay = daysWithTrades.length > 0
+              ? [...daysWithTrades].sort((a, b) => b.netPnlUsd - a.netPnlUsd)[0]
+              : null;
+
+            return (
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-xl space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between pb-3 border-b border-slate-800 gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-indigo-400" />
+                      <h3 className="text-sm font-bold text-white uppercase tracking-wider font-sans">
+                        Weekday-Specific Win Rate &amp; Performance Matrix
+                      </h3>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                        Monday – Sunday
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Empirical statistical distribution across calendar days. Uncovers high-conviction momentum windows versus low-liquidity chop days. Click any day to filter trade logs.
+                    </p>
+                  </div>
+
+                  {/* Highlights */}
+                  <div className="flex items-center gap-2 flex-wrap text-xs">
+                    {bestWinRateDay && bestWinRateDay.tradesCount > 0 && (
+                      <span className="px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 font-mono flex items-center gap-1.5 shadow-2xs">
+                        <span>🏆 Best Win Rate:</span>
+                        <strong className="font-bold text-white">{bestWinRateDay.dayName} ({bestWinRateDay.winRate.toFixed(1)}%)</strong>
+                      </span>
+                    )}
+                    {mostProfitableDay && mostProfitableDay.tradesCount > 0 && mostProfitableDay.netPnlUsd > 0 && (
+                      <span className="px-2.5 py-1 rounded-lg bg-indigo-950/40 border border-indigo-500/30 text-indigo-300 font-mono flex items-center gap-1.5 shadow-2xs">
+                        <span>💰 Top PnL:</span>
+                        <strong className="font-bold text-white">{mostProfitableDay.dayName} (+${mostProfitableDay.netPnlUsd.toFixed(2)})</strong>
+                      </span>
+                    )}
+                    {filterWeekday !== "ALL" && (
+                      <button
+                        onClick={() => setFilterWeekday("ALL")}
+                        className="px-2 py-1 rounded text-xs font-mono text-slate-400 hover:text-white bg-slate-800 border border-slate-700 cursor-pointer"
+                      >
+                        Reset Filter ({filterWeekday})
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Weekday Cards Strip (7 days) */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                  {WEEKDAYS_ORDER.map((day) => {
+                    const stats = weekdayMap[day.id] || {
+                      dayId: day.id,
+                      dayName: day.name,
+                      tradesCount: 0,
+                      winCount: 0,
+                      lossCount: 0,
+                      winRate: 0,
+                      netPnlUsd: 0,
+                      profitFactor: 0,
+                    };
+                    const isSelected = filterWeekday.toLowerCase() === day.id;
+
+                    const wrColor =
+                      stats.tradesCount === 0
+                        ? "text-slate-500"
+                        : stats.winRate >= 70
+                        ? "text-emerald-400"
+                        : stats.winRate >= 50
+                        ? "text-sky-400"
+                        : "text-amber-400";
+
+                    const barColor =
+                      stats.tradesCount === 0
+                        ? "bg-slate-800"
+                        : stats.winRate >= 70
+                        ? "bg-emerald-500"
+                        : stats.winRate >= 50
+                        ? "bg-sky-500"
+                        : "bg-amber-500";
+
+                    return (
+                      <div
+                        key={day.id}
+                        onClick={() => setFilterWeekday(isSelected ? "ALL" : day.id)}
+                        className={`p-3 rounded-xl border transition-all cursor-pointer select-none flex flex-col justify-between ${
+                          isSelected
+                            ? "bg-indigo-950/40 border-indigo-500 shadow-md ring-1 ring-indigo-500"
+                            : "bg-slate-950/60 border-slate-800/80 hover:border-slate-700 hover:bg-slate-900/60"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-xs font-bold font-sans text-slate-300">
+                              {day.name}
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-500">
+                              {stats.tradesCount}T
+                            </span>
+                          </div>
+
+                          <div className="flex items-baseline justify-between mt-1">
+                            <span className={`text-xl font-mono font-extrabold tabular-nums ${wrColor}`}>
+                              {stats.tradesCount > 0 ? `${stats.winRate.toFixed(1)}%` : "—"}
+                            </span>
+                            {stats.tradesCount > 0 && (
+                              <span className="text-[10px] font-mono text-slate-400">
+                                {stats.winCount}W / {stats.lossCount}L
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Progress bar */}
+                          <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2 overflow-hidden">
+                            <div
+                              className={`h-1.5 rounded-full transition-all duration-300 ${barColor}`}
+                              style={{ width: `${Math.min(100, Math.max(0, stats.winRate))}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-3 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px] font-mono">
+                          <span className="text-slate-500">P&amp;L:</span>
+                          <span
+                            className={`font-bold ${
+                              stats.netPnlUsd > 0
+                                ? "text-emerald-400"
+                                : stats.netPnlUsd < 0
+                                ? "text-rose-400"
+                                : "text-slate-500"
+                            }`}
+                          >
+                            {stats.tradesCount > 0
+                              ? `${stats.netPnlUsd >= 0 ? "+" : ""}$${stats.netPnlUsd.toFixed(1)}`
+                              : "$0.0"}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Regime & Session Breakdown Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -861,6 +1205,26 @@ export default function BacktestLab() {
                   ))}
                 </div>
 
+                {/* Weekday Filter */}
+                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 text-xs">
+                  {(["ALL", "mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const).map((day) => {
+                    const label = day === "ALL" ? "All Days" : day.charAt(0).toUpperCase() + day.slice(1);
+                    return (
+                      <button
+                        key={day}
+                        onClick={() => setFilterWeekday(day === "ALL" ? "ALL" : day)}
+                        className={`px-2 py-1 rounded font-medium transition-colors text-[11px] whitespace-nowrap ${
+                          filterWeekday.toLowerCase() === day.toLowerCase()
+                            ? "bg-indigo-600 text-white font-bold"
+                            : "text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
                 {/* CSV Download */}
                 <button
                   onClick={exportCsv}
@@ -896,13 +1260,23 @@ export default function BacktestLab() {
                     {filteredTrades.map((t) => (
                       <tr key={t.id} className="hover:bg-slate-800/30 transition-colors">
                         <td className="py-2.5 text-slate-400 font-sans">
-                          {t.timestamp.replace("T", " ").replace("Z", "").slice(0, 16)}
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-slate-800 text-indigo-300 border border-slate-700/60 uppercase">
+                              {t.dayName ? t.dayName.slice(0, 3) : "Day"}
+                            </span>
+                            <span>{t.timestamp.replace("T", " ").replace("Z", "").slice(0, 16)}</span>
+                          </div>
                         </td>
                         <td className="py-2.5">
                           <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-800 text-slate-300 border border-slate-700/60 flex items-center gap-1 w-fit whitespace-nowrap">
                             <span>{t.sessionId === "asia_open" ? "🌅" : t.sessionId === "intraday_chop" ? "☕" : t.sessionId === "europe_us_overlap" ? "🗽" : t.sessionId === "late_us_session" ? "🌙" : t.sessionId === "dead_liquidity" ? "💤" : t.sessionId === "weekends" ? "🏖️" : "⏰"}</span>
                             <span>{t.sessionName || t.sessionId || "Normal"}</span>
                           </span>
+                          {t.confluenceRuleName && (
+                            <span className="block mt-1 text-[9px] font-mono text-indigo-300 bg-indigo-950/60 border border-indigo-700/40 px-1.5 py-0.5 rounded truncate max-w-[170px]" title={t.confluenceRuleName}>
+                              ⚡ {t.confluenceRuleName}
+                            </span>
+                          )}
                         </td>
                         <td className="py-2.5">
                           <span
@@ -1135,6 +1509,149 @@ export default function BacktestLab() {
                 className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold transition-colors cursor-pointer"
               >
                 Close Leaderboard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tactical Setups Catalog Modal */}
+      {showSetupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in duration-200">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  <Layers className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-white">Tactical Strategy Setups Catalog</h3>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                      {setups.length} Setups Available
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Select any tactical setup to backtest in strict isolation or run all core setups combined.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSetupModal(false)}
+                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="px-5 py-3 border-b border-slate-800 bg-slate-950/40 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5 overflow-x-auto">
+                {[
+                  { id: "ALL", label: `All (${setups.length})` },
+                  { id: "trend", label: `Trend (${setups.filter((s) => s.category === "trend").length})` },
+                  { id: "reversal", label: `Reversal & SMC (${setups.filter((s) => s.category === "reversal").length})` },
+                  { id: "orderflow", label: `Order Flow (${setups.filter((s) => s.category === "orderflow").length})` },
+                ].map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setSetupCategoryFilter(cat.id)}
+                    className={`px-3 py-1 rounded-lg text-xs font-mono transition-colors cursor-pointer border ${
+                      setupCategoryFilter === cat.id
+                        ? "bg-indigo-600 text-white font-bold border-indigo-500"
+                        : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Filter setups..."
+                  value={setupSearchQuery}
+                  onChange={(e) => setSetupSearchQuery(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            {/* Modal Body: Cards Grid */}
+            <div className="p-5 overflow-y-auto max-h-[60vh] grid grid-cols-1 md:grid-cols-2 gap-3">
+              {setups
+                .filter((s) => setupCategoryFilter === "ALL" || s.category === setupCategoryFilter)
+                .filter(
+                  (s) =>
+                    !setupSearchQuery ||
+                    s.name.toLowerCase().includes(setupSearchQuery.toLowerCase()) ||
+                    s.description.toLowerCase().includes(setupSearchQuery.toLowerCase()) ||
+                    s.id.toLowerCase().includes(setupSearchQuery.toLowerCase())
+                )
+                .map((s) => {
+                  const isCurrent = selectedSetup === s.id;
+                  return (
+                    <div
+                      key={s.id}
+                      onClick={() => {
+                        setSelectedSetup(s.id);
+                        setShowSetupModal(false);
+                      }}
+                      className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+                        isCurrent
+                          ? "bg-indigo-950/40 border-indigo-500 shadow-md ring-1 ring-indigo-500/50"
+                          : "bg-slate-950/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900/60"
+                      }`}
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-sans font-bold text-sm text-white flex items-center gap-1.5">
+                            {s.id === "all" ? "🌟" : "⚡"} {s.name}
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700">
+                            {s.category}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                          {s.description}
+                        </p>
+                      </div>
+
+                      <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                        <span className="text-[10px] font-mono text-slate-500">ID: {s.id}</span>
+                        <button
+                          type="button"
+                          className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-colors ${
+                            isCurrent
+                              ? "bg-emerald-500 text-black"
+                              : "bg-indigo-600 hover:bg-indigo-500 text-white"
+                          }`}
+                        >
+                          {isCurrent ? "✓ Active Selection" : "Select Setup"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between">
+              <span className="text-xs text-slate-400 font-mono">
+                Active Selection:{" "}
+                <strong className="text-white">
+                  {setups.find((s) => s.id === selectedSetup)?.name || selectedSetup}
+                </strong>
+              </span>
+              <button
+                onClick={() => setShowSetupModal(false)}
+                className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Close Catalog
               </button>
             </div>
           </div>

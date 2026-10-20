@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Candlestick, MarketRegime, StrategyConfig, TimingWindow } from "../types.js";
+import { Candlestick, MarketRegime, StrategyConfig, TimingWindow, ConfluenceRule, UnifiedConfluenceConfig } from "../types.js";
 import {
   BacktestRequest,
   BacktestResult,
@@ -11,6 +11,7 @@ import {
   BacktestSetupOption,
   RegimePerformance,
   SessionPerformance,
+  WeekdayPerformance,
   BacktestRankItem,
   BacktestRankResult,
 } from "./types.js";
@@ -209,8 +210,17 @@ export function isSetupGatedBySessionAndRegime(
   respectSessionMatrix: boolean = true,
   sessionFilter?: string,
   config?: StrategyConfig,
-  respectDaySessionMatrix: boolean = true
-): { allowed: boolean; reason?: string; sessionId: string; sessionName: string } {
+  respectDaySessionMatrix: boolean = true,
+  respectUnifiedConfluenceMatrix: boolean = true
+): {
+  allowed: boolean;
+  reason?: string;
+  sessionId: string;
+  sessionName: string;
+  confluenceRuleId?: string;
+  confluenceRuleName?: string;
+  riskMultiplier?: number;
+} {
   const session = sessionTimestampMs !== undefined
     ? getBacktestTradingSession(sessionTimestampMs, config?.general?.timing_windows)
     : { id: "normal_hours", name: "Normal Hours", is_weekend: false, allowed: true };
@@ -227,41 +237,38 @@ export function isSetupGatedBySessionAndRegime(
     }
   }
 
-  // 1a. Session x Setup Matrix Check
-  if (respectSessionMatrix) {
-    const ms = (config?.market_structure || {}) as any;
-    const sessionMatrix = ms.setup_session_matrix || DEFAULT_SETUP_SESSION_MATRIX;
-    const allSessionIds = ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity", "weekends"];
-    const allowedSessions = sessionMatrix[setupId] || DEFAULT_SETUP_SESSION_MATRIX[setupId] || allSessionIds;
+  const ms = (config?.market_structure || {}) as any;
+  const unifiedConfluence = ms.unified_confluence as UnifiedConfluenceConfig | undefined;
+  let matchedRule: ConfluenceRule | undefined;
 
-    if (!allowedSessions.includes(session.id)) {
-      return {
-        allowed: false,
-        reason: `Prohibited in session ${session.name} (${session.id}) by Session x Setup Matrix. Allowed: [${allowedSessions.join(", ")}].`,
-        sessionId: session.id,
-        sessionName: session.name,
-      };
-    }
-  }
+  // 1. Single Unified Confluence Matrix Check (Compound Multi-Variable Rules)
+  if (respectUnifiedConfluenceMatrix && unifiedConfluence && unifiedConfluence.enabled && sessionTimestampMs !== undefined) {
+    const d = new Date(sessionTimestampMs);
+    const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const currentUtcDay = dayNames[d.getUTCDay()];
+    const currentUtcHour = d.getUTCHours();
+    const windowStart = Math.floor(currentUtcHour / 4) * 4;
+    const windowEnd = windowStart + 4;
+    const currentUtcWindow = `${String(windowStart).padStart(2, "0")}-${String(windowEnd).padStart(2, "0")}`;
 
-  // 1b. Day of Week x Trading Session Matrix Check
-  if (respectDaySessionMatrix && sessionTimestampMs !== undefined) {
-    const ms = (config?.market_structure || {}) as any;
-    if (ms.day_session_matrix_enabled !== false) {
-      const d = new Date(sessionTimestampMs);
-      const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
-      const istOffset = 5.5 * 3600000;
-      const istDate = new Date(utcMs + istOffset);
-      const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-      const currentDayId = dayNames[istDate.getDay()];
-      const dayMatrix = ms.day_session_matrix || DEFAULT_DAY_SESSION_MATRIX;
-      const allowedInDay = dayMatrix[currentDayId] || DEFAULT_DAY_SESSION_MATRIX[currentDayId] || [];
+    const activeRules = (unifiedConfluence.rules || []).filter((r: ConfluenceRule) => r.is_enabled);
 
-      if (!allowedInDay.includes(session.id)) {
-        const dayDisplay = currentDayId.charAt(0).toUpperCase() + currentDayId.slice(1);
+    matchedRule = activeRules.find((rule: ConfluenceRule) => {
+      if (rule.setup_id !== "all" && rule.setup_id !== setupId) return false;
+      if (rule.regimes !== "ALL" && Array.isArray(rule.regimes) && !rule.regimes.includes(currentRegime)) return false;
+      if (rule.sessions !== "ALL" && Array.isArray(rule.sessions) && !rule.sessions.includes(session.id)) return false;
+      if (rule.days !== "ALL" && Array.isArray(rule.days) && !rule.days.map((x: string) => x.toLowerCase()).includes(currentUtcDay)) return false;
+      if (rule.hours_utc !== "ALL" && Array.isArray(rule.hours_utc) && !rule.hours_utc.includes(currentUtcWindow)) return false;
+      if (unifiedConfluence.min_validation_win_rate && rule.validation_win_rate < unifiedConfluence.min_validation_win_rate) return false;
+      return true;
+    });
+
+    if (!matchedRule) {
+      if (unifiedConfluence.strict_mode || !unifiedConfluence.fallback_to_legacy) {
+        const dayDisplay = currentUtcDay.charAt(0).toUpperCase() + currentUtcDay.slice(1);
         return {
           allowed: false,
-          reason: `Prohibited on ${dayDisplay} during ${session.name} (${session.id}) by Day of Week x Session Matrix. Allowed on ${dayDisplay}: [${allowedInDay.join(", ")}].`,
+          reason: `Filtered by Unified Confluence Matrix: No active empirical backtest rule matches (${setupId}, ${dayDisplay}, ${session.name}, ${currentRegime}, ${currentUtcWindow} UTC).`,
           sessionId: session.id,
           sessionName: session.name,
         };
@@ -269,15 +276,57 @@ export function isSetupGatedBySessionAndRegime(
     }
   }
 
-  // 2. Dynamic Market Regime Gating Matrix Check
-  const allowedRegimes = DYNAMIC_REGIME_GATING_MATRIX[setupId] || Object.values(MarketRegime);
-  if (!allowedRegimes.includes(currentRegime)) {
-    return {
-      allowed: false,
-      reason: `Prohibited in current ${currentRegime} regime by Dynamic Market Regime Gating Matrix. Allowed: [${allowedRegimes.join(", ")}].`,
-      sessionId: session.id,
-      sessionName: session.name,
-    };
+  if (!matchedRule) {
+    // 1a. Session x Setup Matrix Check
+    if (respectSessionMatrix) {
+      const sessionMatrix = ms.setup_session_matrix || DEFAULT_SETUP_SESSION_MATRIX;
+      const allSessionIds = ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity", "weekends"];
+      const allowedSessions = sessionMatrix[setupId] || DEFAULT_SETUP_SESSION_MATRIX[setupId] || allSessionIds;
+
+      if (!allowedSessions.includes(session.id)) {
+        return {
+          allowed: false,
+          reason: `Prohibited in session ${session.name} (${session.id}) by Session x Setup Matrix. Allowed: [${allowedSessions.join(", ")}].`,
+          sessionId: session.id,
+          sessionName: session.name,
+        };
+      }
+    }
+
+    // 1b. Day of Week x Trading Session Matrix Check
+    if (respectDaySessionMatrix && sessionTimestampMs !== undefined) {
+      if (ms.day_session_matrix_enabled !== false) {
+        const d = new Date(sessionTimestampMs);
+        const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+        const istOffset = 5.5 * 3600000;
+        const istDate = new Date(utcMs + istOffset);
+        const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+        const currentDayId = dayNames[istDate.getDay()];
+        const dayMatrix = ms.day_session_matrix || DEFAULT_DAY_SESSION_MATRIX;
+        const allowedInDay = dayMatrix[currentDayId] || DEFAULT_DAY_SESSION_MATRIX[currentDayId] || [];
+
+        if (!allowedInDay.includes(session.id)) {
+          const dayDisplay = currentDayId.charAt(0).toUpperCase() + currentDayId.slice(1);
+          return {
+            allowed: false,
+            reason: `Prohibited on ${dayDisplay} during ${session.name} (${session.id}) by Day of Week x Session Matrix. Allowed on ${dayDisplay}: [${allowedInDay.join(", ")}].`,
+            sessionId: session.id,
+            sessionName: session.name,
+          };
+        }
+      }
+    }
+
+    // 2. Dynamic Market Regime Gating Matrix Check
+    const allowedRegimes = DYNAMIC_REGIME_GATING_MATRIX[setupId] || Object.values(MarketRegime);
+    if (!allowedRegimes.includes(currentRegime)) {
+      return {
+        allowed: false,
+        reason: `Prohibited in current ${currentRegime} regime by Dynamic Market Regime Gating Matrix. Allowed: [${allowedRegimes.join(", ")}].`,
+        sessionId: session.id,
+        sessionName: session.name,
+      };
+    }
   }
 
   // 3. Directional Counter-trend Safeguard for Mean Reversion setups
@@ -309,7 +358,14 @@ export function isSetupGatedBySessionAndRegime(
     }
   }
 
-  return { allowed: true, sessionId: session.id, sessionName: session.name };
+  return {
+    allowed: true,
+    sessionId: session.id,
+    sessionName: session.name,
+    confluenceRuleId: matchedRule?.id,
+    confluenceRuleName: matchedRule?.name,
+    riskMultiplier: matchedRule?.risk_multiplier,
+  };
 }
 
 export function isSetupGatedByRegimeMatrix(
@@ -325,7 +381,8 @@ export async function runIsolatedBacktest(
   request: BacktestRequest
 ): Promise<BacktestResult> {
   const symbol = request.symbol || "BTCUSDT";
-  const days = Math.min(30, Math.max(1, request.days || 3));
+  // Support historical lookback periods up to 180 days (6 months)
+  const days = Math.min(180, Math.max(1, request.days || 3));
   const initialBalance = request.initialBalance || 10000;
   const positionSizeBtc = request.positionSizeBtc || 0.01;
   const leverage = request.leverage || 20;
@@ -337,19 +394,23 @@ export async function runIsolatedBacktest(
   const startTimeMs = request.startTime || endTimeMs - days * 24 * 60 * 60 * 1000;
   const excludeWeekends = request.excludeWeekends !== false;
 
-  // 1. Source authentic 1m data (prefer active rolling buffer to eliminate network latency)
+  // 1. Source authentic 1m data (prefer active rolling buffer for <= 30 weekdays to eliminate network latency)
   let allCandles: (Candlestick & { takerBuyVolume: number })[] = [];
   const targetCandleCount = days * 1440;
+  const minRequiredCandles = excludeWeekends
+    ? Math.floor(days * 1440 * (5 / 7) * 0.85)
+    : Math.floor(days * 1440 * 0.85);
+
   const bufferedCandles = rollingBufferManager.getCandles({
     days,
     excludeWeekends,
     maxCandles: targetCandleCount,
   });
 
-  if (bufferedCandles.length >= Math.min(targetCandleCount, 1440)) {
+  if (bufferedCandles.length >= minRequiredCandles && bufferedCandles.length > 0) {
     allCandles = bufferedCandles;
   } else {
-    // Fall back to direct fetch if buffer is warming up
+    // Fall back to direct fetch with local disk cache for deep historical lookbacks (up to 180 days / 6 months)
     const fetched = await fetchBinanceHistoricalKlines(symbol, startTimeMs, endTimeMs);
     allCandles = excludeWeekends
       ? (fetched.filter((c) => !isWeekend(c.time * 1000)) as (Candlestick & { takerBuyVolume: number })[])
@@ -527,6 +588,8 @@ export async function runIsolatedBacktest(
       sessionName?: string;
       dayId?: string;
       dayName?: string;
+      confluenceRuleId?: string;
+      confluenceRuleName?: string;
     } | null = null;
 
     const targetSetup = request.setupId;
@@ -550,7 +613,8 @@ export async function runIsolatedBacktest(
         request.respectSessionMatrix !== false,
         request.sessionFilter,
         dbConfig,
-        request.respectDaySessionMatrix !== false
+        request.respectDaySessionMatrix !== false,
+        request.respectUnifiedConfluenceMatrix !== false
       );
       if (gate.allowed) {
         const d = new Date(candleTimeMs);
@@ -572,6 +636,8 @@ export async function runIsolatedBacktest(
           sessionName: gate.sessionName,
           dayId: dayNames[dayIdx],
           dayName: dayDisplay[dayIdx],
+          confluenceRuleId: gate.confluenceRuleId,
+          confluenceRuleName: gate.confluenceRuleName,
         };
       } else {
         gatedSignalsCount++;
@@ -1053,6 +1119,8 @@ export async function runIsolatedBacktest(
         sessionName: signal.sessionName,
         dayId: signal.dayId,
         dayName: signal.dayName,
+        confluenceRuleId: signal.confluenceRuleId,
+        confluenceRuleName: signal.confluenceRuleName,
         entryPrice,
         exitPrice,
         stopLoss: targetSl,
@@ -1181,6 +1249,49 @@ export async function runIsolatedBacktest(
     };
   }
 
+  // Breakdown by Day of the Week (Monday - Sunday)
+  const WEEKDAYS_LIST = [
+    { id: "monday", name: "Monday" },
+    { id: "tuesday", name: "Tuesday" },
+    { id: "wednesday", name: "Wednesday" },
+    { id: "thursday", name: "Thursday" },
+    { id: "friday", name: "Friday" },
+    { id: "saturday", name: "Saturday" },
+    { id: "sunday", name: "Sunday" },
+  ];
+
+  const weekdayBreakdown: Record<string, WeekdayPerformance> = {};
+  for (const day of WEEKDAYS_LIST) {
+    const dTrades = trades.filter((t) => {
+      if (t.dayId) return t.dayId.toLowerCase() === day.id;
+      const d = new Date(t.entryTimestampMs || Date.parse(t.timestamp));
+      const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+      const istOffset = 5.5 * 3600000;
+      const istDate = new Date(utcMs + istOffset);
+      const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+      return dayNames[istDate.getDay()] === day.id;
+    });
+
+    const dWins = dTrades.filter((t) => t.netPnlUsd > 0).length;
+    const dLosses = dTrades.filter((t) => t.netPnlUsd <= 0).length;
+    const dGrossProfit = dTrades.filter((t) => t.grossPnlUsd > 0).reduce((s, t) => s + t.grossPnlUsd, 0);
+    const dGrossLoss = Math.abs(dTrades.filter((t) => t.grossPnlUsd < 0).reduce((s, t) => s + t.grossPnlUsd, 0));
+    const dNetPnl = dTrades.reduce((s, t) => s + t.netPnlUsd, 0);
+    const dAvgHold = dTrades.length > 0 ? dTrades.reduce((s, t) => s + t.holdDurationSeconds, 0) / dTrades.length : 0;
+
+    weekdayBreakdown[day.id] = {
+      dayId: day.id,
+      dayName: day.name,
+      tradesCount: dTrades.length,
+      winCount: dWins,
+      lossCount: dLosses,
+      winRate: dTrades.length > 0 ? Number(((dWins / dTrades.length) * 100).toFixed(1)) : 0,
+      netPnlUsd: Number(dNetPnl.toFixed(2)),
+      profitFactor: dGrossLoss > 0 ? Number((dGrossProfit / dGrossLoss).toFixed(2)) : dGrossProfit > 0 ? 99 : 0,
+      averageHoldDurationSeconds: Math.round(dAvgHold),
+    };
+  }
+
   return {
     runId: `run_${Date.now()}`,
     setupId: selectedSetupOption.id,
@@ -1220,6 +1331,7 @@ export async function runIsolatedBacktest(
     gatedSignalsCount,
     regimeBreakdown,
     sessionBreakdown,
+    weekdayBreakdown,
     trades,
     equityCurve,
   };

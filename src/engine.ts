@@ -27,6 +27,8 @@ import {
   SetupId,
   TradingSetupResult,
   DynamicSetupStatus,
+  ConfluenceRule,
+  UnifiedConfluenceConfig,
 } from "./types.js";
 import { FinBertSentimentModel } from "./finbert.js";
 import { CrossSourceSentimentAggregator } from "./sentimentEngine.js";
@@ -6630,6 +6632,8 @@ class TradingEngine {
     allowed_regimes: MarketRegime[];
     allowed_sessions: string[];
     current_session: string;
+    matched_confluence_rule?: ConfluenceRule;
+    risk_multiplier?: number;
   } {
     const config = dbManager.getConfig();
     const ms = (config.market_structure || {}) as any;
@@ -6709,70 +6713,67 @@ class TradingEngine {
       };
     }
 
-    // 2a. Market Regime Matrix Gating Check
-    const isMatrixEnabled = ms.dynamic_regime_setup_matrix_enabled !== false;
-    const regime_allowed = !isMatrixEnabled || allowed_regimes.includes(this.currentRegime);
+    // 2. GATING CHECK: Single Unified Confluence Matrix vs. Legacy 3-Matrix
+    const unifiedConfluence = ms.unified_confluence as UnifiedConfluenceConfig | undefined;
+    let matchedConfluenceRule: ConfluenceRule | undefined;
+    let confluenceRiskMultiplier: number | undefined;
 
-    if (!regime_allowed) {
-      return {
-        eligible: false,
-        master_enabled: true,
-        regime_allowed: false,
-        session_allowed: true,
-        conditions_allowed: false,
-        reason: `Dynamically gated: Prohibited in current ${this.currentRegime} regime.`,
-        allowed_regimes,
-        allowed_sessions,
-        current_session: currentSession.id,
-      };
-    }
+    if (unifiedConfluence && unifiedConfluence.enabled) {
+      const dNow = candleTimestampMs ? new Date(candleTimestampMs) : new Date();
+      const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+      const currentUtcDay = dayNames[dNow.getUTCDay()];
+      const currentUtcHour = dNow.getUTCHours();
+      const windowStart = Math.floor(currentUtcHour / 4) * 4;
+      const windowEnd = windowStart + 4;
+      const currentUtcWindow = `${String(windowStart).padStart(2, "0")}-${String(windowEnd).padStart(2, "0")}`;
 
-    // 2b. Trading Session Matrix Gating Check
-    const isSessionMatrixEnabled = ms.dynamic_session_setup_matrix_enabled !== false;
-    const session_allowed = !isSessionMatrixEnabled || allowed_sessions.includes(currentSession.id);
+      const activeRules = (unifiedConfluence.rules || []).filter((r: ConfluenceRule) => r.is_enabled);
 
-    if (!session_allowed) {
-      return {
-        eligible: false,
-        master_enabled: true,
-        regime_allowed: true,
-        session_allowed: false,
-        conditions_allowed: false,
-        reason: `Dynamically gated: Prohibited during ${currentSession.name} (${currentSession.id}) by Session x Setup Matrix. Allowed: [${allowed_sessions.join(", ")}].`,
-        allowed_regimes,
-        allowed_sessions,
-        current_session: currentSession.id,
-      };
-    }
+      matchedConfluenceRule = activeRules.find((rule: ConfluenceRule) => {
+        // Setup match
+        if (rule.setup_id !== "all" && rule.setup_id !== setupId) {
+          return false;
+        }
+        // Regime match
+        if (rule.regimes !== "ALL" && Array.isArray(rule.regimes) && !rule.regimes.includes(this.currentRegime)) {
+          return false;
+        }
+        // Session match
+        if (rule.sessions !== "ALL" && Array.isArray(rule.sessions) && !rule.sessions.includes(currentSession.id)) {
+          return false;
+        }
+        // Day match
+        if (rule.days !== "ALL" && Array.isArray(rule.days) && !rule.days.map((d: string) => d.toLowerCase()).includes(currentUtcDay)) {
+          return false;
+        }
+        // Hours match
+        if (rule.hours_utc !== "ALL" && Array.isArray(rule.hours_utc) && !rule.hours_utc.includes(currentUtcWindow)) {
+          return false;
+        }
+        // Validation win rate threshold
+        if (unifiedConfluence.min_validation_win_rate && rule.validation_win_rate < unifiedConfluence.min_validation_win_rate) {
+          return false;
+        }
+        return true;
+      });
 
-    // 2c. Day of Week x Trading Session Matrix Gating Check
-    const isDaySessionMatrixEnabled = ms.day_session_matrix_enabled !== false;
-    const defaultDayMatrix: Record<string, string[]> = DEFAULT_DAY_SESSION_MATRIX;
-    const daySessionMatrix = ms.day_session_matrix || defaultDayMatrix;
-
-    const dNow = candleTimestampMs ? new Date(candleTimestampMs) : new Date();
-    const utcMs = dNow.getTime() + dNow.getTimezoneOffset() * 60000;
-    const istOffset = 5.5 * 3600000;
-    const istDate = new Date(utcMs + istOffset);
-    const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-    const currentDayId = dayNames[istDate.getDay()];
-    const currentDayDisplayName = currentDayId.charAt(0).toUpperCase() + currentDayId.slice(1);
-
-    const allowedSessionsForDay = daySessionMatrix[currentDayId] || defaultDayMatrix[currentDayId] || allSessionIds;
-    const day_session_allowed = !isDaySessionMatrixEnabled || allowedSessionsForDay.includes(currentSession.id);
-
-    if (!day_session_allowed) {
-      return {
-        eligible: false,
-        master_enabled: true,
-        regime_allowed: true,
-        session_allowed: false,
-        conditions_allowed: false,
-        reason: `Dynamically gated: ${currentDayDisplayName} ${currentSession.name} (${currentSession.id}) is disabled by Day of Week x Session Matrix. Allowed on ${currentDayDisplayName}: [${allowedSessionsForDay.join(", ")}].`,
-        allowed_regimes,
-        allowed_sessions,
-        current_session: currentSession.id,
-      };
+      if (!matchedConfluenceRule) {
+        const dayDisplay = currentUtcDay.charAt(0).toUpperCase() + currentUtcDay.slice(1);
+        return {
+          eligible: false,
+          master_enabled: true,
+          regime_allowed: false,
+          session_allowed: false,
+          conditions_allowed: false,
+          reason: `Dynamically gated by Unified Confluence Matrix: No active empirical rule matches context (Setup: ${setupId}, Day: ${dayDisplay}, Session: ${currentSession.name}, Regime: ${this.currentRegime}, Window: ${currentUtcWindow} UTC).`,
+          allowed_regimes,
+          allowed_sessions,
+          current_session: currentSession.id,
+        };
+      } else {
+        // Validated match approved by Unified Confluence Matrix!
+        confluenceRiskMultiplier = matchedConfluenceRule.risk_multiplier || 1.0;
+      }
     }
 
     // 3. Directional Counter-trend Safeguard
@@ -6883,10 +6884,14 @@ class TradingEngine {
       regime_allowed: true,
       session_allowed: true,
       conditions_allowed: true,
-      reason: `Active & eligible for ${this.currentRegime} during ${currentSession.name}`,
+      reason: matchedConfluenceRule
+        ? `Passed Unified Confluence: [${matchedConfluenceRule.name}] (Val WR: ${matchedConfluenceRule.validation_win_rate.toFixed(1)}%)`
+        : `Active & eligible for ${this.currentRegime} during ${currentSession.name}`,
       allowed_regimes,
       allowed_sessions,
       current_session: currentSession.id,
+      matched_confluence_rule: matchedConfluenceRule,
+      risk_multiplier: confluenceRiskMultiplier,
     };
   }
 
@@ -6927,6 +6932,8 @@ class TradingEngine {
         allowed_regimes: eligibility.allowed_regimes,
         allowed_sessions: eligibility.allowed_sessions,
         current_session: eligibility.current_session,
+        matched_confluence_rule: eligibility.matched_confluence_rule,
+        risk_multiplier: eligibility.risk_multiplier,
       };
     });
   }
@@ -9375,17 +9382,14 @@ class TradingEngine {
     const estRoundTripFeeRate = config.risk_management.delta_india_gst_enabled ? 0.00118 : 0.0010;
     const minFeeCoverDistance = executedEntryPrice * estRoundTripFeeRate * 1.5;
 
-    // Positive R:R Guarantee:
-    // Ensure planned TP Distance is at least 1.25x - 1.35x of Stop Loss Distance (or 0.95x in quick-scalp low ADX mode)
+    // Dynamic ATR Scalping with ADX Compression & Positive R:R Guarantee:
+    // Ensures planned TP Distance dynamically adapts to ATR (or compressed to 1.05x in quick-scalp low ADX mode),
+    // guaranteed by at least 1.25x - 1.35x of SL distance and round-trip fee coverage.
     const minRRMultiplier = config.risk_management.min_rr_ratio_floor !== undefined
       ? config.risk_management.min_rr_ratio_floor
       : (isQuickScalpActive ? 0.95 : (this.currentRegime === MarketRegime.RANGE_BOUND ? 1.15 : 1.35));
 
-    const isAtrScalpMode = config.risk_management.take_profit_mode !== "RR_RATIO" || isQuickScalpActive;
-    const rawTpDist = isAtrScalpMode
-      ? Math.max(lastAtr * effectiveTpAtrMult, structuralSlDistance * minRRMultiplier)
-      : structuralSlDistance * Math.max(config.risk_management.take_profit_ratio, minRRMultiplier);
-
+    const rawTpDist = Math.max(lastAtr * effectiveTpAtrMult, structuralSlDistance * minRRMultiplier);
     const takeProfitDistance = Math.max(rawTpDist, minFeeCoverDistance);
 
     // --- CONTEXT-AWARE VOLUME PROFILE SL / TP TARGETING ---
@@ -9457,7 +9461,7 @@ class TradingEngine {
         2
       )} [${effectiveSlAtrMult}x ATR | Regime: ${this.currentRegime}]), TakeProfit=$${takeProfitPrice.toFixed(2)} (Dist: $${actualTPDistance.toFixed(
         2
-      )} [Mode: ${isAtrScalpMode ? `${effectiveTpAtrMult}x ATR Scalp` : `${config.risk_management.take_profit_ratio}x R:R`} | VP Anchor: ${vpCheck.nearestBarrierPrice ? `$${vpCheck.nearestBarrierPrice.toFixed(0)}` : "Standard"}]), Qty=${positionQtyBtc} BTC, Leverage=${leverage}x`
+      )} [Mode: ${effectiveTpAtrMult}x ATR Scalp | VP Anchor: ${vpCheck.nearestBarrierPrice ? `$${vpCheck.nearestBarrierPrice.toFixed(0)}` : "Standard"}]), Qty=${positionQtyBtc} BTC, Leverage=${leverage}x`
     );
 
     // Create the Trade record
@@ -9636,14 +9640,11 @@ class TradingEngine {
       ? config.risk_management.min_rr_ratio_floor
       : (this.currentRegime === MarketRegime.RANGE_BOUND ? 1.15 : 1.35);
 
-    // Take-Profit Calibration: Ensure TP is at least minRRMultiplier x SL distance and covers round-trip fees
+    // Take-Profit Calibration: Standardize strictly on Dynamic ATR Scalping with positive R:R floor
     const tpAtrMult = config.risk_management.take_profit_atr_multiplier !== undefined
       ? config.risk_management.take_profit_atr_multiplier
       : 1.50;
-    const isAtrScalpMode = config.risk_management.take_profit_mode !== "RR_RATIO";
-    const rawTpDist = isAtrScalpMode
-      ? Math.max(lastAtr * tpAtrMult, stopLossDistance * minRRMultiplier)
-      : stopLossDistance * Math.max(config.risk_management.take_profit_ratio, minRRMultiplier);
+    const rawTpDist = Math.max(lastAtr * tpAtrMult, stopLossDistance * minRRMultiplier);
     const takeProfitDistance = Math.max(rawTpDist, minFeeCoverDistance);
 
     let stopLossPrice = direction === TradeDirection.LONG ? entryPrice - stopLossDistance : entryPrice + stopLossDistance;

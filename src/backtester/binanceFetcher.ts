@@ -23,7 +23,10 @@ export async function fetchBinanceHistoricalKlines(
     }
   }
 
-  const cacheKey = `${symbol}_${startTimeMs}_${endTimeMs}.json`;
+  // Round timestamps to 10-minute boundaries to maximize cache hits across subsequent backtest runs
+  const roundedStart = Math.floor(startTimeMs / (10 * 60 * 1000)) * (10 * 60 * 1000);
+  const roundedEnd = Math.floor(endTimeMs / (10 * 60 * 1000)) * (10 * 60 * 1000);
+  const cacheKey = `${symbol}_${roundedStart}_${roundedEnd}.json`;
   const cacheFilePath = path.join(CACHE_DIR, cacheKey);
 
   if (fs.existsSync(cacheFilePath)) {
@@ -90,9 +93,9 @@ export async function fetchBinanceHistoricalKlines(
 
       currentStart = lastTimestamp + 60000;
 
-      // Small throttle to be courteous to Binance public API
+      // Controlled throttle to be courteous to Binance public API
       if (currentStart < endTimeMs) {
-        await new Promise((resolve) => setTimeout(resolve, 80));
+        await new Promise((resolve) => setTimeout(resolve, 25));
       }
     } catch (err) {
       console.error("[BinanceFetcher] Fetch error:", err);

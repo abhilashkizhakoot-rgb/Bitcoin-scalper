@@ -12,6 +12,81 @@ export interface BacktestSetupOption {
   category: "trend" | "range" | "reversal" | "orderflow";
 }
 
+export const DEFAULT_AVAILABLE_SETUPS: BacktestSetupOption[] = [
+  {
+    id: "setup_1_pullback_retest",
+    name: "Setup 1: Pullback & Retest",
+    description: "Breakout of key horizontal range boundary followed by retest of broken level as new support/resistance with rejection confirmation.",
+    category: "trend",
+  },
+  {
+    id: "setup_2_dynamic_ema_pushback",
+    name: "Setup 2: Dynamic EMA Pushback",
+    description: "Trend continuation bounce off dynamic EMA 20/50 support/resistance band with trend alignment and volume expansion.",
+    category: "trend",
+  },
+  {
+    id: "setup_3_liquidity_sweep",
+    name: "Setup 3: Liquidity Sweep Reversal",
+    description: "Aggressive multi-timeframe swing high/low sweep that rapidly reclaims internal structure with CVD delta absorption.",
+    category: "reversal",
+  },
+  {
+    id: "setup_4_fvg_retest",
+    name: "Setup 4: Fair Value Gap Retest",
+    description: "Impulse imbalance mitigation at consequent encroachment (50% CE) with institutional volume validation.",
+    category: "trend",
+  },
+  {
+    id: "setup_9_range_failed_auction",
+    name: "Setup 9: Range Failed Auction Reclaim",
+    description: "Swing Failure Pattern (SFP) outside range boundary that snaps back inside with order flow absorption.",
+    category: "reversal",
+  },
+  {
+    id: "setup_10_vwap_band_rejection",
+    name: "Setup 10: VWAP Band Rejection",
+    description: "Mean-reversion bounce off ±2 standard deviation VWAP bands with CVD exhaustion and delta divergence.",
+    category: "reversal",
+  },
+  {
+    id: "setup_11_eqh_eql_double_touch",
+    name: "Setup 11: EQH/EQL Double Touch",
+    description: "Equal Highs/Equal Lows liquidity grab sweep with rapid pin-bar reclaim.",
+    category: "reversal",
+  },
+  {
+    id: "setup_12_cvd_absorption",
+    name: "Setup 12: CVD Absorption & Delta Divergence",
+    description: "Heavy delta divergence where aggressive taker market orders fail to push price through passive limit walls.",
+    category: "orderflow",
+  },
+  {
+    id: "setup_13_oi_flush_cascade",
+    name: "Setup 13: OI Flush & Cascade Fade",
+    description: "Fades sudden liquidation-driven cascade extremes coinciding with rapid Open Interest contraction and exhaustion wicks.",
+    category: "orderflow",
+  },
+  {
+    id: "setup_14_fresh_momentum_impulse",
+    name: "Setup 14: Fresh Momentum Impulse",
+    description: "High-velocity breakout continuation with volume expansion and trend alignment.",
+    category: "trend",
+  },
+  {
+    id: "setup_15_trendline_bounce",
+    name: "Setup 15: Trendline Bounce & Retest",
+    description: "Multi-touch ascending/descending dynamic trendline bounce with golden 3rd touch and liquidity sweep reclaim.",
+    category: "trend",
+  },
+  {
+    id: "all",
+    name: "All Core Setups Combined",
+    description: "Evaluates all 11 setups collectively using global multi-regime priority rules.",
+    category: "trend",
+  },
+];
+
 export interface BacktestRequest {
   setupId: string; // Specific setup ID (e.g. 'setup_15_trendline_bounce') or 'all'
   symbol?: string; // Default: 'BTCUSDT'
@@ -27,6 +102,7 @@ export interface BacktestRequest {
   sessionFilter?: string; // Optional session filter (e.g. 'all', 'asia_open', 'europe_us_overlap')
   respectSessionMatrix?: boolean; // If true, enforces Session x Setup Matrix during backtest
   respectDaySessionMatrix?: boolean; // If true, enforces Days vs Sessions Matrix during backtest
+  respectUnifiedConfluenceMatrix?: boolean; // If true, enforces Single Unified Confluence Matrix
 }
 
 export interface BacktestTrade {
@@ -41,6 +117,8 @@ export interface BacktestTrade {
   sessionName?: string;
   dayId?: string;
   dayName?: string;
+  confluenceRuleId?: string;
+  confluenceRuleName?: string;
   entryPrice: number;
   exitPrice: number;
   stopLoss: number;
@@ -69,6 +147,18 @@ export interface SessionPerformance {
   winRate: number;
   netPnlUsd: number;
   profitFactor: number;
+}
+
+export interface WeekdayPerformance {
+  dayId: string;
+  dayName: string;
+  tradesCount: number;
+  winCount: number;
+  lossCount: number;
+  winRate: number;
+  netPnlUsd: number;
+  profitFactor: number;
+  averageHoldDurationSeconds?: number;
 }
 
 export interface RegimePerformance {
@@ -120,6 +210,7 @@ export interface BacktestResult {
   gatedSignalsCount?: number;
   regimeBreakdown: Record<string, RegimePerformance>;
   sessionBreakdown: Record<string, SessionPerformance>;
+  weekdayBreakdown?: Record<string, WeekdayPerformance>;
   trades: BacktestTrade[];
   equityCurve: { timestamp: string; equity: number }[];
 }

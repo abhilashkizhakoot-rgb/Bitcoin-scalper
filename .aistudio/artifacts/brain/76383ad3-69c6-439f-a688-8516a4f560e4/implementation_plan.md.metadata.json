@@ -1,6 +1,6 @@
 {
-  "summary": "Architectural and implementation plan for the Days of the Week vs Trading Sessions Gating Matrix. Features interactive 7x6 matrix configuration in the Strategy Control Panel, real-time IST day/session evaluation in the live execution engine, pre-loaded institutional defaults (restricting Friday Asian Open and Sunday Dead Liquidity), and simulation support in the Backtest Lab.",
-  "updatedAt": "2026-10-17T11:13:41.987995928Z",
+  "summary": "Comprehensive audit and streamlining of all strategy parameters, risk management safeguards, and matrix gating controls. Deprecates the obsolete 3-matrix fallback accordions, standardizes Take Profit calculation on Dynamic ATR Scalping with regime and ADX compression, and clarifies global safety timing versus tactical confluence timing to eliminate parameter conflicts.",
+  "updatedAt": "2026-10-19T08:18:43.604602260Z",
   "requestFeedback": true,
   "userFacing": true
 }

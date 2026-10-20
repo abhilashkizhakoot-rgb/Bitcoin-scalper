@@ -814,6 +814,74 @@ async function startServer() {
   });
 
   // ----------------------------------------------------
+  // REST API: Unified Confluence Matrix Gating Hub
+  // ----------------------------------------------------
+
+  app.get("/api/strategy/unified-confluence", (req, res) => {
+    try {
+      const config = dbManager.getUnifiedConfluenceConfig();
+      res.json({ success: true, config });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post("/api/strategy/unified-confluence", (req, res) => {
+    try {
+      const updates = req.body || {};
+      const updated = dbManager.updateUnifiedConfluenceConfig(updates);
+      res.json({ success: true, config: updated });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post("/api/strategy/unified-confluence/reset", (req, res) => {
+    try {
+      const resetConfig = dbManager.resetUnifiedConfluenceToPreset();
+      res.json({ success: true, message: "Reset to 25 empirical robust backtest clusters", config: resetConfig });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post("/api/strategy/unified-confluence/toggle-rule", (req, res) => {
+    try {
+      const { ruleId, isEnabled } = req.body || {};
+      if (!ruleId) {
+        return res.status(400).json({ success: false, message: "Missing ruleId" });
+      }
+      const updated = dbManager.toggleConfluenceRule(ruleId, isEnabled);
+      res.json({ success: true, config: updated });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post("/api/strategy/unified-confluence/add-rule", (req, res) => {
+    try {
+      const rule = req.body;
+      if (!rule || !rule.id) {
+        return res.status(400).json({ success: false, message: "Invalid rule definition" });
+      }
+      const updated = dbManager.addConfluenceRule(rule);
+      res.json({ success: true, config: updated });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.delete("/api/strategy/unified-confluence/rule/:id", (req, res) => {
+    try {
+      const ruleId = req.params.id;
+      const updated = dbManager.deleteConfluenceRule(ruleId);
+      res.json({ success: true, config: updated });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // ----------------------------------------------------
   // REST API: Isolated Backtest Lab
   // ----------------------------------------------------
 

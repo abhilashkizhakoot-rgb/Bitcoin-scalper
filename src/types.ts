@@ -511,6 +511,8 @@ export interface StrategyConfig {
     asian_session_min_rvol?: number; // Minimum Relative Volume required during Asian session (default: 1.35x)
     asian_session_min_atr?: number; // Minimum ATR floor during Asian session (default: 28.0)
     europe_us_overlap_aggressive_mode?: boolean; // Enable Aggressive Mode during Europe/US Overlap (boosted position size & tighter FVG / Order Flow confirmation)
+    // Unified Multi-Dimensional Confluence Matrix
+    unified_confluence?: UnifiedConfluenceConfig;
   };
   gate_scoring?: {
     enabled: boolean;
@@ -736,6 +738,8 @@ export interface DynamicSetupStatus {
   allowed_regimes: MarketRegime[];
   allowed_sessions?: string[];
   current_session?: string;
+  matched_confluence_rule?: ConfluenceRule;
+  risk_multiplier?: number;
 }
 
 export interface HistoricalOptimizationRecommendation {
@@ -760,4 +764,29 @@ export interface HistoricalOptimizationReport {
   net_profit_usdt: number;
   recommendations: HistoricalOptimizationRecommendation[];
   suggested_config: Partial<StrategyConfig>;
+}
+
+export interface ConfluenceRule {
+  id: string;
+  name: string;
+  setup_id: string; // Specific setup (e.g. 'setup_14_fresh_momentum_impulse') or 'all'
+  regimes: MarketRegime[] | "ALL";
+  sessions: string[] | "ALL";
+  days: string[] | "ALL"; // e.g. ['thursday', 'monday']
+  hours_utc: string[] | "ALL"; // e.g. ['12-16', '16-20', '04-08']
+  discovery_trades?: number;
+  discovery_win_rate?: number;
+  validation_trades?: number;
+  validation_win_rate?: number;
+  verdict?: "Robust" | "Moderate" | "Watchlist" | "Custom" | "Manual" | string;
+  is_enabled: boolean;
+  risk_multiplier?: number;
+}
+
+export interface UnifiedConfluenceConfig {
+  enabled: boolean; // Master toggle: true uses Unified Confluence rules for gating
+  strict_mode: boolean; // If true, only candidate setups matching an explicit active rule are allowed
+  fallback_to_legacy?: boolean; // Deprecated: Unified Confluence is the sole gating authority
+  min_validation_win_rate: number; // e.g. 70.0%
+  rules: ConfluenceRule[];
 }

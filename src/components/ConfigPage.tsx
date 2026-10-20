@@ -40,6 +40,11 @@ import {
   CheckSquare,
   Square,
   Wrench,
+  Plus,
+  Search,
+  ChevronDown,
+  ChevronUp,
+  SlidersHorizontal,
 } from "lucide-react";
 import {
   StrategyConfig,
@@ -48,7 +53,134 @@ import {
   MarketRegime,
   HistoricalOptimizationReport,
   HistoricalOptimizationRecommendation,
+  ConfluenceRule,
+  UnifiedConfluenceConfig,
 } from "../types.js";
+
+const CONFLUENCE_SETUPS = [
+  { id: "all", name: "All Core Setups (Universal)" },
+  { id: "setup_1_pullback_retest", name: "Setup 1: Pullback & Retest" },
+  { id: "setup_2_dynamic_ema_pushback", name: "Setup 2: Dynamic EMA Pushback" },
+  { id: "setup_3_liquidity_sweep", name: "Setup 3: Liquidity Sweep Reversal" },
+  { id: "setup_4_fvg_retest", name: "Setup 4: Fair Value Gap Retest" },
+  { id: "setup_9_range_failed_auction", name: "Setup 9: Range Failed Auction Reclaim" },
+  { id: "setup_10_vwap_band_rejection", name: "Setup 10: VWAP Band Rejection" },
+  { id: "setup_11_eqh_eql_double_touch", name: "Setup 11: EQH/EQL Double Touch" },
+  { id: "setup_12_cvd_absorption", name: "Setup 12: CVD Absorption & Delta Divergence" },
+  { id: "setup_13_oi_flush_cascade", name: "Setup 13: OI Flush & Cascade Fade" },
+  { id: "setup_14_fresh_momentum_impulse", name: "Setup 14: Fresh Momentum Impulse" },
+  { id: "setup_15_trendline_bounce", name: "Setup 15: Trendline Bounce & Retest" },
+];
+
+const CONFLUENCE_SESSIONS = [
+  { id: "ALL", name: "ALL Sessions" },
+  { id: "asia_open", name: "Asia Open (05:00 - 13:30 IST)" },
+  { id: "intraday_chop", name: "Intraday Chop (13:30 - 17:30 IST)" },
+  { id: "europe_us_overlap", name: "Europe / US Overlap (17:30 - 22:30 IST / 12-16 UTC)" },
+  { id: "late_us_session", name: "Late US Session (22:30 - 01:30 IST)" },
+  { id: "dead_liquidity", name: "Dead Liquidity (01:30 - 05:00 IST)" },
+  { id: "weekends", name: "Weekends" },
+];
+
+const CONFLUENCE_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+
+interface ConfluenceTimingOption {
+  id: string;
+  name: string;
+  session: string | "ALL";
+  hours_utc: string | "ALL";
+  description: string;
+}
+
+const CONFLUENCE_TIMING_OPTIONS: ConfluenceTimingOption[] = [
+  {
+    id: "ALL",
+    name: "ALL Sessions & Hours (24/7 Any Time)",
+    session: "ALL",
+    hours_utc: "ALL",
+    description: "Triggers any time of day",
+  },
+  {
+    id: "europe_us_overlap_12_16",
+    name: "Europe / US Overlap (12:00 – 16:00 UTC · 17:30 – 21:30 IST)",
+    session: "europe_us_overlap",
+    hours_utc: "12-16",
+    description: "Peak global crypto liquidity & breakout volatility",
+  },
+  {
+    id: "late_us_16_20",
+    name: "Late US Session (16:00 – 20:00 UTC · 21:30 – 01:30 IST)",
+    session: "late_us_session",
+    hours_utc: "16-20",
+    description: "US afternoon continuation & mean reversion",
+  },
+  {
+    id: "london_chop_08_12",
+    name: "London Open / Intraday Chop (08:00 – 12:00 UTC · 13:30 – 17:30 IST)",
+    session: "intraday_chop",
+    hours_utc: "08-12",
+    description: "London morning opening moves & range rotation",
+  },
+  {
+    id: "asia_open_04_08",
+    name: "Asia Open (04:00 – 08:00 UTC · 09:30 – 13:30 IST)",
+    session: "asia_open",
+    hours_utc: "04-08",
+    description: "Asian morning session trading",
+  },
+  {
+    id: "dead_liquidity_20_24",
+    name: "Dead Liquidity / Pacific (20:00 – 24:00 UTC · 01:30 – 05:30 IST)",
+    session: "dead_liquidity",
+    hours_utc: "20-24",
+    description: "Thin volume post-US close",
+  },
+  {
+    id: "asia_night_00_04",
+    name: "Early Asia Night (00:00 – 04:00 UTC · 05:30 – 09:30 IST)",
+    session: "asia_open",
+    hours_utc: "00-04",
+    description: "Pre-Asia open volume accumulation",
+  },
+];
+
+const formatConfluenceTiming = (rule: ConfluenceRule): string => {
+  const isAllSessions = rule.sessions === "ALL" || !rule.sessions || (Array.isArray(rule.sessions) && rule.sessions.length === 0);
+  const isAllHours = rule.hours_utc === "ALL" || !rule.hours_utc || (Array.isArray(rule.hours_utc) && rule.hours_utc.length === 0);
+
+  if (isAllSessions && isAllHours) {
+    return "All Hours (24h)";
+  }
+
+  const sessionNameMap: Record<string, string> = {
+    europe_us_overlap: "Europe/US Overlap",
+    late_us_session: "Late US",
+    intraday_chop: "London/Chop",
+    asia_open: "Asia Open",
+    dead_liquidity: "Dead Liquidity",
+    weekends: "Weekends",
+  };
+
+  const sessionStr = Array.isArray(rule.sessions)
+    ? rule.sessions.map((s) => sessionNameMap[s] || s).join(", ")
+    : rule.sessions !== "ALL"
+    ? sessionNameMap[rule.sessions] || rule.sessions
+    : "";
+
+  const hoursStr = Array.isArray(rule.hours_utc)
+    ? rule.hours_utc.map((h) => `${h} UTC`).join(", ")
+    : rule.hours_utc !== "ALL"
+    ? `${rule.hours_utc} UTC`
+    : "";
+
+  if (sessionStr && hoursStr) {
+    return `${sessionStr} (${hoursStr})`;
+  }
+  if (sessionStr) {
+    return `${sessionStr}`;
+  }
+  return `${hoursStr}`;
+};
 
 const AVAILABLE_GATES = [
   { id: "catboost", label: "CatBoost AI Prediction Threshold", supportsWeight: true },
@@ -315,6 +447,239 @@ export default function ConfigPage({
       fetchHistoricalOptimizationReport();
     }
   }, [activeTab]);
+
+  // Unified Confluence Matrix State & Handlers
+  const [unifiedConfluence, setUnifiedConfluence] = useState<UnifiedConfluenceConfig | null>(null);
+  const [isLoadingConfluence, setIsLoadingConfluence] = useState(false);
+  const [isSavingConfluence, setIsSavingConfluence] = useState(false);
+  const [confluenceSuccessMsg, setConfluenceSuccessMsg] = useState<string | null>(null);
+  const [confluenceErrorMsg, setConfluenceErrorMsg] = useState<string | null>(null);
+  const [confluenceFilterCategory, setConfluenceFilterCategory] = useState<"ALL" | "100_WR" | "80_WR" | "70_WR" | "CUSTOM">("ALL");
+  const [confluenceSearch, setConfluenceSearch] = useState("");
+  const [confluenceSetupFilter, setConfluenceSetupFilter] = useState("ALL");
+  const [confluenceDayFilter, setConfluenceDayFilter] = useState("ALL");
+  const [confluenceRegimeFilter, setConfluenceRegimeFilter] = useState("ALL");
+  const [showAddRuleModal, setShowAddRuleModal] = useState(false);
+  const [showResearchMetrics, setShowResearchMetrics] = useState(false);
+  const [showAdvancedRuleNotes, setShowAdvancedRuleNotes] = useState(false);
+
+  // New Rule Draft State (Focused cleanly on trading logic)
+  const [newRuleDraft, setNewRuleDraft] = useState<Partial<ConfluenceRule>>({
+    id: "",
+    name: "",
+    setup_id: "all",
+    regimes: "ALL",
+    sessions: "ALL",
+    days: "ALL",
+    hours_utc: "ALL",
+    is_enabled: true,
+    risk_multiplier: 1.0,
+    verdict: "Custom",
+  });
+
+  const selectedTimingOptionId = useMemo(() => {
+    const s = Array.isArray(newRuleDraft.sessions) ? newRuleDraft.sessions[0] : newRuleDraft.sessions || "ALL";
+    const h = Array.isArray(newRuleDraft.hours_utc) ? newRuleDraft.hours_utc[0] : newRuleDraft.hours_utc || "ALL";
+    if (s === "ALL" && h === "ALL") return "ALL";
+    const found = CONFLUENCE_TIMING_OPTIONS.find((opt) => opt.session === s && opt.hours_utc === h);
+    if (found) return found.id;
+    const foundSession = CONFLUENCE_TIMING_OPTIONS.find((opt) => opt.session === s && opt.id !== "ALL");
+    if (foundSession) return foundSession.id;
+    const foundHour = CONFLUENCE_TIMING_OPTIONS.find((opt) => opt.hours_utc === h && opt.id !== "ALL");
+    if (foundHour) return foundHour.id;
+    return "ALL";
+  }, [newRuleDraft.sessions, newRuleDraft.hours_utc]);
+
+  const fetchUnifiedConfluence = async () => {
+    setIsLoadingConfluence(true);
+    setConfluenceErrorMsg(null);
+    try {
+      const res = await apiFetch("/api/strategy/unified-confluence");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.config) {
+          setUnifiedConfluence(data.config);
+        }
+      }
+    } catch (e: any) {
+      console.error("Failed to load unified confluence config:", e);
+    } finally {
+      setIsLoadingConfluence(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "market_structure") {
+      fetchUnifiedConfluence();
+    }
+  }, [activeTab]);
+
+
+  const handleUpdateConfluenceConfig = async (updates: Partial<UnifiedConfluenceConfig>) => {
+    setIsSavingConfluence(true);
+    try {
+      const res = await apiFetch("/api/strategy/unified-confluence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUnifiedConfluence(data.config);
+        setMsConfig({
+          ...msConfig,
+          unified_confluence: data.config,
+        });
+        setConfluenceSuccessMsg("Confluence parameters updated successfully.");
+        setTimeout(() => setConfluenceSuccessMsg(null), 3000);
+      }
+    } catch (e: any) {
+      setConfluenceErrorMsg(e.message || "Failed to save confluence updates.");
+    } finally {
+      setIsSavingConfluence(false);
+    }
+  };
+
+  const handleToggleConfluenceRule = async (ruleId: string) => {
+    try {
+      const res = await apiFetch("/api/strategy/unified-confluence/toggle-rule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ruleId }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUnifiedConfluence(data.config);
+        setMsConfig({
+          ...msConfig,
+          unified_confluence: data.config,
+        });
+      }
+    } catch (e) {
+      console.error("Failed to toggle rule:", e);
+    }
+  };
+
+  const handleResetConfluenceToPreset = async () => {
+    if (!confirm("Load the 25 empirically validated robust backtest clusters as your active preset?")) return;
+    setIsSavingConfluence(true);
+    try {
+      const res = await apiFetch("/api/strategy/unified-confluence/reset", {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUnifiedConfluence(data.config);
+        setMsConfig({
+          ...msConfig,
+          unified_confluence: data.config,
+        });
+        setConfluenceSuccessMsg("Successfully loaded all 25 empirical backtest clusters!");
+        setTimeout(() => setConfluenceSuccessMsg(null), 4000);
+      }
+    } catch (e: any) {
+      setConfluenceErrorMsg(e.message || "Failed to reset preset.");
+    } finally {
+      setIsSavingConfluence(false);
+    }
+  };
+
+  const handleAddCustomConfluenceRule = async () => {
+    if (!newRuleDraft.name || !newRuleDraft.name.trim()) {
+      alert("Please provide a name for the confluence rule.");
+      return;
+    }
+    const id = newRuleDraft.id || `custom_rule_${Date.now()}`;
+    const rule: ConfluenceRule = {
+      id,
+      name: newRuleDraft.name.trim(),
+      setup_id: newRuleDraft.setup_id || "all",
+      regimes: newRuleDraft.regimes || "ALL",
+      sessions: newRuleDraft.sessions || "ALL",
+      days: newRuleDraft.days || "ALL",
+      hours_utc: newRuleDraft.hours_utc || "ALL",
+      discovery_trades: newRuleDraft.discovery_trades,
+      discovery_win_rate: newRuleDraft.discovery_win_rate,
+      validation_trades: newRuleDraft.validation_trades,
+      validation_win_rate: newRuleDraft.validation_win_rate,
+      verdict: newRuleDraft.verdict || "Custom",
+      is_enabled: true,
+      risk_multiplier: Number(newRuleDraft.risk_multiplier) || 1.0,
+    };
+    try {
+      const res = await apiFetch("/api/strategy/unified-confluence/add-rule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rule),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUnifiedConfluence(data.config);
+        setShowAddRuleModal(false);
+        setNewRuleDraft({
+          name: "",
+          setup_id: "all",
+          regimes: "ALL",
+          sessions: "ALL",
+          days: "ALL",
+          hours_utc: "ALL",
+          risk_multiplier: 1.0,
+          is_enabled: true,
+          verdict: "Custom",
+        });
+        setConfluenceSuccessMsg(`Added rule: ${rule.name}`);
+        setTimeout(() => setConfluenceSuccessMsg(null), 3000);
+      }
+    } catch (e: any) {
+      alert(e.message || "Failed to add rule.");
+    }
+  };
+
+  const handleDeleteConfluenceRule = async (ruleId: string) => {
+    if (!confirm("Are you sure you want to remove this confluence rule?")) return;
+    try {
+      const res = await apiFetch(`/api/strategy/unified-confluence/rule/${ruleId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUnifiedConfluence(data.config);
+        setConfluenceSuccessMsg("Rule deleted successfully.");
+        setTimeout(() => setConfluenceSuccessMsg(null), 3000);
+      }
+    } catch (e) {
+      console.error("Failed to delete rule:", e);
+    }
+  };
+
+  const handleExportConfluenceJson = () => {
+    if (!unifiedConfluence) return;
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(unifiedConfluence.rules, null, 2));
+    const dlAnchorElem = document.createElement("a");
+    dlAnchorElem.setAttribute("href", dataStr);
+    dlAnchorElem.setAttribute("download", `confluence_rules_${Date.now()}.json`);
+    dlAnchorElem.click();
+  };
+
+  const handleImportConfluenceJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const parsed = JSON.parse(evt.target?.result as string);
+        if (Array.isArray(parsed)) {
+          await handleUpdateConfluenceConfig({ rules: parsed });
+          alert(`Successfully imported ${parsed.length} confluence rules!`);
+        } else {
+          alert("Invalid file format. Expected a JSON array of confluence rules.");
+        }
+      } catch (err) {
+        alert("Failed to parse JSON file.");
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const sanitizeCategoryData = (category: string, data: any) => {
     const cleaned = { ...data };
@@ -1586,12 +1951,17 @@ export default function ConfigPage({
             {/* Section 4: Timing & Session Windows */}
             <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm">
               <div>
-                <h4 className="text-xs font-bold font-sans text-slate-700 uppercase flex items-center gap-1.5">
-                  <Clock className="w-4 h-4 text-indigo-500" />
-                  Scalper Session Timing Windows (IST)
-                </h4>
-                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                  Configure active Indian Standard Time (IST) sessions during which automated trades are permitted. Disable periods of low volatility (e.g. dead liquidity hours) or weekends to minimize sideways churn and slippages.
+                <div className="flex items-center gap-2">
+                  <h4 className="text-xs font-bold font-sans text-slate-700 uppercase flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-indigo-500" />
+                    Global Operational Safety Hours (IST)
+                  </h4>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                    Master Kill-Switch
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  Defines master operational hours for the bot. Unchecking a window acts as a hard circuit-breaker, blocking all trade execution regardless of setup. Setup-specific session permissions (e.g., London vs. NY Overlap) are governed dynamically by the <strong className="text-indigo-600 font-semibold">Unified Confluence Matrix</strong>.
                 </p>
               </div>
 
@@ -2170,22 +2540,14 @@ export default function ConfigPage({
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Take Profit Mode</label>
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-200">
-                      {riskConfig.take_profit_mode === "RR_RATIO" ? "R:R Ratio" : "ATR Scalp (Fix 1 Active)"}
+                    <label className="text-xs font-mono text-slate-400 uppercase">Take Profit Framework</label>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
+                      DYNAMIC ATR SCALPING
                     </span>
                   </div>
-                  <select
-                    value={riskConfig.take_profit_mode || "ATR_SCALP"}
-                    onChange={(e) => setRiskConfig({ ...riskConfig, take_profit_mode: e.target.value as "ATR_SCALP" | "RR_RATIO" })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                  >
-                    <option value="ATR_SCALP">Direct ATR Scalp (1.2x - 1.5x ATR - High Win Rate)</option>
-                    <option value="RR_RATIO">Risk-to-Reward Multiple (R:R Ratio)</option>
-                  </select>
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Selects how profit targets are computed. "Direct ATR Scalp" anchors TP to the single-impulse volatility horizon ($1.2\times - 1.5\times$ ATR), capturing wins before intermediate pullbacks.
-                  </p>
+                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-sans leading-relaxed">
+                    Standardized on <strong>Dynamic ATR Scalping</strong>. Profit targets adapt in real time using 14-period ATR volatility, low-ADX compression (1.05x ATR), and regime expansion for maximum edge.
+                  </div>
                 </div>
 
                 {/* Regime-Adaptive Dynamic SL/TP Section */}
@@ -2412,19 +2774,6 @@ export default function ConfigPage({
                   </p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Take Profit Reward Ratio (Fallback)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={riskConfig.take_profit_ratio}
-                    onChange={(e) => setRiskConfig({ ...riskConfig, take_profit_ratio: parseInputNumber(e.target.value, true) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                  />
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Target Risk-to-Reward ratio used when Take Profit Mode is set to "R:R Ratio".
-                  </p>
-                </div>
 
                 <div className="space-y-1.5">
                   <label className="text-xs font-mono text-slate-400 uppercase">Min Stop Loss (USD Floor)</label>
@@ -2447,65 +2796,6 @@ export default function ConfigPage({
                   </p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Min Stop Loss (Price % Floor)</label>
-                  <input
-                    type="number"
-                    step="0.005"
-                    value={riskConfig.min_stop_loss_distance_pct ?? 0.035}
-                    onChange={(e) => {
-                      const parsed = parseInputNumber(e.target.value, true);
-                      if (typeof parsed === "number") {
-                        setRiskConfig({ ...riskConfig, min_stop_loss_distance_pct: Math.max(0, parsed) });
-                      } else {
-                        setRiskConfig({ ...riskConfig, min_stop_loss_distance_pct: parsed });
-                      }
-                    }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                  />
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Minimum stop loss percentage from the entry price. Protects trade executions from sub-tick spread volatility without forcing oversized losses (Default: 0.035%).
-                  </p>
-                </div>
-
-                <div className="space-y-2 col-span-1 md:col-span-2 border-t border-slate-100 pt-4 mt-2">
-                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none text-xs font-semibold text-slate-700 uppercase">
-                    <input
-                      type="checkbox"
-                      checked={riskConfig.static_stop_loss_enabled === true}
-                      onChange={(e) => setRiskConfig({ ...riskConfig, static_stop_loss_enabled: e.target.checked })}
-                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
-                    />
-                    Enable Static Stop Loss Override
-                  </label>
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    When enabled, the dynamic ATR-based calculation is bypassed, and a fixed static stop loss price distance (configured below) is applied to all trades.
-                  </p>
-                </div>
-
-                {riskConfig.static_stop_loss_enabled && (
-                  <div className="space-y-1.5 col-span-1 md:col-span-2">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Static Stop Loss Value (USD Distance)</label>
-                    <input
-                      type="number"
-                      step="10"
-                      value={riskConfig.static_stop_loss_value_usd}
-                      onChange={(e) => {
-                        const parsed = parseInputNumber(e.target.value, true);
-                        if (typeof parsed === "number") {
-                          setRiskConfig({ ...riskConfig, static_stop_loss_value_usd: Math.max(10, parsed) });
-                        } else {
-                          setRiskConfig({ ...riskConfig, static_stop_loss_value_usd: parsed });
-                        }
-                      }}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                    />
-                    <p className="text-[10px] text-slate-400 leading-relaxed">
-                      Fixed USD price distance from the entry price to place the static stop loss (e.g., $150 means the stop loss will always be placed exactly $150 away from the entry price regardless of current ATR volatility).
-                    </p>
-                  </div>
-                )}
-
                 <div className="space-y-2 col-span-1 md:col-span-2 border-t border-slate-100 pt-4 mt-2">
                   <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none text-xs font-semibold text-slate-700 uppercase">
                     <input
@@ -2517,13 +2807,13 @@ export default function ConfigPage({
                     Enable Maximum ATR Stop Loss Cap
                   </label>
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    When enabled, if the current market ATR exceeds the Maximum ATR value defined below, the capped Maximum ATR value is used to calculate the trade entry's stop loss instead of the higher market ATR. This helps prevent excessively wide stop losses during sudden high-volatility spikes, and is not used for any other trade entry signals or strategy filters.
+                    When enabled, if current market ATR exceeds the cap below, the capped ATR value is used to calculate the stop loss distance instead of the high spike ATR, preventing excessively wide stop losses during sudden volatility bursts.
                   </p>
                 </div>
 
                 {riskConfig.max_atr_for_stop_loss_enabled && (
                   <div className="space-y-1.5 col-span-1 md:col-span-2">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Maximum ATR Value Cap</label>
+                    <label className="text-xs font-mono text-slate-400 uppercase">Maximum ATR Value Cap ($)</label>
                     <input
                       type="number"
                       step="5"
@@ -2540,67 +2830,6 @@ export default function ConfigPage({
                     />
                     <p className="text-[10px] text-slate-400 leading-relaxed">
                       The maximum capped ATR value used for multiplying by the stop loss ATR multiplier on trade entry.
-                    </p>
-                  </div>
-                )}
-
-                <div className="space-y-2 col-span-1 md:col-span-2 border-t border-slate-100 pt-4 mt-2">
-                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none text-xs font-semibold text-slate-700 uppercase">
-                    <input
-                      type="checkbox"
-                      checked={riskConfig.min_atr_for_trading_enabled !== false}
-                      onChange={(e) => {
-                        const enabled = e.target.checked;
-                        setRiskConfig({ ...riskConfig, min_atr_for_trading_enabled: enabled });
-                        const allAvailableIds = AVAILABLE_GATES.map((g) => g.id);
-                        let currentMandatory = generalConfig.mandatory_gates ? [...generalConfig.mandatory_gates] : [
-                          "preflight", "timing", "structure", "atr", "regime_cooldown", "choppy", "orderflow", "volume_profile"
-                        ];
-                        if (enabled) {
-                          if (!currentMandatory.includes("atr")) currentMandatory.push("atr");
-                        } else {
-                          currentMandatory = currentMandatory.filter((id) => id !== "atr");
-                        }
-                        const currentWeighted = (generalConfig.weighted_gates || []).filter((id) => id !== "atr");
-                        const updatedRequired = [...currentMandatory, ...currentWeighted];
-                        const updatedSkipped = allAvailableIds.filter((id) => !updatedRequired.includes(id));
-                        setGeneralConfig({
-                          ...generalConfig,
-                          mandatory_gates: currentMandatory,
-                          weighted_gates: currentWeighted,
-                          required_gates: updatedRequired,
-                          skipped_gates: updatedSkipped,
-                        });
-                      }}
-                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
-                    />
-                    Enable Minimum ATR Volatility Floor (Skip Low ATR)
-                  </label>
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    When enabled, the system enforces a strict absolute floor threshold on the 14-period Average True Range (ATR). If the current ATR falls below this value (e.g., during dead-liquidity or ultra-low volume periods), all trade entry signals are hard-blocked to avoid sideways chop losses.
-                  </p>
-                </div>
-
-                {riskConfig.min_atr_for_trading_enabled !== false && (
-                  <div className="space-y-1.5 col-span-1 md:col-span-2">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Minimum ATR Threshold Floor</label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={riskConfig.min_atr_for_trading_value !== undefined ? riskConfig.min_atr_for_trading_value : 12}
-                      onChange={(e) => {
-                        const parsed = parseInputNumber(e.target.value, true);
-                        if (typeof parsed === "number") {
-                          setRiskConfig({ ...riskConfig, min_atr_for_trading_value: Math.max(0, parsed) });
-                        } else {
-                          setRiskConfig({ ...riskConfig, min_atr_for_trading_value: parsed });
-                        }
-                      }}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none font-mono"
-                    />
-                    <p className="text-[10px] text-slate-400 leading-relaxed">
-                      The absolute minimum 14-period Average True Range value required to authorize trading. Set to 11 or 12 to filter out dead consolidation ranges (Standard: 11 - 15).
                     </p>
                   </div>
                 )}
@@ -2812,20 +3041,6 @@ export default function ConfigPage({
                   </p>
                 </div>
 
-                <div className="space-y-2 p-3 bg-amber-50/50 rounded-lg border border-amber-200">
-                  <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
-                    <input
-                      type="checkbox"
-                      checked={riskConfig.hard_time_limit_29m_enabled !== false}
-                      onChange={(e) => setRiskConfig({ ...riskConfig, hard_time_limit_29m_enabled: e.target.checked })}
-                      className="rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 h-4 w-4 cursor-pointer"
-                    />
-                    <span className="text-xs font-bold text-amber-950">29-Minute Hard Time-Limit Exit</span>
-                  </label>
-                  <p className="text-[10px] text-slate-600 leading-relaxed pl-6.5">
-                    Enforces an automatic time-based exit before 30 minutes. When toggled <span className="font-semibold text-rose-700">OFF</span>, trades will never be prematurely closed due to duration alone and will run indefinitely until hitting Stop Loss or Take Profit.
-                  </p>
-                </div>
 
                 <div className="space-y-2 p-3 bg-indigo-50/50 rounded-lg border border-indigo-100">
                   <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
@@ -3013,38 +3228,6 @@ export default function ConfigPage({
                   )}
                 </div>
 
-                <div className="space-y-2 p-3 bg-indigo-50/50 rounded-lg border border-indigo-100">
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
-                      <input
-                        type="checkbox"
-                        checked={msConfig.dynamic_regime_setup_matrix_enabled !== false}
-                        onChange={async (e) => {
-                          const nextVal = e.target.checked;
-                          setRiskConfig({ ...riskConfig, hybrid_regime_switching_enabled: nextVal });
-                          setMsConfig({ ...msConfig, dynamic_regime_setup_matrix_enabled: nextVal });
-                          try {
-                            await apiFetch("/api/strategy/dynamic-conditions/update", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ dynamic_regime_setup_matrix_enabled: nextVal }),
-                            });
-                          } catch (err) {
-                            console.error("Failed to sync hybrid regime toggle:", err);
-                          }
-                        }}
-                        className="rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-400 h-4 w-4 cursor-pointer"
-                      />
-                      <span className="text-xs font-bold text-indigo-900">Hybrid Regime-Switching Framework (Momentum vs Reversion)</span>
-                    </label>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-semibold border border-indigo-200">
-                      Linked to Matrix
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-600 leading-relaxed pl-6.5">
-                    Synchronized directly with the <span className="font-semibold text-indigo-800">Dynamic Regime Gating Matrix</span> in Market Structure. Separates execution into <span className="font-semibold text-indigo-800">Momentum Mode</span> during strong trends (only pullbacks, FVGs, and impulse continuation) and <span className="font-semibold text-indigo-800">Mean-Reversion Mode</span> during ranges/chop (VWAP bands &plusmn;2&sigma;, liquidity sweeps, CVD absorption).
-                  </p>
-                </div>
 
                 <div className="space-y-2 p-3 bg-amber-50/40 rounded-lg border border-amber-200/60">
                   <label className="flex items-center gap-2.5 cursor-pointer font-sans select-none">
@@ -3624,242 +3807,7 @@ export default function ConfigPage({
               </button>
             </div>
 
-            {/* ================= INSTITUTIONAL RESEARCH HIERARCHY OPTIMIZATION HUB ================= */}
-            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-xl p-5 shadow-md text-white space-y-4" id="institutional-research-hub">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-3 border-b border-indigo-800/50 gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                      BTC 1M Scalping Hierarchy
-                    </span>
-                    <h4 className="text-sm font-sans font-bold tracking-wide text-white">
-                      Institutional Trading Sessions & Finer Windows Architecture
-                    </h4>
-                  </div>
-                  <p className="text-xs text-slate-300 mt-1">
-                    Calibrates all 15 setups, finer 1-minute execution windows, and calendar risk multipliers based on historical Bitcoin order book depth, institutional volume, and spot ETF liquidity flows.
-                  </p>
-                </div>
 
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <button
-                    type="button"
-                    id="btn-apply-institutional-hierarchy"
-                    onClick={async () => {
-                      try {
-                        const res = await apiFetch("/api/strategy/institutional-preset/apply", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                        });
-                        if (res.ok) {
-                          const data = await res.json();
-                          if (data.config?.market_structure) {
-                            setMsConfig(data.config.market_structure);
-                          }
-                          if (data.config?.risk_management) {
-                            setRiskConfig(data.config.risk_management);
-                          }
-                          if (data.config?.general) {
-                            setGeneralConfig(data.config.general);
-                          }
-                          alert("Institutional Research Hierarchy Preset applied successfully across all modules!");
-                        }
-                      } catch (e) {
-                        console.error("Failed to apply institutional preset:", e);
-                      }
-                    }}
-                    className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 font-sans text-xs font-semibold tracking-wide shadow-sm transition-all shrink-0 cursor-pointer border border-slate-700 hover:border-slate-600 hover:scale-[1.02] active:scale-[0.98]"
-                    title="Applies static theoretical institutional research settings (fixed 13:00-17:00 overlap, 1.25x sizing, 0.85x Thu, 0.70x Fri)"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                    <div className="text-left">
-                      <div className="text-[11px] font-bold text-white leading-tight">Apply Static Research Preset</div>
-                      <div className="text-[9px] text-slate-400 font-mono">Macro Institutional Defaults</div>
-                    </div>
-                  </button>
-
-                  <a
-                    href="#historical-data-optimizer-hub"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      document.getElementById("historical-data-optimizer-hub")?.scrollIntoView({ behavior: "smooth" });
-                    }}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 text-white font-sans text-xs font-bold tracking-wide shadow-md transition-all shrink-0 cursor-pointer border border-emerald-400/30 hover:scale-[1.02] active:scale-[0.98]"
-                  >
-                    <Database className="w-4 h-4 text-emerald-200 animate-pulse" />
-                    <div className="text-left">
-                      <div className="text-[11px] font-bold text-white leading-tight flex items-center gap-1.5">
-                        <span>Adjust from Historical Trades</span>
-                        <span className="px-1.5 py-0.2 rounded bg-emerald-400/20 text-emerald-200 text-[8px] font-mono uppercase">Dynamic</span>
-                      </div>
-                      <div className="text-[9px] text-emerald-100 font-mono">Empirical Quant Optimization</div>
-                    </div>
-                  </a>
-                </div>
-              </div>
-
-              {/* Research Hierarchy Matrix Table */}
-              <div className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/60">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-900/90 text-slate-400 border-b border-slate-800 text-[10px] font-mono uppercase">
-                      <th className="py-2 px-3">Rank &amp; Window</th>
-                      <th className="py-2 px-3">Day(s)</th>
-                      <th className="py-2 px-3">UTC Time</th>
-                      <th className="py-2 px-3">IST Time</th>
-                      <th className="py-2 px-3">Activity Profile &amp; Engine Calibration</th>
-                      <th className="py-2 px-3 text-center">Engine Rules</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/80 font-mono text-[11px]">
-                    <tr className="hover:bg-slate-900/50">
-                      <td className="py-2.5 px-3 font-bold text-amber-300">
-                        <span className="inline-block px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] mr-1.5 font-sans">
-                          RANK 1
-                        </span>
-                        Europe / US Overlap
-                      </td>
-                      <td className="py-2.5 px-3 text-emerald-400 font-semibold font-sans">Wednesday &amp; Monday</td>
-                      <td className="py-2.5 px-3 text-slate-300">13:00 – 17:00</td>
-                      <td className="py-2.5 px-3 text-indigo-300 font-semibold">18:30 – 22:30</td>
-                      <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">
-                        <strong>Maximum Volatility &amp; Returns:</strong> Peak institutional depth, tightest spreads, lowest 1m slippage.
-                      </td>
-                      <td className="py-2.5 px-3 text-center">
-                        <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-sans font-bold">
-                          1.25x SIZING + FVG/CVD
-                        </span>
-                      </td>
-                    </tr>
-                    <tr className="hover:bg-slate-900/50">
-                      <td className="py-2.5 px-3 font-bold text-indigo-300">
-                        <span className="inline-block px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[9px] mr-1.5 font-sans">
-                          RANK 2
-                        </span>
-                        Europe / US Overlap
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-300 font-sans">Tuesday, Thursday, Friday</td>
-                      <td className="py-2.5 px-3 text-slate-300">13:00 – 17:00</td>
-                      <td className="py-2.5 px-3 text-indigo-300 font-semibold">18:30 – 22:30</td>
-                      <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">
-                        <strong>Very High Catalysts:</strong> US Macro releases (13:30 UTC CPI/NFP) &amp; Spot ETF pricing volume.
-                      </td>
-                      <td className="py-2.5 px-3 text-center">
-                        <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[9px] font-sans font-bold">
-                          AGGRESSIVE MOMENTUM
-                        </span>
-                      </td>
-                    </tr>
-                    <tr className="hover:bg-slate-900/50">
-                      <td className="py-2.5 px-3 font-bold text-sky-300">
-                        <span className="inline-block px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[9px] mr-1.5 font-sans">
-                          RANK 3
-                        </span>
-                        London Open / Pre-NY
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-300 font-sans">Mon – Fri</td>
-                      <td className="py-2.5 px-3 text-slate-300">08:00 – 13:00</td>
-                      <td className="py-2.5 px-3 text-sky-300 font-semibold">13:30 – 18:30</td>
-                      <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">
-                        <strong>High SMC Profile:</strong> European desks sweep Asian highs/lows; ideal for Setups 3 (SFP), 11, 15.
-                      </td>
-                      <td className="py-2.5 px-3 text-center">
-                        <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[9px] font-sans font-bold">
-                          SMC LIQUIDITY SWEEPS
-                        </span>
-                      </td>
-                    </tr>
-                    <tr className="hover:bg-slate-900/50">
-                      <td className="py-2.5 px-3 font-bold text-purple-300">
-                        <span className="inline-block px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[9px] mr-1.5 font-sans">
-                          RANK 4
-                        </span>
-                        Late US / Wall St Close
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-300 font-sans">Mon – Fri</td>
-                      <td className="py-2.5 px-3 text-slate-300">17:00 – 21:00</td>
-                      <td className="py-2.5 px-3 text-purple-300 font-semibold">22:30 – 02:30</td>
-                      <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">
-                        <strong>Moderate:</strong> 21:00 UTC Wall St close creates algorithmic cross-asset rebalancing spikes.
-                      </td>
-                      <td className="py-2.5 px-3 text-center">
-                        <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[9px] font-sans font-bold">
-                          IMPULSE CONTINUATION
-                        </span>
-                      </td>
-                    </tr>
-                    <tr className="hover:bg-slate-900/50">
-                      <td className="py-2.5 px-3 font-bold text-amber-400">
-                        <span className="inline-block px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] mr-1.5 font-sans">
-                          RANK 5
-                        </span>
-                        Asian Session
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-300 font-sans">Mon – Fri</td>
-                      <td className="py-2.5 px-3 text-slate-300">00:00 – 08:00</td>
-                      <td className="py-2.5 px-3 text-amber-300 font-semibold">05:30 – 13:30</td>
-                      <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">
-                        <strong>Low Volatility Chop:</strong> Thinner books cause 1m false wicks. Gated with ATR floor ($28) &amp; RVol (1.35x).
-                      </td>
-                      <td className="py-2.5 px-3 text-center">
-                        <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-sans font-bold">
-                          STRICT NOISE GATED
-                        </span>
-                      </td>
-                    </tr>
-                    <tr className="hover:bg-slate-900/50">
-                      <td className="py-2.5 px-3 font-bold text-rose-300">
-                        <span className="inline-block px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] mr-1.5 font-sans">
-                          RANK 6
-                        </span>
-                        Weekend Market
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-300 font-sans">Saturday &amp; Sunday</td>
-                      <td className="py-2.5 px-3 text-slate-300">24/7</td>
-                      <td className="py-2.5 px-3 text-rose-300 font-semibold">24/7 Sat &amp; Sun</td>
-                      <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">
-                        <strong>Lowest Volume &amp; Widest Spreads:</strong> Trend breakouts prohibited. Confined to range-bound fades.
-                      </td>
-                      <td className="py-2.5 px-3 text-center">
-                        <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] font-sans font-bold">
-                          RANGE BOUND ONLY
-                        </span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Three Algorithmic Rules Summary Pills */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
-                <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-lg">
-                  <div className="text-[10px] font-mono uppercase text-emerald-400 font-bold flex items-center gap-1.5">
-                    <span>⚡ Rule 1: Aggressive Mode (13:00–17:00 UTC)</span>
-                  </div>
-                  <p className="text-[11px] text-slate-300 mt-1 font-sans">
-                    Deepest order book. Boosts position sizing to <strong>1.25x</strong>, lowers Imbalance Ratio to 1.5, and prioritizes FVG (Setup 4) &amp; CVD Absorption (Setup 12).
-                  </p>
-                </div>
-
-                <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-lg">
-                  <div className="text-[10px] font-mono uppercase text-amber-400 font-bold flex items-center gap-1.5">
-                    <span>🛡️ Rule 2: Asian Session Noise Shield</span>
-                  </div>
-                  <p className="text-[11px] text-slate-300 mt-1 font-sans">
-                    Requires 1m ATR &ge; <strong>$28.0</strong> and Relative Volume &ge; <strong>1.35x</strong> during Asian hours (00:00–08:00 UTC) to eliminate false wick stop-outs.
-                  </p>
-                </div>
-
-                <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-lg">
-                  <div className="text-[10px] font-mono uppercase text-rose-400 font-bold flex items-center gap-1.5">
-                    <span>📉 Rule 3: Late-Week De-risking</span>
-                  </div>
-                  <p className="text-[11px] text-slate-300 mt-1 font-sans">
-                    Scales account risk to <strong>0.85x on Thursday</strong> and <strong>0.70x on Friday</strong>. Keeps Friday Asian Open blocked to defend accumulated weekly profits.
-                  </p>
-                </div>
-              </div>
-            </div>
 
             {/* ================= HISTORICAL DATA-DRIVEN AUTO-TUNER & DYNAMIC OPTIMIZER ================= */}
             <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/80 border border-emerald-500/40 rounded-xl p-5 shadow-lg text-white space-y-5" id="historical-data-optimizer-hub">
@@ -3900,16 +3848,15 @@ export default function ConfigPage({
                 </div>
               </div>
 
-              {/* Clarification Alert: Static Preset vs. Dynamic Optimization */}
+              {/* How Trade Journal Auto-Tuner Works */}
               <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-3.5 text-xs font-sans text-slate-300 flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-indigo-300 font-bold text-[11px] font-mono uppercase">
-                    <Info className="w-4 h-4 text-indigo-400 shrink-0" />
-                    <span>Preset Settings vs. Dynamic Historical Optimization</span>
+                  <div className="flex items-center gap-2 text-emerald-300 font-bold text-[11px] font-mono uppercase">
+                    <Info className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>How Trade Journal Auto-Tuning Works</span>
                   </div>
                   <p className="text-[11px] text-slate-400">
-                    <strong className="text-amber-300 font-normal">Static Preset:</strong> Applies theoretical institutional research benchmarks (fixed 13:00–17:00 UTC overlap, 1.25x sizing, fixed 0.85x Thu / 0.70x Fri).<br />
-                    <strong className="text-emerald-300 font-normal">Dynamic Auto-Tuning:</strong> Reads your actual closed trades database, computes observed win rates, empirical MAE/MFE excursions, and identifies your real high-alpha days and weak windows to auto-tune parameters dynamically.
+                    While the <strong className="text-indigo-300 font-medium">Unified Confluence Matrix</strong> governs which setups are permitted to enter trades, this Auto-Tuner analyzes your actual closed trade journal to calibrate <strong className="text-emerald-300 font-medium">Stop-Loss ATR buffer (MAE)</strong> and <strong className="text-emerald-300 font-medium">Take-Profit target ratios (MFE)</strong> from real observed trade excursions.
                   </p>
                 </div>
               </div>
@@ -4330,1056 +4277,717 @@ export default function ConfigPage({
               </div>
             </div>
 
-            {/* ================= DYNAMIC MARKET REGIME GATING MATRIX ================= */}
-            <div className="bg-white border border-slate-200/80 rounded-xl p-5 space-y-4 shadow-sm" id="dynamic-regime-gating-matrix">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-3 border-b border-slate-100 gap-3">
+            {/* ================= SINGLE UNIFIED CONFLUENCE MATRIX & EMPIRICAL GATING HUB ================= */}
+            <div className="bg-white border-2 border-indigo-500/30 rounded-2xl p-6 space-y-6 shadow-sm relative overflow-hidden" id="unified-confluence-matrix">
+              {/* Top Accent Gradient Bar */}
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500" />
+
+              {/* Header & Master Engine Gating Mode Selector */}
+              <div className="flex flex-col xl:flex-row xl:items-center justify-between pb-4 border-b border-slate-100 gap-4">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <Compass className="w-4 h-4 text-indigo-600" />
-                    <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-sans">
-                      Dynamic Market Regime Gating Matrix
-                    </h4>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">
-                      Regime-Aware Scalper
-                    </span>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 shadow-sm">
+                      <Zap className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider font-sans">
+                          Single Unified Confluence Matrix & Empirical Gating Hub
+                        </h3>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-100 text-indigo-800 border border-indigo-300">
+                          Multi-Dimensional (5D Context)
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Consolidates the 3 fragmented 2D matrices into compound context rules: <span className="font-mono text-indigo-600 font-semibold">(Setup × Day × UTC Hours × Session × Regime)</span>. Evaluates entry signals with empirical backtest precision, eliminating both false blocking and leakage.
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Automatically permits or blocks setups based on the current classified market regime. When price transitions into a Strong Trend, mean-reversion setups are dynamically blocked to avoid counter-trend steamrolling.
-                  </p>
                 </div>
 
-                {/* Master Switch for Matrix Gating */}
-                <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/70 px-3 py-2 rounded-lg shrink-0">
-                  <div className="text-right">
-                    <p className="text-[11px] font-semibold text-slate-800">Enforce Regime Matrix</p>
-                    <p className="text-[9px] font-mono text-slate-400">
-                      {msConfig.dynamic_regime_setup_matrix_enabled !== false ? "STRICT GATING ACTIVE" : "BYPASSED (ALL REGIMES)"}
-                    </p>
-                  </div>
-                  <button
-                    id="toggle-dynamic-regime-matrix"
-                    type="button"
-                    onClick={async () => {
-                      const next = msConfig.dynamic_regime_setup_matrix_enabled === false ? true : false;
-                      setMsConfig({ ...msConfig, dynamic_regime_setup_matrix_enabled: next });
-                      setRiskConfig({ ...riskConfig, hybrid_regime_switching_enabled: next });
-                      try {
-                        await apiFetch("/api/strategy/dynamic-conditions/update", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ dynamic_regime_setup_matrix_enabled: next }),
-                        });
-                      } catch (e) {
-                        console.error("Failed to toggle matrix master:", e);
-                      }
-                    }}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.dynamic_regime_setup_matrix_enabled !== false ? "bg-indigo-600" : "bg-slate-300"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.dynamic_regime_setup_matrix_enabled !== false ? "translate-x-4" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {/* Current Active Regime Live Status Banner */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg gap-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">Current Active Regime:</span>
-                  <span className={`px-2.5 py-0.5 rounded font-mono font-bold text-xs uppercase tracking-wide border ${
-                    currentRegime === MarketRegime.STRONG_UPTREND
-                      ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                      : currentRegime === MarketRegime.STRONG_DOWNTREND
-                      ? "bg-rose-100 text-rose-800 border-rose-300"
-                      : currentRegime === MarketRegime.HIGH_VOLATILITY
-                      ? "bg-purple-100 text-purple-800 border-purple-300"
-                      : currentRegime === MarketRegime.LOW_VOLATILITY
-                      ? "bg-sky-100 text-sky-800 border-sky-300"
-                      : "bg-amber-100 text-amber-800 border-amber-300"
-                  }`}>
-                    {currentRegime || "RANGE_BOUND"}
-                  </span>
-                  <span className="text-[11px] text-slate-500 hidden sm:inline">
-                    — The highlighted column below is currently evaluated by the live scalper engine.
+                {/* Single Authority Status Badge */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-xs font-semibold text-indigo-700 font-sans flex items-center gap-1.5 shadow-2xs">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Unified Confluence Matrix (Sole Gating Authority)</span>
                   </span>
                 </div>
-
-                {/* Presets Bar */}
-                <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                  <span className="text-[10px] font-mono text-slate-400 uppercase font-bold mr-1">Presets:</span>
-                  {[
-                    { id: "QUANT_OPTIMAL", label: "Quant Optimal", title: "Recommended: Optimal trend vs range allocation" },
-                    { id: "STRICT_TREND", label: "Strict Trend", title: "Only trend and breakout setups during trends" },
-                    { id: "STRICT_RANGE", label: "Strict Range", title: "Only range and mean-reversion setups" },
-                    { id: "ALL_PERMISSIVE", label: "All Regimes", title: "Allow every setup across all 5 regimes" },
-                  ].map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      title={p.title}
-                      onClick={async () => {
-                        try {
-                          const res = await apiFetch("/api/strategy/regime-matrix/preset", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ preset: p.id }),
-                          });
-                          if (res.ok) {
-                            const data = await res.json();
-                            if (data.setup_regime_matrix) {
-                              setMsConfig({ ...msConfig, setup_regime_matrix: data.setup_regime_matrix });
-                            }
-                          }
-                        } catch (e) {
-                          console.error("Failed to apply preset:", e);
-                        }
-                      }}
-                      className="px-2 py-1 text-[10px] font-mono font-medium rounded border border-slate-200 bg-white hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-300 text-slate-600 transition-colors cursor-pointer"
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
               </div>
 
-              {/* Matrix Table */}
-              <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-100/80 border-b border-slate-200 text-[10px] font-mono uppercase text-slate-500">
-                      <th className="py-2.5 px-3 font-semibold">Tactical Setup</th>
-                      <th className="py-2.5 px-2 font-semibold">Category</th>
-                      {[
-                        { id: MarketRegime.STRONG_UPTREND, label: "Strong Uptrend", icon: "📈", color: "emerald" },
-                        { id: MarketRegime.STRONG_DOWNTREND, label: "Strong Downtrend", icon: "📉", color: "rose" },
-                        { id: MarketRegime.RANGE_BOUND, label: "Range Bound", icon: "⚖️", color: "amber" },
-                        { id: MarketRegime.HIGH_VOLATILITY, label: "High Volatility", icon: "⚡", color: "purple" },
-                        { id: MarketRegime.LOW_VOLATILITY, label: "Low Volatility", icon: "💤", color: "sky" },
-                      ].map((reg) => {
-                        const isLiveCurrent = currentRegime === reg.id || (!currentRegime && reg.id === MarketRegime.RANGE_BOUND);
-                        return (
-                          <th
-                            key={reg.id}
-                            className={`py-2.5 px-3 font-semibold text-center ${
-                              isLiveCurrent ? "bg-indigo-100/70 text-indigo-900 border-x-2 border-indigo-400 font-bold" : ""
-                            }`}
-                          >
-                            <div className="flex items-center justify-center gap-1">
-                              <span>{reg.icon}</span>
-                              <span>{reg.label}</span>
-                            </div>
-                            {isLiveCurrent && (
-                              <span className="block text-[8px] font-bold text-indigo-600 tracking-wider">LIVE</span>
-                            )}
-                          </th>
-                        );
-                      })}
-                      <th className="py-2.5 px-3 font-semibold text-center">Live Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-sans">
-                    {(() => {
-                      const defaultMatrix: Record<string, MarketRegime[]> = {
-                        setup_1_pullback_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
-                        setup_2_dynamic_ema_pushback: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
-                        setup_3_liquidity_sweep: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY, MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
-                        setup_4_fvg_retest: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY],
-                        setup_9_range_failed_auction: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
-                        setup_10_vwap_band_rejection: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY, MarketRegime.HIGH_VOLATILITY, MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND],
-                        setup_11_eqh_eql_double_touch: [MarketRegime.RANGE_BOUND, MarketRegime.LOW_VOLATILITY],
-                        setup_12_cvd_absorption: [MarketRegime.RANGE_BOUND, MarketRegime.HIGH_VOLATILITY, MarketRegime.STRONG_DOWNTREND, MarketRegime.STRONG_UPTREND],
-                        setup_13_oi_flush_cascade: [MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND, MarketRegime.STRONG_DOWNTREND, MarketRegime.STRONG_UPTREND],
-                        setup_14_fresh_momentum_impulse: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.LOW_VOLATILITY],
-                        setup_15_trendline_bounce: [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.HIGH_VOLATILITY, MarketRegime.RANGE_BOUND],
-                      };
-                      const activeMatrix = msConfig.setup_regime_matrix || defaultMatrix;
-
-                      const setupsList = [
-                        { id: "setup_1_pullback_retest", num: "1", name: "Pullback & Retest", key: "pullback_retest_enabled", category: "Trend Continuation" },
-                        { id: "setup_2_dynamic_ema_pushback", num: "2", name: "EMA Pushback", key: "ema_pushback_enabled", category: "Trend Pullback" },
-                        { id: "setup_3_liquidity_sweep", num: "3", name: "Liquidity Sweep", key: "liquidity_sweep_enabled", category: "Mean Reversion" },
-                        { id: "setup_4_fvg_retest", num: "4", name: "Fair Value Gap", key: "fvg_strategy_enabled", category: "SMC Imbalance" },
-                        { id: "setup_9_range_failed_auction", num: "9", name: "Failed Auction", key: "failed_auction_strategy_enabled", category: "Mean Reversion" },
-                        { id: "setup_10_vwap_band_rejection", num: "10", name: "VWAP Band Rejection", key: "vwap_band_reversal_enabled", category: "Mean Reversion" },
-                        { id: "setup_11_eqh_eql_double_touch", num: "11", name: "EQH / EQL Double Touch", key: "eqh_eql_strategy_enabled", category: "Liquidity Sweep" },
-                        { id: "setup_12_cvd_absorption", num: "12", name: "CVD Absorption", key: "cvd_divergence_strategy_enabled", category: "Order Flow" },
-                        { id: "setup_13_oi_flush_cascade", num: "13", name: "OI Flush Fade", key: "oi_flush_strategy_enabled", category: "Order Flow" },
-                        { id: "setup_14_fresh_momentum_impulse", num: "14", name: "Fresh Momentum Impulse", key: "fresh_momentum_strategy_enabled", category: "Breakout" },
-                        { id: "setup_15_trendline_bounce", num: "15", name: "Trendline Bounce & Retest", key: "trendline_bounce_strategy_enabled", category: "Trend Retest" },
-                      ];
-
-                      return setupsList.map((setup) => {
-                        const isMasterOn = (msConfig as any)[setup.key] !== false;
-                        const allowedRegimes: MarketRegime[] = activeMatrix[setup.id] || defaultMatrix[setup.id] || [];
-                        const effectiveRegime = currentRegime || MarketRegime.RANGE_BOUND;
-                        const isAllowedInCurrent = allowedRegimes.includes(effectiveRegime);
-                        const isMatrixEnforced = msConfig.dynamic_regime_setup_matrix_enabled !== false;
-                        const isLiveActive = isMasterOn && (!isMatrixEnforced || isAllowedInCurrent);
-
-                        return (
-                          <tr
-                            key={setup.id}
-                            className={`hover:bg-slate-50/70 transition-colors ${
-                              !isMasterOn ? "opacity-40 bg-slate-50/40" : ""
-                            }`}
-                          >
-                            <td className="py-2.5 px-3">
-                              <div className="font-semibold text-slate-800 text-xs flex items-center gap-1.5">
-                                <span className="font-mono text-[10px] text-slate-400 font-bold">#{setup.num}</span>
-                                <span>{setup.name}</span>
-                              </div>
-                            </td>
-                            <td className="py-2.5 px-2">
-                              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
-                                setup.category.includes("Trend")
-                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                  : setup.category.includes("Reversion")
-                                  ? "bg-amber-50 text-amber-700 border border-amber-200"
-                                  : setup.category.includes("Order Flow")
-                                  ? "bg-cyan-50 text-cyan-700 border border-cyan-200"
-                                  : setup.category.includes("Breakout")
-                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
-                                  : "bg-purple-50 text-purple-700 border border-purple-200"
-                              }`}>
-                                {setup.category}
-                              </span>
-                            </td>
-
-                            {[
-                              MarketRegime.STRONG_UPTREND,
-                              MarketRegime.STRONG_DOWNTREND,
-                              MarketRegime.RANGE_BOUND,
-                              MarketRegime.HIGH_VOLATILITY,
-                              MarketRegime.LOW_VOLATILITY,
-                            ].map((reg) => {
-                              const isChecked = allowedRegimes.includes(reg);
-                              const isLiveCol = effectiveRegime === reg;
-
-                              return (
-                                <td
-                                  key={reg}
-                                  className={`py-2 px-3 text-center ${
-                                    isLiveCol ? "bg-indigo-50/40 border-x-2 border-indigo-400" : ""
-                                  }`}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      const nextList = isChecked
-                                        ? allowedRegimes.filter((r) => r !== reg)
-                                        : [...allowedRegimes, reg];
-                                      const nextMatrix = { ...activeMatrix, [setup.id]: nextList };
-                                      setMsConfig({ ...msConfig, setup_regime_matrix: nextMatrix });
-                                      try {
-                                        await apiFetch("/api/strategy/regime-matrix/toggle-cell", {
-                                          method: "POST",
-                                          headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({ setupId: setup.id, regime: reg }),
-                                        });
-                                      } catch (e) {
-                                        console.error("Failed to toggle cell:", e);
-                                      }
-                                    }}
-                                    className={`inline-flex items-center justify-center w-6 h-6 rounded border transition-all cursor-pointer ${
-                                      isChecked
-                                        ? "bg-indigo-600 border-indigo-700 text-white shadow-xs"
-                                        : "bg-white border-slate-200 text-slate-300 hover:border-slate-300 hover:bg-slate-100"
-                                    }`}
-                                    title={`${isChecked ? "Allowed" : "Blocked"} in ${reg}. Click to toggle.`}
-                                  >
-                                    {isChecked ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : <X className="w-3 h-3 text-slate-300" />}
-                                  </button>
-                                </td>
-                              );
-                            })}
-
-                            <td className="py-2.5 px-3 text-center">
-                              <span className={`inline-block text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
-                                !isMasterOn
-                                  ? "bg-slate-100 text-slate-500 border border-slate-200"
-                                  : isLiveActive
-                                  ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                                  : "bg-amber-100 text-amber-800 border border-amber-300"
-                              }`}>
-                                {!isMasterOn ? "DISABLED" : isLiveActive ? "ELIGIBLE" : "REGIME GATED"}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      });
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* ================= DAYS OF WEEK x TRADING SESSIONS MATRIX ================= */}
-            <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm" id="day-session-matrix">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-3 border-b border-slate-100 gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-indigo-600" />
-                    <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-sans">
-                      Days of the Week × Trading Sessions Matrix (Calendar Gating)
-                    </h4>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">
-                      Institutional Seasonality Guard
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Control which trading sessions are permitted on each day of the week (Mon–Sun). Blocks low-edge windows such as <strong className="text-slate-600 font-medium">Friday Asian Open</strong> (Asia de-risking before weekend) and <strong className="text-slate-600 font-medium">Sunday Dead Liquidity</strong> before market open.
-                  </p>
+              {/* Feedback messages */}
+              {confluenceSuccessMsg && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{confluenceSuccessMsg}</span>
                 </div>
-
-                {/* Master Switch for Day-Session Matrix */}
-                <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/70 px-3 py-2 rounded-lg shrink-0">
-                  <div className="text-right">
-                    <p className="text-[11px] font-semibold text-slate-800">Enforce Day-Session Filter</p>
-                    <p className="text-[9px] font-mono text-slate-400">
-                      {msConfig.day_session_matrix_enabled !== false ? "STRICT CALENDAR GATING ACTIVE" : "BYPASSED (ALL DAYS)"}
-                    </p>
-                  </div>
-                  <button
-                    id="toggle-day-session-matrix"
-                    type="button"
-                    onClick={async () => {
-                      const next = msConfig.day_session_matrix_enabled === false ? true : false;
-                      setMsConfig({ ...msConfig, day_session_matrix_enabled: next });
-                      try {
-                        await apiFetch("/api/strategy/dynamic-conditions/update", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ day_session_matrix_enabled: next }),
-                        });
-                      } catch (e) {
-                        console.error("Failed to toggle day-session matrix master:", e);
-                      }
-                    }}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.day_session_matrix_enabled !== false ? "bg-indigo-600" : "bg-slate-300"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.day_session_matrix_enabled !== false ? "translate-x-4" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
+              )}
+              {confluenceErrorMsg && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{confluenceErrorMsg}</span>
                 </div>
-              </div>
+              )}
 
-              {/* Day-Session Live Info Banner & Presets */}
+              {/* Summary Stats Strip & Core Controls */}
               {(() => {
-                const now = new Date();
-                const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-                const istOffset = 5.5 * 3600000;
-                const istDate = new Date(utcMs + istOffset);
-                const dayIndex = istDate.getDay();
-                const dayKeys = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-                const dayDisplayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-                const todayId = dayKeys[dayIndex];
-                const todayName = dayDisplayNames[dayIndex];
-
-                const defaultDayMatrix: Record<string, string[]> = {
-                  monday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
-                  tuesday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
-                  wednesday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
-                  thursday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
-                  friday: ["intraday_chop", "europe_us_overlap", "late_us_session"],
-                  saturday: ["weekends", "intraday_chop"],
-                  sunday: ["weekends", "late_us_session"],
-                };
-
-                const activeDayMatrix: Record<string, string[]> = (msConfig as any).day_session_matrix || defaultDayMatrix;
-                const todayAllowed = activeDayMatrix[todayId] || [];
+                const rulesList = unifiedConfluence?.rules || [];
+                const activeCount = rulesList.filter((r) => r.is_enabled).length;
+                const c100 = rulesList.filter((r) => r.validation_win_rate >= 100).length;
+                const c80 = rulesList.filter((r) => r.validation_win_rate >= 80 && r.validation_win_rate < 100).length;
+                const c70 = rulesList.filter((r) => r.validation_win_rate >= 70 && r.validation_win_rate < 80).length;
 
                 return (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg gap-2 text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">Today (IST):</span>
-                      <span className="px-2.5 py-0.5 rounded font-mono font-bold text-xs uppercase tracking-wide border bg-indigo-100 text-indigo-800 border-indigo-300 flex items-center gap-1.5">
-                        <span>📅</span>
-                        <span>{todayName}</span>
-                        <span className="text-[10px] opacity-75 font-normal">({todayAllowed.length} sessions permitted)</span>
-                      </span>
-                      <span className="text-[11px] text-slate-500 hidden md:inline">
-                        — Click any cell below to permit or restrict trade executions during that day and session.
-                      </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase font-bold block">Active Rules</span>
+                      <div className="flex items-baseline gap-1 mt-1">
+                        <span className="text-xl font-bold font-mono text-slate-800 tabular-nums">{activeCount}</span>
+                        <span className="text-xs font-mono text-slate-400">/ {rulesList.length}</span>
+                      </div>
                     </div>
 
-                    {/* Presets Bar */}
-                    <div className="flex items-center gap-1.5 self-end sm:self-auto flex-wrap">
-                      <span className="text-[10px] font-mono text-slate-400 uppercase font-bold mr-1">Presets:</span>
-                      {[
-                        { id: "INSTITUTIONAL_HIERARCHY", label: "⚡ Institutional Research", title: "Apply full BTC research hierarchy: Overlap aggressive, London SMC sweeps, Asian noise gated, Friday close protected" },
-                        { id: "QUANT_SEASONALITY", label: "Quant Seasonality", title: "Default: Restrict Friday Asian open & Sunday dead liquidity" },
-                        { id: "WEEKDAYS_ONLY", label: "Weekdays Only", title: "Allow Monday-Friday sessions, block all Saturday & Sunday trading" },
-                        { id: "PEAK_ONLY", label: "Strict Peak Only", title: "Only allow Asia Open, US/EU Overlap & Late US on Mon-Thu; restricted Friday" },
-                        { id: "ALL_PERMISSIVE", label: "Allow All", title: "Allow every session across all 7 days without restrictions" },
-                      ].map((p) => (
+                    <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200/80">
+                      <span className="text-[10px] font-mono text-emerald-700 uppercase font-bold block">100% Win Rate</span>
+                      <div className="flex items-baseline gap-1 mt-1">
+                        <span className="text-xl font-bold font-mono text-emerald-800 tabular-nums">{c100}</span>
+                        <span className="text-xs font-mono text-emerald-600">Clusters</span>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-purple-50/70 border border-purple-200/80">
+                      <span className="text-[10px] font-mono text-purple-700 uppercase font-bold block">80%+ Win Rate</span>
+                      <div className="flex items-baseline gap-1 mt-1">
+                        <span className="text-xl font-bold font-mono text-purple-800 tabular-nums">{c80}</span>
+                        <span className="text-xs font-mono text-purple-600">Clusters</span>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-sky-50/70 border border-sky-200/80">
+                      <span className="text-[10px] font-mono text-sky-700 uppercase font-bold block">70%+ Win Rate</span>
+                      <div className="flex items-baseline gap-1 mt-1">
+                        <span className="text-xl font-bold font-mono text-sky-800 tabular-nums">{c70}</span>
+                        <span className="text-xs font-mono text-sky-600">Clusters</span>
+                      </div>
+                    </div>
+
+                    {/* Strict Mode Toggle */}
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex flex-col justify-between">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-mono text-slate-500 uppercase font-bold">Strict Gating</span>
                         <button
-                          key={p.id}
                           type="button"
-                          title={p.title}
-                          onClick={async () => {
-                            try {
-                              const res = await apiFetch("/api/strategy/day-session-matrix/preset", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ preset: p.id }),
-                              });
-                              if (res.ok) {
-                                const data = await res.json();
-                                if (data.day_session_matrix) {
-                                  setMsConfig({ ...msConfig, day_session_matrix: data.day_session_matrix });
-                                }
-                              }
-                            } catch (e) {
-                              console.error("Failed to apply day-session preset:", e);
-                            }
-                          }}
-                          className="px-2 py-1 rounded bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[10px] font-semibold transition-all hover:border-slate-300 shadow-2xs"
+                          id="toggle-confluence-strict-mode"
+                          onClick={() => handleUpdateConfluenceConfig({ strict_mode: !unifiedConfluence?.strict_mode })}
+                          className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                            unifiedConfluence?.strict_mode ? "bg-indigo-600" : "bg-slate-300"
+                          }`}
                         >
-                          {p.label}
+                          <span
+                            className={`inline-block h-3 w-3 transform rounded-full bg-white transition ${
+                              unifiedConfluence?.strict_mode ? "translate-x-3" : "translate-x-0"
+                            }`}
+                          />
                         </button>
-                      ))}
+                      </div>
+                      <span className="text-[9px] font-mono text-slate-400 mt-1">
+                        {unifiedConfluence?.strict_mode ? "Strict: Match Required" : "Permissive"}
+                      </span>
                     </div>
                   </div>
                 );
               })()}
 
-              {/* Day x Session Interactive Grid */}
-              <div className="overflow-x-auto border border-slate-200/80 rounded-lg">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-100/80 text-slate-600 border-b border-slate-200 text-[10px] font-mono uppercase">
-                      <th className="py-2.5 px-3 font-semibold sticky left-0 bg-slate-100/90 z-10 w-44">
-                        Day of Week
-                      </th>
-                      <th className="py-2.5 px-2 text-center font-semibold">
-                        <div>🌅 Asia Open</div>
-                        <div className="text-[9px] font-normal text-slate-400">05:00 - 09:30</div>
-                      </th>
-                      <th className="py-2.5 px-2 text-center font-semibold">
-                        <div>☕ Intra-day Chop</div>
-                        <div className="text-[9px] font-normal text-slate-400">09:30 - 18:30</div>
-                      </th>
-                      <th className="py-2.5 px-2 text-center font-semibold">
-                        <div>🗽 US/EU Overlap</div>
-                        <div className="text-[9px] font-normal text-slate-400">18:30 - 22:30</div>
-                      </th>
-                      <th className="py-2.5 px-2 text-center font-semibold">
-                        <div>🌙 Late US Session</div>
-                        <div className="text-[9px] font-normal text-slate-400">22:30 - 01:30</div>
-                      </th>
-                      <th className="py-2.5 px-2 text-center font-semibold">
-                        <div>💤 Dead Liquidity</div>
-                        <div className="text-[9px] font-normal text-slate-400">01:30 - 05:00</div>
-                      </th>
-                      <th className="py-2.5 px-2 text-center font-semibold">
-                        <div>🏖️ Weekends</div>
-                        <div className="text-[9px] font-normal text-slate-400">Sat / Sun</div>
-                      </th>
-                      <th className="py-2.5 px-3 text-center font-semibold w-36">
-                        Day Status / Quick Action
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
-                    {(() => {
-                      const allSessions = [
-                        { id: "asia_open", name: "Asia Open" },
-                        { id: "intraday_chop", name: "Intra-day Chop" },
-                        { id: "europe_us_overlap", name: "US/EU Overlap" },
-                        { id: "late_us_session", name: "Late US" },
-                        { id: "dead_liquidity", name: "Dead Liquidity" },
-                        { id: "weekends", name: "Weekends" },
-                      ];
+              {/* Action Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-50/80 border border-slate-200/80 rounded-xl">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    id="btn-add-custom-confluence-rule"
+                    onClick={() => setShowAddRuleModal(true)}
+                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Confluence Rule</span>
+                  </button>
+                </div>
 
-                      const daysList = [
-                        { id: "monday", name: "Monday", short: "Mon", icon: "💼", note: "Asia Open expansion & weekly open positioning" },
-                        { id: "tuesday", name: "Tuesday", short: "Tue", icon: "📈", note: "High-volume institutional trend continuation" },
-                        { id: "wednesday", name: "Wednesday", short: "Wed", icon: "⚡", note: "Mid-week macro catalysts & peak momentum" },
-                        { id: "thursday", name: "Thursday", short: "Thu", icon: "🏛️", note: "Expansion continuation & reversal traps" },
-                        { id: "friday", name: "Friday", short: "Fri", icon: "🎯", note: "Friday Asian open disabled by default to avoid de-risking flush" },
-                        { id: "saturday", name: "Saturday", short: "Sat", icon: "🏖️", note: "Weekend retail choppiness & SFP sweeps" },
-                        { id: "sunday", name: "Sunday", short: "Sun", icon: "☀️", note: "Sunday dead liquidity disabled before weekly open" },
-                      ];
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowResearchMetrics(!showResearchMetrics)}
+                    title="Toggle detailed backtest research columns (Discovery N/WR, Validation N/WR, Verdict)"
+                    className={`px-3 py-1.5 border rounded-lg text-xs font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
+                      showResearchMetrics
+                        ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-semibold shadow-xs"
+                        : "bg-white border-slate-200 hover:bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    <BarChart3 className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{showResearchMetrics ? "Hide Research Columns" : "Show Discovery / Validation Stats"}</span>
+                  </button>
 
-                      const defaultDayMatrix: Record<string, string[]> = {
-                        monday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
-                        tuesday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
-                        wednesday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
-                        thursday: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity"],
-                        friday: ["intraday_chop", "europe_us_overlap", "late_us_session"],
-                        saturday: ["weekends", "intraday_chop"],
-                        sunday: ["weekends", "late_us_session"],
-                      };
+                  <button
+                    type="button"
+                    onClick={handleExportConfluenceJson}
+                    title="Export confluence rules as JSON file"
+                    className="px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Export JSON</span>
+                  </button>
 
-                      const activeDayMatrix: Record<string, string[]> = (msConfig as any).day_session_matrix || defaultDayMatrix;
-                      const isMasterOn = msConfig.day_session_matrix_enabled !== false;
+                  <label
+                    title="Import confluence rules JSON"
+                    className="px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Import JSON</span>
+                    <input type="file" accept=".json" onChange={handleImportConfluenceJson} className="hidden" />
+                  </label>
+                </div>
+              </div>
 
-                      const now = new Date();
-                      const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-                      const istOffset = 5.5 * 3600000;
-                      const istDate = new Date(utcMs + istOffset);
-                      const currentDayIndex = istDate.getDay();
-                      const dayKeys = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-                      const currentTodayId = dayKeys[currentDayIndex];
+              {/* Informational Guidance Callout */}
+              <div className="px-3.5 py-2.5 bg-indigo-50/50 border border-indigo-100 rounded-xl text-xs text-slate-600 flex items-start gap-2.5">
+                <span className="text-base leading-none select-none">💡</span>
+                <div className="space-y-1">
+                  <p className="font-sans leading-relaxed">
+                    <strong className="text-indigo-900 font-semibold">How Confluence Rules Work:</strong> Instead of 3 disconnected matrices that block profitable setups, a trade enters when its live market context (Setup + Day + Session + Regime) matches an active rule.
+                  </p>
+                  {showResearchMetrics && (
+                    <p className="font-mono text-[11px] text-indigo-800 bg-white/70 p-1.5 rounded-lg border border-indigo-200/60 leading-normal">
+                      🔬 <strong className="font-bold">Research Mode Active:</strong> <strong>Discovery (N / WR)</strong> shows in-sample test trade volume and win rate from original cluster discovery. <strong>Validation (N / WR)</strong> shows forward out-of-sample verified trades. <strong>Verdict</strong> confirms edge robustness without overfitting.
+                    </p>
+                  )}
+                </div>
+              </div>
 
-                      return daysList.map((day) => {
-                        const allowedSessions = activeDayMatrix[day.id] !== undefined ? activeDayMatrix[day.id] : (defaultDayMatrix[day.id] || []);
-                        const isToday = currentTodayId === day.id;
-                        const restrictionsCount = allSessions.length - allowedSessions.length;
+              {/* Filters Bar */}
+              {(() => {
+                const rulesList = unifiedConfluence?.rules || [];
+                return (
+                  <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 pt-1">
+                    {/* Category Chips */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[
+                        { id: "ALL", label: `All (${rulesList.length})` },
+                        { id: "100_WR", label: `100% Win Rate (${rulesList.filter((r) => (r.validation_win_rate ?? 0) >= 100).length})` },
+                        { id: "80_WR", label: `80%+ Win Rate (${rulesList.filter((r) => (r.validation_win_rate ?? 0) >= 80 && (r.validation_win_rate ?? 0) < 100).length})` },
+                        { id: "70_WR", label: `70%+ Win Rate (${rulesList.filter((r) => (r.validation_win_rate ?? 0) >= 70 && (r.validation_win_rate ?? 0) < 80).length})` },
+                        { id: "CUSTOM", label: `Custom Rules (${rulesList.filter((r) => r.verdict === "Custom" || r.verdict === "Manual" || r.id.startsWith("custom_")).length})` },
+                      ].map((chip) => (
+                        <button
+                          key={chip.id}
+                          type="button"
+                          onClick={() => setConfluenceFilterCategory(chip.id as any)}
+                          className={`px-2.5 py-1 text-xs font-mono font-medium rounded-lg border transition-all cursor-pointer ${
+                            confluenceFilterCategory === chip.id
+                              ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                          }`}
+                        >
+                          {chip.label}
+                        </button>
+                      ))}
+                    </div>
 
-                        return (
-                          <tr
-                            key={day.id}
-                            className={`hover:bg-slate-50/70 transition-colors ${isToday ? "bg-indigo-50/30" : ""}`}
-                          >
-                            <td className="py-2.5 px-3 sticky left-0 bg-white z-10 border-r border-slate-100">
-                              <div className="flex items-center gap-2">
-                                <span className="text-base">{day.icon}</span>
-                                <div>
-                                  <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                                    <span>{day.name}</span>
-                                    {isToday && (
-                                      <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold uppercase">
-                                        TODAY
+                    {/* Secondary Filters & Search */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          placeholder="Search rules, days, sessions..."
+                          value={confluenceSearch}
+                          onChange={(e) => setConfluenceSearch(e.target.value)}
+                          className="pl-8 pr-3 py-1 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-indigo-500 w-44 font-sans"
+                        />
+                      </div>
+
+                      <select
+                        value={confluenceSetupFilter}
+                        onChange={(e) => setConfluenceSetupFilter(e.target.value)}
+                        className="px-2 py-1 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 font-sans focus:outline-none"
+                      >
+                        <option value="ALL">All Setups</option>
+                        {CONFLUENCE_SETUPS.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={confluenceDayFilter}
+                        onChange={(e) => setConfluenceDayFilter(e.target.value)}
+                        className="px-2 py-1 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 font-sans focus:outline-none capitalize"
+                      >
+                        <option value="ALL">All Days</option>
+                        {CONFLUENCE_DAYS.map((d) => (
+                          <option key={d} value={d} className="capitalize">{d}</option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={confluenceRegimeFilter}
+                        onChange={(e) => setConfluenceRegimeFilter(e.target.value)}
+                        className="px-2 py-1 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 font-sans focus:outline-none"
+                      >
+                        <option value="ALL">All Regimes</option>
+                        {Object.values(MarketRegime).map((r) => (
+                          <option key={r} value={r}>{r}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* High-Density Confluence Data Grid */}
+              {(() => {
+                const rulesList = unifiedConfluence?.rules || [];
+                const filteredRules = rulesList.filter((r) => {
+                  if (confluenceFilterCategory === "100_WR" && (r.validation_win_rate ?? 0) < 100) return false;
+                  if (confluenceFilterCategory === "80_WR" && ((r.validation_win_rate ?? 0) < 80 || (r.validation_win_rate ?? 0) >= 100)) return false;
+                  if (confluenceFilterCategory === "70_WR" && ((r.validation_win_rate ?? 0) < 70 || (r.validation_win_rate ?? 0) >= 80)) return false;
+                  if (confluenceFilterCategory === "CUSTOM" && r.verdict !== "Custom" && r.verdict !== "Manual" && !r.id.startsWith("custom_")) return false;
+                  if (confluenceSetupFilter !== "ALL" && r.setup_id !== confluenceSetupFilter && r.setup_id !== "all") return false;
+                  if (confluenceDayFilter !== "ALL") {
+                    if (r.days !== "ALL" && Array.isArray(r.days) && !r.days.map((d) => d.toLowerCase()).includes(confluenceDayFilter.toLowerCase())) return false;
+                  }
+                  if (confluenceRegimeFilter !== "ALL") {
+                    if (r.regimes !== "ALL" && Array.isArray(r.regimes) && !r.regimes.includes(confluenceRegimeFilter as MarketRegime)) return false;
+                  }
+                  if (confluenceSearch.trim()) {
+                    const q = confluenceSearch.toLowerCase();
+                    const matchName = r.name.toLowerCase().includes(q);
+                    const matchSetup = r.setup_id.toLowerCase().includes(q);
+                    const matchDays = Array.isArray(r.days) ? r.days.join(" ").toLowerCase().includes(q) : r.days.toLowerCase().includes(q);
+                    const matchSessions = Array.isArray(r.sessions) ? r.sessions.join(" ").toLowerCase().includes(q) : r.sessions.toLowerCase().includes(q);
+                    const matchRegimes = Array.isArray(r.regimes) ? r.regimes.join(" ").toLowerCase().includes(q) : r.regimes.toLowerCase().includes(q);
+                    if (!matchName && !matchSetup && !matchDays && !matchSessions && !matchRegimes) return false;
+                  }
+                  return true;
+                });
+
+                return (
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-sm">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100/80 border-b border-slate-200 text-slate-700 font-mono text-[11px] uppercase">
+                          <th className="py-2.5 px-3 w-12 text-center">Active</th>
+                          <th className="py-2.5 px-3">Rule Name & Setup</th>
+                          <th className="py-2.5 px-3">Context Tuple (Day · Session · Hours · Regime)</th>
+                          {showResearchMetrics ? (
+                            <>
+                              <th className="py-2.5 px-3 text-right" title="Initial in-sample discovery trades and win rate">
+                                Discovery (N / WR)
+                              </th>
+                              <th className="py-2.5 px-3 text-right" title="Forward out-of-sample validation trades and win rate">
+                                Validation (N / WR)
+                              </th>
+                              <th className="py-2.5 px-3 text-center" title="Statistical stability assessment">
+                                Verdict
+                              </th>
+                            </>
+                          ) : (
+                            <th className="py-2.5 px-3 text-center">Empirical Edge</th>
+                          )}
+                          <th className="py-2.5 px-3 text-center">Risk Multiplier</th>
+                          <th className="py-2.5 px-2 text-center w-12">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-sans">
+                        {filteredRules.length === 0 ? (
+                          <tr>
+                            <td colSpan={showResearchMetrics ? 8 : 6} className="py-8 text-center text-slate-400 font-sans text-xs">
+                              No confluence rules match the selected filters.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredRules.map((rule, idx) => {
+                            const setupMeta = CONFLUENCE_SETUPS.find((s) => s.id === rule.setup_id);
+                            const isAllSetups = rule.setup_id === "all";
+
+                            return (
+                              <tr
+                                key={rule.id}
+                                className={`hover:bg-slate-50/80 transition-colors ${
+                                  !rule.is_enabled ? "opacity-45 bg-slate-50/30" : ""
+                                }`}
+                              >
+                                {/* Active Checkbox */}
+                                <td className="py-2.5 px-3 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={rule.is_enabled}
+                                    onChange={() => handleToggleConfluenceRule(rule.id)}
+                                    className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                  />
+                                </td>
+
+                                {/* Name & Setup */}
+                                <td className="py-2.5 px-3">
+                                  <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                                    <span className="font-mono text-[10px] text-slate-400 font-bold">#{idx + 1}</span>
+                                    <span>{rule.name}</span>
+                                  </div>
+                                  <div className="mt-0.5 flex items-center gap-1.5">
+                                    <span
+                                      className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-semibold ${
+                                        isAllSetups
+                                          ? "bg-slate-100 text-slate-600 border border-slate-200"
+                                          : "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                      }`}
+                                    >
+                                      {setupMeta?.name || rule.setup_id}
+                                    </span>
+                                  </div>
+                                </td>
+
+                                {/* Multi-Dimensional Context Tuple */}
+                                <td className="py-2.5 px-3">
+                                  <div className="flex flex-wrap items-center gap-1 font-mono text-[11px]">
+                                    <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 font-semibold capitalize">
+                                      📅 {Array.isArray(rule.days) ? rule.days.join(", ") : rule.days}
+                                    </span>
+                                    <span className="px-1.5 py-0.5 rounded bg-sky-50 border border-sky-200 text-sky-800 font-semibold">
+                                      🕒 {formatConfluenceTiming(rule)}
+                                    </span>
+                                    <span className="px-1.5 py-0.5 rounded bg-purple-50 border border-purple-200 text-purple-800 font-semibold">
+                                      📊 {Array.isArray(rule.regimes) ? rule.regimes.join(", ") : "ALL REGIMES"}
+                                    </span>
+                                  </div>
+                                </td>
+
+                                {/* Empirical Edge or Detailed Research Stats */}
+                                {showResearchMetrics ? (
+                                  <>
+                                    {/* Discovery Trades & WR */}
+                                    <td className="py-2.5 px-3 text-right font-mono text-xs tabular-nums text-slate-600">
+                                      {rule.discovery_trades !== undefined ? (
+                                        <>
+                                          <span>{rule.discovery_trades} tr</span>
+                                          <span className="text-slate-400 mx-1">/</span>
+                                          <span className="font-semibold text-slate-800">{rule.discovery_win_rate?.toFixed(1)}%</span>
+                                        </>
+                                      ) : (
+                                        <span className="text-slate-400">—</span>
+                                      )}
+                                    </td>
+
+                                    {/* Validation Trades & WR */}
+                                    <td className="py-2.5 px-3 text-right font-mono text-xs tabular-nums">
+                                      {rule.validation_trades !== undefined ? (
+                                        <>
+                                          <span className="text-slate-600">{rule.validation_trades} tr</span>
+                                          <span className="text-slate-400 mx-1">/</span>
+                                          <span className={`font-bold text-sm ${
+                                            (rule.validation_win_rate ?? 0) >= 100
+                                              ? "text-emerald-700 font-extrabold"
+                                              : (rule.validation_win_rate ?? 0) >= 80
+                                              ? "text-emerald-600"
+                                              : "text-indigo-600"
+                                          }`}>
+                                            {rule.validation_win_rate?.toFixed(1)}%
+                                          </span>
+                                        </>
+                                      ) : (
+                                        <span className="text-slate-400">—</span>
+                                      )}
+                                    </td>
+
+                                    {/* Verdict */}
+                                    <td className="py-2.5 px-3 text-center font-mono">
+                                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                        rule.verdict === "Robust"
+                                          ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                          : rule.verdict === "Moderate"
+                                          ? "bg-blue-100 text-blue-800 border border-blue-200"
+                                          : "bg-slate-100 text-slate-700 border border-slate-200"
+                                      }`}>
+                                        {rule.verdict || "Custom"}
+                                      </span>
+                                    </td>
+                                  </>
+                                ) : (
+                                  /* Clean Default View: Empirical Edge Badge */
+                                  <td className="py-2.5 px-3 text-center">
+                                    {rule.validation_win_rate !== undefined && rule.validation_win_rate > 0 ? (
+                                      <div className="inline-flex flex-col items-center">
+                                        <span className={`px-2 py-0.5 rounded text-[11px] font-bold font-mono ${
+                                          rule.validation_win_rate >= 100
+                                            ? "bg-emerald-50 text-emerald-800 border border-emerald-200 font-extrabold"
+                                            : rule.validation_win_rate >= 80
+                                            ? "bg-teal-50 text-teal-800 border border-teal-200"
+                                            : "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                        }`}>
+                                          {rule.validation_win_rate.toFixed(1)}% WR
+                                        </span>
+                                        {rule.validation_trades ? (
+                                          <span className="text-[9px] text-slate-400 font-mono mt-0.5">
+                                            {rule.validation_trades} trades verified
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                                        Active Rule
                                       </span>
                                     )}
-                                  </div>
-                                  <div className="text-[10px] text-slate-400 font-sans line-clamp-1" title={day.note}>
-                                    {day.note}
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
+                                  </td>
+                                )}
 
-                            {allSessions.map((session) => {
-                              const isChecked = allowedSessions.includes(session.id);
-                              return (
-                                <td key={session.id} className="py-2 px-2 text-center">
+                                {/* Risk Multiplier */}
+                                <td className="py-2.5 px-3 text-center font-mono">
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                    {rule.risk_multiplier ? `${rule.risk_multiplier.toFixed(2)}x` : "1.00x"}
+                                  </span>
+                                </td>
+
+                                {/* Actions */}
+                                <td className="py-2.5 px-2 text-center">
                                   <button
                                     type="button"
-                                    onClick={async () => {
-                                      const nextList = isChecked
-                                        ? allowedSessions.filter((s) => s !== session.id)
-                                        : [...allowedSessions, session.id];
-
-                                      const nextMatrix = {
-                                        ...activeDayMatrix,
-                                        [day.id]: nextList,
-                                      };
-                                      setMsConfig({ ...msConfig, day_session_matrix: nextMatrix });
-
-                                      try {
-                                        await apiFetch("/api/strategy/day-session-matrix/toggle-cell", {
-                                          method: "POST",
-                                          headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({
-                                            dayId: day.id,
-                                            session: session.id,
-                                            enabled: !isChecked,
-                                          }),
-                                        });
-                                      } catch (e) {
-                                        console.error("Failed to toggle day-session cell:", e);
-                                      }
-                                    }}
-                                    className={`w-7 h-7 rounded-md inline-flex items-center justify-center transition-all cursor-pointer border ${
-                                      isChecked
-                                        ? "bg-indigo-50 border-indigo-200 text-indigo-600 hover:bg-indigo-100 shadow-2xs font-bold"
-                                        : "bg-slate-50 border-slate-200 text-slate-300 hover:border-slate-300 hover:bg-slate-100"
-                                    }`}
-                                    title={`${day.name} during ${session.name}: ${isChecked ? "Allowed" : "RESTRICTED (Trades Blocked)"}. Click to toggle.`}
+                                    onClick={() => handleDeleteConfluenceRule(rule.id)}
+                                    title="Delete this rule"
+                                    className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                                   >
-                                    {isChecked ? (
-                                      <Check className="w-3.5 h-3.5 stroke-[3]" />
-                                    ) : (
-                                      <X className="w-3 h-3 text-rose-400 stroke-[2.5]" />
-                                    )}
+                                    <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 </td>
-                              );
-                            })}
-
-                            <td className="py-2.5 px-3 text-center">
-                              <div className="flex items-center justify-center gap-1.5">
-                                <span
-                                  className={`inline-block text-[9px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
-                                    !isMasterOn
-                                      ? "bg-slate-100 text-slate-500 border border-slate-200"
-                                      : restrictionsCount === 0
-                                      ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                                      : restrictionsCount >= allSessions.length
-                                      ? "bg-rose-100 text-rose-800 border border-rose-300"
-                                      : "bg-amber-100 text-amber-800 border border-amber-300"
-                                  }`}
-                                >
-                                  {!isMasterOn
-                                    ? "BYPASSED"
-                                    : restrictionsCount === 0
-                                    ? "ALL ALLOWED"
-                                    : restrictionsCount >= allSessions.length
-                                    ? "ALL BLOCKED"
-                                    : `${restrictionsCount} RESTRICTED`}
-                                </span>
-
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      const nextMatrix = {
-                                        ...activeDayMatrix,
-                                        [day.id]: allSessions.map((s) => s.id),
-                                      };
-                                      setMsConfig({ ...msConfig, day_session_matrix: nextMatrix });
-                                      try {
-                                        await apiFetch("/api/strategy/day-session-matrix/toggle-day", {
-                                          method: "POST",
-                                          headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({ dayId: day.id, allowAll: true }),
-                                        });
-                                      } catch (e) {
-                                        console.error("Failed to allow all sessions for day:", e);
-                                      }
-                                    }}
-                                    title={`Allow all sessions on ${day.name}`}
-                                    className="px-1.5 py-0.5 text-[9px] rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 font-sans"
-                                  >
-                                    All
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      const nextMatrix = {
-                                        ...activeDayMatrix,
-                                        [day.id]: [],
-                                      };
-                                      setMsConfig({ ...msConfig, day_session_matrix: nextMatrix });
-                                      try {
-                                        await apiFetch("/api/strategy/day-session-matrix/toggle-day", {
-                                          method: "POST",
-                                          headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({ dayId: day.id, allowAll: false }),
-                                        });
-                                      } catch (e) {
-                                        console.error("Failed to block all sessions for day:", e);
-                                      }
-                                    }}
-                                    title={`Block all sessions on ${day.name}`}
-                                    className="px-1.5 py-0.5 text-[9px] rounded bg-white hover:bg-rose-50 border border-slate-200 text-rose-600 font-sans"
-                                  >
-                                    None
-                                  </button>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      });
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* ================= DYNAMIC TRADING SESSION x SETUP GATING MATRIX ================= */}
-            <div className="border border-slate-200/80 rounded-xl p-5 space-y-4 bg-white shadow-sm" id="dynamic-session-matrix">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-3 border-b border-slate-100 gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-indigo-600" />
-                    <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-sans">
-                      Dynamic Trading Session x Setup Gating Matrix
-                    </h4>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
-                      Institutional Liquidity Filter
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Filters setups according to institutional order flow profiles across Asian, European, and US trading sessions. Prevents breakout chasing during low-liquidity hours and protects against false trends on weekends.
-                  </p>
-                </div>
-
-                {/* Master Switch for Session Matrix Gating */}
-                <div className="flex items-center gap-3 bg-slate-50 border border-slate-200/70 px-3 py-2 rounded-lg shrink-0">
-                  <div className="text-right">
-                    <p className="text-[11px] font-semibold text-slate-800">Enforce Session Matrix</p>
-                    <p className="text-[9px] font-mono text-slate-400">
-                      {msConfig.dynamic_session_setup_matrix_enabled !== false ? "STRICT GATING ACTIVE" : "BYPASSED (ALL SESSIONS)"}
-                    </p>
-                  </div>
-                  <button
-                    id="toggle-dynamic-session-matrix"
-                    type="button"
-                    onClick={async () => {
-                      const next = msConfig.dynamic_session_setup_matrix_enabled === false ? true : false;
-                      setMsConfig({ ...msConfig, dynamic_session_setup_matrix_enabled: next });
-                      try {
-                        await apiFetch("/api/strategy/dynamic-conditions/update", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ dynamic_session_setup_matrix_enabled: next }),
-                        });
-                      } catch (e) {
-                        console.error("Failed to toggle session matrix master:", e);
-                      }
-                    }}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      msConfig.dynamic_session_setup_matrix_enabled !== false ? "bg-indigo-600" : "bg-slate-300"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        msConfig.dynamic_session_setup_matrix_enabled !== false ? "translate-x-4" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {/* Current Active Session Live Status Banner */}
-              {(() => {
-                const getCurrentLiveSession = () => {
-                  const windows = generalConfig.timing_windows || [];
-                  const d = new Date();
-                  const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
-                  const istOffset = 5.5 * 3600000;
-                  const istDate = new Date(utcMs + istOffset);
-                  const hour = istDate.getHours();
-                  const minute = istDate.getMinutes();
-                  const day = istDate.getDay();
-                  const minutesOfDay = hour * 60 + minute;
-
-                  if (day === 0 || (day === 6 && minutesOfDay > 90)) {
-                    return "weekends";
-                  }
-
-                  const parseTimeToMinutes = (tStr: string) => {
-                    const parts = tStr.split(":");
-                    return parts.length === 2 ? parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10) : 0;
-                  };
-
-                  const match = windows.find((w) => {
-                    if (w.id === "weekends") return false;
-                    const s = parseTimeToMinutes(w.start_time);
-                    const e = parseTimeToMinutes(w.end_time);
-                    return s < e ? minutesOfDay >= s && minutesOfDay < e : minutesOfDay >= s || minutesOfDay < e;
-                  });
-
-                  return match ? match.id : "intraday_chop";
-                };
-
-                const currentSessionId = getCurrentLiveSession();
-                const sessionLabels: Record<string, { name: string; time: string; icon: string }> = {
-                  asia_open: { name: "Asia Open Front-run", time: "05:00 - 09:30 IST", icon: "🌅" },
-                  intraday_chop: { name: "Intra-day Chop (Europe/Asia)", time: "09:30 - 18:30 IST", icon: "☕" },
-                  europe_us_overlap: { name: "US / Europe Overlap", time: "18:30 - 22:30 IST", icon: "🗽" },
-                  late_us_session: { name: "Late US Session", time: "22:30 - 01:30 IST", icon: "🌙" },
-                  dead_liquidity: { name: "Dead Liquidity", time: "01:30 - 05:00 IST", icon: "💤" },
-                  weekends: { name: "Weekends", time: "All day Sat/Sun IST", icon: "🏖️" },
-                };
-                const currentSessionInfo = sessionLabels[currentSessionId] || { name: "Normal Hours", time: "IST", icon: "⏰" };
-
-                return (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg gap-2 text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">Current Active Session:</span>
-                      <span className="px-2.5 py-0.5 rounded font-mono font-bold text-xs uppercase tracking-wide border bg-emerald-100 text-emerald-800 border-emerald-300 flex items-center gap-1.5">
-                        <span>{currentSessionInfo.icon}</span>
-                        <span>{currentSessionInfo.name}</span>
-                        <span className="text-[10px] opacity-75 font-normal">({currentSessionInfo.time})</span>
-                      </span>
-                      <span className="text-[11px] text-slate-500 hidden sm:inline">
-                        — The highlighted column below is currently evaluated for live trade entries.
-                      </span>
-                    </div>
-
-                    {/* Presets Bar */}
-                    <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                      <span className="text-[10px] font-mono text-slate-400 uppercase font-bold mr-1">Presets:</span>
-                      {[
-                        { id: "INSTITUTIONAL_HIERARCHY", label: "⚡ Institutional Research", title: "Institutional BTC research hierarchy: Overlap aggressive, London SMC sweeps, Asian noise gated, Friday close protected" },
-                        { id: "QUANT_OPTIMAL", label: "Quant Optimal", title: "Institutional standard: Trend in US/EU overlap & Asia, Mean-reversion in Chop & Weekends" },
-                        { id: "STRICT_PEAK_ONLY", label: "Strict Peak Only", title: "Only allow setups during high-volume sessions (Asia Open, US/EU Overlap, Late US)" },
-                        { id: "MEAN_REVERSION_FOCUS", label: "Mean Reversion", title: "Confines chop, weekends, and dead hours exclusively to SFP, VWAP & Liquidity Sweeps" },
-                        { id: "ALL_PERMISSIVE", label: "All Sessions", title: "Allow every setup across all 6 trading sessions" },
-                      ].map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          title={p.title}
-                          onClick={async () => {
-                            try {
-                              const res = await apiFetch("/api/strategy/session-matrix/preset", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ preset: p.id }),
-                              });
-                              if (res.ok) {
-                                const data = await res.json();
-                                if (data.setup_session_matrix) {
-                                  setMsConfig({ ...msConfig, setup_session_matrix: data.setup_session_matrix });
-                                }
-                              }
-                            } catch (e) {
-                              console.error("Failed to apply session preset:", e);
-                            }
-                          }}
-                          className="px-2 py-1 text-[10px] font-mono font-medium rounded border border-slate-200 bg-white hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 text-slate-600 transition-colors cursor-pointer"
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 );
               })()}
 
-              {/* Matrix Table */}
-              <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-100/80 border-b border-slate-200 text-[10px] font-mono uppercase text-slate-500">
-                      <th className="py-2.5 px-3 font-semibold">Tactical Setup</th>
-                      <th className="py-2.5 px-2 font-semibold">Category</th>
-                      {(() => {
-                        const getCurrentLiveSession = () => {
-                          const windows = generalConfig.timing_windows || [];
-                          const d = new Date();
-                          const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
-                          const istOffset = 5.5 * 3600000;
-                          const istDate = new Date(utcMs + istOffset);
-                          const hour = istDate.getHours();
-                          const minute = istDate.getMinutes();
-                          const day = istDate.getDay();
-                          const minutesOfDay = hour * 60 + minute;
+              {/* Add Custom Confluence Rule Modal */}
+              {showAddRuleModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+                  <div className="bg-white border border-slate-200 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-xl">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Plus className="w-5 h-5 text-indigo-600" />
+                          <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+                            Add Trading Confluence Rule
+                          </h4>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Allow a setup to execute when live market context matches these conditions.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddRuleModal(false)}
+                        className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
 
-                          if (day === 0 || (day === 6 && minutesOfDay > 90)) {
-                            return "weekends";
-                          }
+                    <div className="space-y-3.5 text-xs">
+                      {/* Rule Name */}
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          Rule Name <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Setup 14 Thursday Overlap Momentum Boost"
+                          value={newRuleDraft.name || ""}
+                          onChange={(e) => setNewRuleDraft({ ...newRuleDraft, name: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 font-sans text-xs"
+                        />
+                      </div>
 
-                          const parseTimeToMinutes = (tStr: string) => {
-                            const parts = tStr.split(":");
-                            return parts.length === 2 ? parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10) : 0;
-                          };
-
-                          const match = windows.find((w) => {
-                            if (w.id === "weekends") return false;
-                            const s = parseTimeToMinutes(w.start_time);
-                            const e = parseTimeToMinutes(w.end_time);
-                            return s < e ? minutesOfDay >= s && minutesOfDay < e : minutesOfDay >= s || minutesOfDay < e;
-                          });
-
-                          return match ? match.id : "intraday_chop";
-                        };
-                        const liveSessionId = getCurrentLiveSession();
-
-                        const SESSIONS_COLUMNS = [
-                          { id: "asia_open", label: "Asia Open", time: "05:00-09:30", icon: "🌅" },
-                          { id: "intraday_chop", label: "Intra-day Chop", time: "09:30-18:30", icon: "☕" },
-                          { id: "europe_us_overlap", label: "US/EU Overlap", time: "18:30-22:30", icon: "🗽" },
-                          { id: "late_us_session", label: "Late US", time: "22:30-01:30", icon: "🌙" },
-                          { id: "dead_liquidity", label: "Dead Liquidity", time: "01:30-05:00", icon: "💤" },
-                          { id: "weekends", label: "Weekends", time: "Sat/Sun IST", icon: "🏖️" },
-                        ];
-
-                        return SESSIONS_COLUMNS.map((sess) => {
-                          const isLiveCurrent = liveSessionId === sess.id;
-                          return (
-                            <th
-                              key={sess.id}
-                              className={`py-2 px-2.5 font-semibold text-center ${
-                                isLiveCurrent ? "bg-emerald-100/70 text-emerald-900 border-x-2 border-emerald-400 font-bold" : ""
-                              }`}
-                            >
-                              <div className="flex items-center justify-center gap-1">
-                                <span>{sess.icon}</span>
-                                <span>{sess.label}</span>
-                              </div>
-                              <span className="block text-[8px] opacity-75 font-mono">{sess.time}</span>
-                              {isLiveCurrent && (
-                                <span className="block text-[8px] font-bold text-emerald-600 tracking-wider">LIVE</span>
-                              )}
-                            </th>
-                          );
-                        });
-                      })()}
-                      <th className="py-2.5 px-3 font-semibold text-center">Session Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-sans">
-                    {(() => {
-                      const defaultSessionMatrix: Record<string, string[]> = {
-                        setup_1_pullback_retest: ["asia_open", "europe_us_overlap", "late_us_session"],
-                        setup_2_dynamic_ema_pushback: ["europe_us_overlap", "late_us_session"],
-                        setup_3_liquidity_sweep: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "weekends"],
-                        setup_4_fvg_retest: ["asia_open", "europe_us_overlap", "late_us_session", "intraday_chop"],
-                        setup_9_range_failed_auction: ["asia_open", "intraday_chop", "dead_liquidity", "weekends"],
-                        setup_10_vwap_band_rejection: ["asia_open", "intraday_chop", "dead_liquidity", "weekends"],
-                        setup_11_eqh_eql_double_touch: ["asia_open", "intraday_chop", "europe_us_overlap", "weekends"],
-                        setup_12_cvd_absorption: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session"],
-                        setup_13_oi_flush_cascade: ["asia_open", "europe_us_overlap", "late_us_session"],
-                        setup_14_fresh_momentum_impulse: ["asia_open", "europe_us_overlap", "late_us_session"],
-                        setup_15_trendline_bounce: ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session"],
-                      };
-
-                      const activeSessionMatrix = (msConfig as any).setup_session_matrix || defaultSessionMatrix;
-
-                      const setupsList = [
-                        { id: "setup_1_pullback_retest", num: "1", name: "Pullback & Retest", key: "pullback_retest_enabled", category: "Trend Continuation" },
-                        { id: "setup_2_dynamic_ema_pushback", num: "2", name: "EMA Pushback", key: "ema_pushback_enabled", category: "Trend Pullback" },
-                        { id: "setup_3_liquidity_sweep", num: "3", name: "Liquidity Sweep", key: "liquidity_sweep_enabled", category: "Mean Reversion" },
-                        { id: "setup_4_fvg_retest", num: "4", name: "Fair Value Gap", key: "fvg_strategy_enabled", category: "SMC Imbalance" },
-                        { id: "setup_9_range_failed_auction", num: "9", name: "Failed Auction", key: "failed_auction_strategy_enabled", category: "Mean Reversion" },
-                        { id: "setup_10_vwap_band_rejection", num: "10", name: "VWAP Band Rejection", key: "vwap_band_reversal_enabled", category: "Mean Reversion" },
-                        { id: "setup_11_eqh_eql_double_touch", num: "11", name: "EQH / EQL Double Touch", key: "eqh_eql_strategy_enabled", category: "Liquidity Sweep" },
-                        { id: "setup_12_cvd_absorption", num: "12", name: "CVD Absorption", key: "cvd_divergence_strategy_enabled", category: "Order Flow" },
-                        { id: "setup_13_oi_flush_cascade", num: "13", name: "OI Flush Fade", key: "oi_flush_strategy_enabled", category: "Order Flow" },
-                        { id: "setup_14_fresh_momentum_impulse", num: "14", name: "Fresh Momentum Impulse", key: "fresh_momentum_strategy_enabled", category: "Breakout" },
-                        { id: "setup_15_trendline_bounce", num: "15", name: "Trendline Bounce & Retest", key: "trendline_bounce_strategy_enabled", category: "Trend Retest" },
-                      ];
-
-                      const sessionIds = ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity", "weekends"];
-
-                      const getCurrentLiveSession = () => {
-                        const windows = generalConfig.timing_windows || [];
-                        const d = new Date();
-                        const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
-                        const istOffset = 5.5 * 3600000;
-                        const istDate = new Date(utcMs + istOffset);
-                        const hour = istDate.getHours();
-                        const minute = istDate.getMinutes();
-                        const day = istDate.getDay();
-                        const minutesOfDay = hour * 60 + minute;
-
-                        if (day === 0 || (day === 6 && minutesOfDay > 90)) {
-                          return "weekends";
-                        }
-
-                        const parseTimeToMinutes = (tStr: string) => {
-                          const parts = tStr.split(":");
-                          return parts.length === 2 ? parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10) : 0;
-                        };
-
-                        const match = windows.find((w) => {
-                          if (w.id === "weekends") return false;
-                          const s = parseTimeToMinutes(w.start_time);
-                          const e = parseTimeToMinutes(w.end_time);
-                          return s < e ? minutesOfDay >= s && minutesOfDay < e : minutesOfDay >= s || minutesOfDay < e;
-                        });
-
-                        return match ? match.id : "intraday_chop";
-                      };
-
-                      const currentSessionId = getCurrentLiveSession();
-
-                      return setupsList.map((setup) => {
-                        const isMasterOn = (msConfig as any)[setup.key] !== false;
-                        const allowedSessions: string[] = activeSessionMatrix[setup.id] || defaultSessionMatrix[setup.id] || [];
-                        const isAllowedInCurrentSession = allowedSessions.includes(currentSessionId);
-                        const isMatrixEnforced = msConfig.dynamic_session_setup_matrix_enabled !== false;
-                        const isLiveSessionActive = isMasterOn && (!isMatrixEnforced || isAllowedInCurrentSession);
-
-                        return (
-                          <tr
-                            key={setup.id}
-                            className={`hover:bg-slate-50/70 transition-colors ${
-                              !isMasterOn ? "opacity-40 bg-slate-50/40" : ""
-                            }`}
+                      {/* Setup & Day */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">Target Setup</label>
+                          <select
+                            value={newRuleDraft.setup_id || "all"}
+                            onChange={(e) => setNewRuleDraft({ ...newRuleDraft, setup_id: e.target.value })}
+                            className="w-full px-2.5 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 bg-white"
                           >
-                            <td className="py-2.5 px-3">
-                              <div className="font-semibold text-slate-800 text-xs flex items-center gap-1.5">
-                                <span className="font-mono text-[10px] text-slate-400 font-bold">#{setup.num}</span>
-                                <span>{setup.name}</span>
-                              </div>
-                            </td>
-                            <td className="py-2.5 px-2">
-                              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
-                                setup.category.includes("Trend")
-                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                  : setup.category.includes("Reversion")
-                                  ? "bg-amber-50 text-amber-700 border border-amber-200"
-                                  : setup.category.includes("Order")
-                                  ? "bg-purple-50 text-purple-700 border border-purple-200"
-                                  : "bg-blue-50 text-blue-700 border border-blue-200"
-                              }`}>
-                                {setup.category}
-                              </span>
-                            </td>
+                            {CONFLUENCE_SETUPS.map((s) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                        </div>
 
-                            {sessionIds.map((sessId) => {
-                              const isChecked = allowedSessions.includes(sessId);
-                              const isLiveCol = currentSessionId === sessId;
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">Trading Day</label>
+                          <select
+                            value={Array.isArray(newRuleDraft.days) ? newRuleDraft.days[0] : newRuleDraft.days || "ALL"}
+                            onChange={(e) => setNewRuleDraft({ ...newRuleDraft, days: e.target.value === "ALL" ? "ALL" : [e.target.value] })}
+                            className="w-full px-2.5 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 capitalize bg-white"
+                          >
+                            <option value="ALL">ALL Days (Mon - Sun)</option>
+                            {CONFLUENCE_DAYS.map((d) => (
+                              <option key={d} value={d} className="capitalize">{d}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
 
-                              return (
-                                <td
-                                  key={sessId}
-                                  className={`py-2 px-2.5 text-center ${
-                                    isLiveCol ? "bg-emerald-50/50 border-x-2 border-emerald-400/60" : ""
+                      {/* Consolidated Market Session & Timing Window Selector */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block font-semibold text-slate-700">
+                            Market Session & Timing Window
+                          </label>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            UTC & IST synchronized
+                          </span>
+                        </div>
+                        <select
+                          value={selectedTimingOptionId}
+                          onChange={(e) => {
+                            const opt = CONFLUENCE_TIMING_OPTIONS.find((t) => t.id === e.target.value);
+                            if (opt) {
+                              setNewRuleDraft({
+                                ...newRuleDraft,
+                                sessions: opt.session === "ALL" ? "ALL" : [opt.session],
+                                hours_utc: opt.hours_utc === "ALL" ? "ALL" : [opt.hours_utc],
+                              });
+                            }
+                          }}
+                          className="w-full px-2.5 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 bg-white text-xs font-sans"
+                        >
+                          {CONFLUENCE_TIMING_OPTIONS.map((opt) => (
+                            <option key={opt.id} value={opt.id}>
+                              {opt.name}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          Consolidated timing: Sets the market session and corresponding UTC hour block together to avoid contradictory gating.
+                        </p>
+                      </div>
+
+                      {/* Market Regime & Position Sizing Multiplier */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">Market Regime</label>
+                          <select
+                            value={Array.isArray(newRuleDraft.regimes) ? newRuleDraft.regimes[0] : newRuleDraft.regimes || "ALL"}
+                            onChange={(e) => setNewRuleDraft({ ...newRuleDraft, regimes: e.target.value === "ALL" ? "ALL" : [e.target.value as MarketRegime] })}
+                            className="w-full px-2.5 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 bg-white"
+                          >
+                            <option value="ALL">ALL Regimes</option>
+                            {Object.values(MarketRegime).map((r) => (
+                              <option key={r} value={r}>{r}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">
+                            Position Size Multiplier
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              step="0.05"
+                              min="0.1"
+                              max="3.0"
+                              value={newRuleDraft.risk_multiplier ?? 1.0}
+                              onChange={(e) => setNewRuleDraft({ ...newRuleDraft, risk_multiplier: Number(e.target.value) })}
+                              className="w-20 px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 font-mono text-xs"
+                            />
+                            <div className="flex items-center gap-1">
+                              {[
+                                { val: 1.0, label: "1.0x" },
+                                { val: 1.15, label: "1.15x" },
+                                { val: 1.25, label: "1.25x" },
+                              ].map((preset) => (
+                                <button
+                                  key={preset.val}
+                                  type="button"
+                                  onClick={() => setNewRuleDraft({ ...newRuleDraft, risk_multiplier: preset.val })}
+                                  className={`px-1.5 py-1 text-[10px] font-mono rounded border transition-colors cursor-pointer ${
+                                    newRuleDraft.risk_multiplier === preset.val
+                                      ? "bg-indigo-600 text-white border-indigo-600"
+                                      : "bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200"
                                   }`}
                                 >
-                                  <button
-                                    type="button"
-                                    disabled={!isMasterOn}
-                                    onClick={async () => {
-                                      const nextList = isChecked
-                                        ? allowedSessions.filter((s) => s !== sessId)
-                                        : [...allowedSessions, sessId];
+                                  {preset.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <span className="text-[10px] text-slate-400 mt-1 block">
+                            1.0x = standard; 1.25x = +25% sizing boost.
+                          </span>
+                        </div>
+                      </div>
 
-                                      const nextMatrix = {
-                                        ...activeSessionMatrix,
-                                        [setup.id]: nextList,
-                                      };
-                                      setMsConfig({ ...msConfig, setup_session_matrix: nextMatrix });
+                      {/* Optional Advanced Backtest / Research Notes */}
+                      <div className="pt-1 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => setShowAdvancedRuleNotes(!showAdvancedRuleNotes)}
+                          className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1 cursor-pointer py-1"
+                        >
+                          <span>{showAdvancedRuleNotes ? "▾ Hide Optional Research Notes" : "▸ + Add Optional Historical Backtest Stats / Notes"}</span>
+                        </button>
 
-                                      try {
-                                        await apiFetch("/api/strategy/session-matrix/toggle-cell", {
-                                          method: "POST",
-                                          headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({ setupId: setup.id, session: sessId }),
-                                        });
-                                      } catch (e) {
-                                        console.error("Failed to toggle session cell:", e);
-                                      }
-                                    }}
-                                    className={`inline-flex items-center justify-center w-6 h-6 rounded border transition-all cursor-pointer ${
-                                      isChecked
-                                        ? "bg-emerald-600 border-emerald-700 text-white shadow-xs"
-                                        : "bg-white border-slate-200 text-slate-300 hover:border-slate-300 hover:bg-slate-100"
-                                    }`}
-                                    title={`${isChecked ? "Allowed" : "Blocked"} during ${sessId}. Click to toggle.`}
-                                  >
-                                    {isChecked ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : <X className="w-3 h-3 text-slate-300" />}
-                                  </button>
-                                </td>
-                              );
-                            })}
+                        {showAdvancedRuleNotes && (
+                          <div className="mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                            <p className="text-[11px] text-slate-500">
+                              Optional metadata for tracking backtest results. These fields are purely descriptive and do not affect live trade gating.
+                            </p>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-slate-600 font-medium mb-1">Historical Win Rate (%)</label>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  placeholder="e.g. 80.0"
+                                  value={newRuleDraft.validation_win_rate ?? ""}
+                                  onChange={(e) => setNewRuleDraft({ ...newRuleDraft, validation_win_rate: e.target.value ? Number(e.target.value) : undefined })}
+                                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white font-mono"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-slate-600 font-medium mb-1">Trades Verified (N)</label>
+                                <input
+                                  type="number"
+                                  placeholder="e.g. 24"
+                                  value={newRuleDraft.validation_trades ?? ""}
+                                  onChange={(e) => setNewRuleDraft({ ...newRuleDraft, validation_trades: e.target.value ? Number(e.target.value) : undefined })}
+                                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white font-mono"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
 
-                            <td className="py-2.5 px-3 text-center">
-                              <span className={`inline-block text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
-                                !isMasterOn
-                                  ? "bg-slate-100 text-slate-500 border border-slate-200"
-                                  : isLiveSessionActive
-                                  ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                                  : "bg-amber-100 text-amber-800 border border-amber-300"
-                              }`}>
-                                {!isMasterOn ? "DISABLED" : isLiveSessionActive ? "ELIGIBLE" : "SESSION GATED"}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      });
-                    })()}
-                  </tbody>
-                </table>
-              </div>
+                    <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddRuleModal(false)}
+                        className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddCustomConfluenceRule}
+                        className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-sm cursor-pointer"
+                      >
+                        Add Rule
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* ================= DYNAMIC QUANTITATIVE CONDITION RULES ================= */}

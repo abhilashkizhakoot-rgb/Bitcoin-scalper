@@ -27,6 +27,7 @@ import {
   X,
   Zap,
   RefreshCw,
+  RotateCcw,
   Filter,
   Compass,
   AlertTriangle,
@@ -580,6 +581,38 @@ export default function ConfigPage({
       }
     } catch (e: any) {
       setConfluenceErrorMsg(e.message || "Failed to reset preset.");
+    } finally {
+      setIsSavingConfluence(false);
+    }
+  };
+
+  const handleClearAllConfluenceRules = async () => {
+    if (!confirm("Are you sure you want to clear all confluence rules? This will empty the active matrix rules list while preserving your master configuration settings.")) {
+      return;
+    }
+    setIsSavingConfluence(true);
+    setConfluenceErrorMsg(null);
+    try {
+      const res = await apiFetch("/api/strategy/unified-confluence/clear", {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.config) {
+          setUnifiedConfluence(data.config);
+          setMsConfig({
+            ...msConfig,
+            unified_confluence: data.config,
+          });
+        }
+        setConfluenceSuccessMsg("All confluence rules have been cleared.");
+        setTimeout(() => setConfluenceSuccessMsg(null), 4000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || "Failed to clear confluence rules.");
+      }
+    } catch (e: any) {
+      alert("Error clearing rules: " + (e.message || "Unknown error"));
     } finally {
       setIsSavingConfluence(false);
     }
@@ -4529,6 +4562,30 @@ export default function ConfigPage({
                     <span>Import JSON</span>
                     <input type="file" accept=".json" onChange={handleImportConfluenceJson} className="hidden" />
                   </label>
+
+                  <button
+                    type="button"
+                    id="btn-clear-confluence-rules"
+                    onClick={handleClearAllConfluenceRules}
+                    disabled={isSavingConfluence || !unifiedConfluence?.rules?.length}
+                    title="Remove all rules from the matrix (master settings like strict mode are preserved)"
+                    className="px-2.5 py-1.5 bg-white border border-rose-200 hover:bg-rose-50 text-rose-600 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Clear All Rules</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="btn-reset-confluence-presets"
+                    onClick={handleResetConfluenceToPreset}
+                    disabled={isSavingConfluence}
+                    title="Restore the 25 default empirical backtested rules"
+                    className="px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Reset Presets</span>
+                  </button>
                 </div>
               </div>
 

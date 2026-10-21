@@ -882,6 +882,19 @@ async function startServer() {
     }
   });
 
+  app.post("/api/strategy/unified-confluence/clear", (req, res) => {
+    try {
+      const updated = dbManager.updateUnifiedConfluenceConfig({ rules: [] });
+      res.json({
+        success: true,
+        message: "All confluence rules cleared successfully.",
+        config: updated,
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   app.post("/api/strategy/unified-confluence/import", (req, res) => {
     try {
       const { rules, mergeStrategy = "merge", configUpdates } = req.body || {};

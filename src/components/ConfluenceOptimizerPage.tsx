@@ -29,6 +29,7 @@ import {
   ChevronRight,
   Info,
   Upload,
+  Trash2,
 } from "lucide-react";
 import { apiFetch } from "../utils/api.ts";
 import {
@@ -331,6 +332,29 @@ export default function ConfluenceOptimizerPage({
       setError("Error optimizing rules: " + (e.message || "Unknown error"));
     } finally {
       setIsOptimizingRules(false);
+    }
+  };
+
+  // Clear All Live Rules Handler
+  const handleClearAllLiveRules = async () => {
+    if (!confirm("Are you sure you want to clear all active rules on the live bot? This will empty the live matrix while keeping your master settings intact.")) {
+      return;
+    }
+    setError(null);
+    setApplySuccessMsg(null);
+    try {
+      const res = await apiFetch("/api/strategy/unified-confluence/clear", {
+        method: "POST",
+      });
+      if (res.ok) {
+        setApplySuccessMsg("All live confluence rules have been successfully cleared.");
+        await fetchLiveConfig();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setError(err.message || "Failed to clear live rules.");
+      }
+    } catch (e: any) {
+      setError("Error clearing rules: " + (e.message || "Unknown error"));
     }
   };
 
@@ -690,6 +714,17 @@ export default function ConfluenceOptimizerPage({
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                 <span>{isOptimizingRules ? "Optimizing..." : "Remove Conflicts"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClearAllLiveRules}
+                disabled={isApplying || !liveConfluenceConfig?.rules?.length}
+                title="Clear all rules currently active in the live bot matrix"
+                className="flex-1 md:flex-none px-3.5 py-2.5 bg-white hover:bg-rose-50 text-rose-600 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border border-rose-200 transition-colors cursor-pointer disabled:opacity-40"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                <span>Clear Live Rules</span>
               </button>
 
               <button

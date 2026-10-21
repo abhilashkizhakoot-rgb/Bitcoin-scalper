@@ -28,6 +28,7 @@ import {
   Grid,
   Search,
   RefreshCw,
+  Target,
 } from "lucide-react";
 import { apiFetch } from "../utils/api.ts";
 import {
@@ -41,7 +42,11 @@ import {
   DEFAULT_AVAILABLE_SETUPS,
 } from "../backtester/types.ts";
 
-export default function BacktestLab() {
+export default function BacktestLab({
+  onNavigateToOptimizer,
+}: {
+  onNavigateToOptimizer?: () => void;
+} = {}) {
   const [setups, setSetups] = useState<BacktestSetupOption[]>(DEFAULT_AVAILABLE_SETUPS);
   const [selectedSetup, setSelectedSetup] = useState<string>("all");
   const [days, setDays] = useState<number>(3);
@@ -354,6 +359,16 @@ export default function BacktestLab() {
                 </>
               )}
             </button>
+
+            {onNavigateToOptimizer && (
+              <button
+                type="button"
+                onClick={onNavigateToOptimizer}
+                className="px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white shadow-lg shadow-emerald-950/20 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+              >
+                <Target className="w-4 h-4" /> Find WR &gt; 60% Matrix
+              </button>
+            )}
 
             <button
               onClick={handleRunBacktest}

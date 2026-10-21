@@ -2747,6 +2747,311 @@ class DatabaseManager {
     const rules = current.rules.filter((r) => r.id !== ruleId);
     return this.updateUnifiedConfluenceConfig({ rules });
   }
+
+  public importUnifiedConfluenceRules(
+    incomingRules: ConfluenceRule[],
+    options?: {
+      mergeStrategy?: "merge" | "replace";
+      configUpdates?: Partial<UnifiedConfluenceConfig>;
+    }
+  ): {
+    config: UnifiedConfluenceConfig;
+    addedCount: number;
+    updatedCount: number;
+    preservedCount: number;
+    totalCount: number;
+  } {
+    const current = this.getUnifiedConfluenceConfig();
+    const strategy = options?.mergeStrategy || "merge";
+
+    if (strategy === "replace") {
+      const updated: UnifiedConfluenceConfig = {
+        ...current,
+        ...(options?.configUpdates || {}),
+        rules: [...incomingRules],
+      };
+      this.updateUnifiedConfluenceConfig(updated);
+      return {
+        config: updated,
+        addedCount: incomingRules.length,
+        updatedCount: 0,
+        preservedCount: 0,
+        totalCount: incomingRules.length,
+      };
+    }
+
+    // Non-destructive merge: preserve existing rules and settings
+    const existingRulesMap = new Map<string, ConfluenceRule>();
+    current.rules.forEach((r) => existingRulesMap.set(r.id, { ...r }));
+
+    const getCriteriaFingerprint = (r: ConfluenceRule): string => {
+      const sId = r.setup_id || "all";
+      const sess = Array.isArray(r.sessions) ? [...r.sessions].sort().join(",") : "ALL";
+      const days = Array.isArray(r.days) ? [...r.days].map((d) => d.toLowerCase()).sort().join(",") : "ALL";
+      const regs = Array.isArray(r.regimes) ? [...r.regimes].sort().join(",") : "ALL";
+      const hrs = Array.isArray(r.hours_utc) ? [...r.hours_utc].sort().join(",") : "ALL";
+      return `${sId}::${sess}::${days}::${regs}::${hrs}`;
+    };
+
+    const existingFingerprints = new Map<string, string>();
+    current.rules.forEach((r) => {
+      existingFingerprints.set(getCriteriaFingerprint(r), r.id);
+    });
+
+    let addedCount = 0;
+    let updatedCount = 0;
+
+    for (const inRule of incomingRules) {
+      if (!inRule || typeof inRule !== "object") continue;
+      const validRule: ConfluenceRule = {
+        id: inRule.id || `rule_imp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        name: inRule.name || "Imported Confluence Rule",
+        setup_id: inRule.setup_id || "all",
+        regimes: inRule.regimes !== undefined ? inRule.regimes : "ALL",
+        sessions: inRule.sessions !== undefined ? inRule.sessions : "ALL",
+        days: inRule.days !== undefined ? inRule.days : "ALL",
+        hours_utc: inRule.hours_utc !== undefined ? inRule.hours_utc : "ALL",
+        discovery_trades: inRule.discovery_trades,
+        discovery_win_rate: inRule.discovery_win_rate,
+        validation_trades: inRule.validation_trades,
+        validation_win_rate: inRule.validation_win_rate !== undefined ? inRule.validation_win_rate : 65.0,
+        verdict: inRule.verdict || "Custom",
+        is_enabled: inRule.is_enabled !== undefined ? inRule.is_enabled : true,
+        risk_multiplier: inRule.risk_multiplier || 1.15,
+      };
+
+      const fp = getCriteriaFingerprint(validRule);
+      const matchedIdByFp = existingFingerprints.get(fp);
+
+      if (existingRulesMap.has(validRule.id)) {
+        const existing = existingRulesMap.get(validRule.id)!;
+        existingRulesMap.set(validRule.id, {
+          ...existing,
+          ...validRule,
+          is_enabled: inRule.is_enabled !== undefined ? inRule.is_enabled : existing.is_enabled,
+        });
+        updatedCount++;
+      } else if (matchedIdByFp && existingRulesMap.has(matchedIdByFp)) {
+        const existing = existingRulesMap.get(matchedIdByFp)!;
+        existingRulesMap.set(matchedIdByFp, {
+          ...existing,
+          ...validRule,
+          id: existing.id,
+        });
+        updatedCount++;
+      } else {
+        existingRulesMap.set(validRule.id, validRule);
+        existingFingerprints.set(fp, validRule.id);
+        addedCount++;
+      }
+    }
+
+    const mergedRules = Array.from(existingRulesMap.values());
+    const preservedCount = current.rules.length - updatedCount;
+
+    const updatedConfig: UnifiedConfluenceConfig = {
+      ...current,
+      ...(options?.configUpdates || {}),
+      rules: mergedRules,
+    };
+
+    this.updateUnifiedConfluenceConfig(updatedConfig);
+
+    return {
+      config: updatedConfig,
+      addedCount,
+      updatedCount,
+      preservedCount,
+      totalCount: mergedRules.length,
+    };
+  }
+
+  public optimizeAndDeduplicateRules(): {
+    config: UnifiedConfluenceConfig;
+    summary: {
+      initialRulesCount: number;
+      finalRulesCount: number;
+      duplicatesRemoved: number;
+      conflictsResolved: number;
+      normalizedCount: number;
+      details: string[];
+    };
+  } {
+    const current = this.getUnifiedConfluenceConfig();
+    const initialRulesCount = current.rules.length;
+    const details: string[] = [];
+    let duplicatesRemoved = 0;
+    let conflictsResolved = 0;
+    let normalizedCount = 0;
+
+    const ALL_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+    const ALL_SESSIONS = ["asia_open", "intraday_chop", "europe_us_overlap", "late_us_session", "dead_liquidity", "weekends"];
+    const ALL_REGIMES = [
+      MarketRegime.STRONG_UPTREND,
+      MarketRegime.STRONG_DOWNTREND,
+      MarketRegime.RANGE_BOUND,
+      MarketRegime.HIGH_VOLATILITY,
+      MarketRegime.LOW_VOLATILITY,
+    ];
+    const ALL_WINDOWS = ["00-04", "04-08", "08-12", "12-16", "16-20", "20-24"];
+
+    // Step 1: Normalize all rules (standardize casing, sort arrays, collapse full sets to "ALL")
+    const normalizedRules: ConfluenceRule[] = current.rules.map((rule) => {
+      let changed = false;
+
+      // Normalize days
+      let days = rule.days;
+      if (Array.isArray(days)) {
+        const lowerDays = Array.from(new Set(days.map((d) => d.toLowerCase()))).sort();
+        if (lowerDays.length >= 7 || ALL_DAYS.every((d) => lowerDays.includes(d))) {
+          days = "ALL";
+          changed = true;
+        } else {
+          days = lowerDays;
+        }
+      }
+
+      // Normalize sessions
+      let sessions = rule.sessions;
+      if (Array.isArray(sessions)) {
+        const uniqueSess = Array.from(new Set(sessions)).sort();
+        if (uniqueSess.length >= 6 || ALL_SESSIONS.every((s) => uniqueSess.includes(s))) {
+          sessions = "ALL";
+          changed = true;
+        } else {
+          sessions = uniqueSess;
+        }
+      }
+
+      // Normalize regimes
+      let regimes = rule.regimes;
+      if (Array.isArray(regimes)) {
+        const uniqueReg = Array.from(new Set(regimes)).sort();
+        if (uniqueReg.length >= 5 || ALL_REGIMES.every((r) => uniqueReg.includes(r))) {
+          regimes = "ALL";
+          changed = true;
+        } else {
+          regimes = uniqueReg;
+        }
+      }
+
+      // Normalize hours_utc
+      let hours = rule.hours_utc;
+      if (Array.isArray(hours)) {
+        const uniqueHrs = Array.from(new Set(hours)).sort();
+        if (uniqueHrs.length >= 6 || ALL_WINDOWS.every((w) => uniqueHrs.includes(w))) {
+          hours = "ALL";
+          changed = true;
+        } else {
+          hours = uniqueHrs;
+        }
+      }
+
+      if (changed) normalizedCount++;
+
+      return {
+        ...rule,
+        days,
+        sessions,
+        regimes,
+        hours_utc: hours,
+      };
+    });
+
+    // Helper to generate fingerprint
+    const getCriteriaFingerprint = (r: ConfluenceRule): string => {
+      const sId = r.setup_id || "all";
+      const sess = Array.isArray(r.sessions) ? [...r.sessions].sort().join(",") : "ALL";
+      const days = Array.isArray(r.days) ? [...r.days].map((d) => d.toLowerCase()).sort().join(",") : "ALL";
+      const regs = Array.isArray(r.regimes) ? [...r.regimes].sort().join(",") : "ALL";
+      const hrs = Array.isArray(r.hours_utc) ? [...r.hours_utc].sort().join(",") : "ALL";
+      return `${sId}::${sess}::${days}::${regs}::${hrs}`;
+    };
+
+    // Step 2: Group by criteria fingerprint to detect exact duplicates and conflicting settings
+    const groups = new Map<string, ConfluenceRule[]>();
+    for (const rule of normalizedRules) {
+      const fp = getCriteriaFingerprint(rule);
+      if (!groups.has(fp)) groups.set(fp, []);
+      groups.get(fp)!.push(rule);
+    }
+
+    const deduplicatedRules: ConfluenceRule[] = [];
+
+    for (const [, group] of groups.entries()) {
+      if (group.length === 1) {
+        deduplicatedRules.push(group[0]);
+        continue;
+      }
+
+      duplicatesRemoved += group.length - 1;
+
+      // Check for conflicts: differing win rates, risk multipliers, or enabled states
+      const winRates = group.map((r) => r.validation_win_rate || 0);
+      const riskMultipliers = group.map((r) => r.risk_multiplier || 1.15);
+      const enabledStates = group.map((r) => r.is_enabled);
+
+      const hasConflictingWinRate = Math.max(...winRates) - Math.min(...winRates) > 0.5;
+      const hasConflictingRisk = Math.max(...riskMultipliers) - Math.min(...riskMultipliers) > 0.05;
+      const hasConflictingEnabled = enabledStates.includes(true) && enabledStates.includes(false);
+
+      if (hasConflictingWinRate || hasConflictingRisk || hasConflictingEnabled) {
+        conflictsResolved++;
+      }
+
+      // Merge: pick rule with highest validation win rate (and largest sample size)
+      group.sort((a, b) => {
+        const wrDiff = (b.validation_win_rate || 0) - (a.validation_win_rate || 0);
+        if (wrDiff !== 0) return wrDiff;
+        return (b.validation_trades || 0) - (a.validation_trades || 0);
+      });
+
+      const bestRule = group[0];
+      const mergedEnabled = group.some((r) => r.is_enabled);
+      const maxRisk = Math.max(...riskMultipliers);
+      const maxDiscoveryTrades = Math.max(...group.map((r) => r.discovery_trades || 0));
+      const maxValidationTrades = Math.max(...group.map((r) => r.validation_trades || 0));
+
+      const mergedRule: ConfluenceRule = {
+        ...bestRule,
+        is_enabled: mergedEnabled,
+        risk_multiplier: maxRisk,
+        discovery_trades: maxDiscoveryTrades || bestRule.discovery_trades,
+        validation_trades: maxValidationTrades || bestRule.validation_trades,
+      };
+
+      details.push(
+        `Merged ${group.length} duplicates for [${bestRule.name}] (Resolved to ${bestRule.validation_win_rate}% WR, ${maxRisk}x risk, enabled: ${mergedEnabled})`
+      );
+
+      deduplicatedRules.push(mergedRule);
+    }
+
+    // Step 3: Sort cleanly by setup_id, then validation_win_rate descending
+    deduplicatedRules.sort((a, b) => {
+      if (a.setup_id !== b.setup_id) return a.setup_id.localeCompare(b.setup_id);
+      return (b.validation_win_rate || 0) - (a.validation_win_rate || 0);
+    });
+
+    const updatedConfig: UnifiedConfluenceConfig = {
+      ...current,
+      rules: deduplicatedRules,
+    };
+
+    this.updateUnifiedConfluenceConfig(updatedConfig);
+
+    return {
+      config: updatedConfig,
+      summary: {
+        initialRulesCount,
+        finalRulesCount: deduplicatedRules.length,
+        duplicatesRemoved,
+        conflictsResolved,
+        normalizedCount,
+        details,
+      },
+    };
+  }
 }
 
 export const dbManager = new DatabaseManager();

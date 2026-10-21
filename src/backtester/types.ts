@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { MarketRegime, Candlestick } from "../types.js";
+import { MarketRegime, Candlestick, ConfluenceRule } from "../types.js";
 
 export interface BacktestSetupOption {
   id: string;
@@ -257,4 +257,97 @@ export interface BacktestRankResult {
     averageWinRate: number;
     totalBacktestTrades: number;
   };
+}
+
+export interface DiscoveredConfluenceCluster {
+  id: string;
+  name: string;
+  setupId: string;
+  setupName: string;
+  regimes: MarketRegime[] | "ALL";
+  sessions: string[] | "ALL";
+  days: string[] | "ALL";
+  hoursUtc: string[] | "ALL";
+  tradesCount: number;
+  winCount: number;
+  lossCount: number;
+  winRate: number; // e.g. 74.2%
+  profitFactor: number;
+  netPnlUsd: number;
+  expectancyUsd: number;
+  avgHoldDurationSeconds: number;
+  confidenceScore: number; // 0 - 100
+  verdict: "Elite" | "Robust" | "Moderate";
+  recommendedRiskMultiplier: number;
+  ruleCandidate: ConfluenceRule;
+  isSelected?: boolean;
+}
+
+export interface ConfluenceOptimizationComparison {
+  baselineTrades: number;
+  baselineWins: number;
+  baselineLosses: number;
+  baselineWinRate: number;
+  baselineNetPnlUsd: number;
+  baselineProfitFactor: number;
+  baselineMaxDrawdownPercent: number;
+
+  optimizedTrades: number;
+  optimizedWins: number;
+  optimizedLosses: number;
+  optimizedWinRate: number;
+  optimizedNetPnlUsd: number;
+  optimizedProfitFactor: number;
+  optimizedMaxDrawdownPercent: number;
+
+  filteredOutLosses: number;
+  lossEliminationRate: number; // percentage (0 - 100)
+  winRetentionRate: number; // percentage (0 - 100)
+  winRateDelta: number; // e.g. +38.2
+  pnlDelta: number; // e.g. +1420.50
+}
+
+export interface DimensionPerformanceBreakdown {
+  id: string;
+  name: string;
+  winRate: number;
+  tradesCount: number;
+  winCount: number;
+  lossCount: number;
+  netPnlUsd: number;
+  profitFactor: number;
+}
+
+export interface ConfluenceOptimizationReport {
+  generatedAt: string;
+  daysAnalyzed: number;
+  totalCandlesAnalyzed: number;
+  totalRawTrades: number;
+  minWinRateThreshold: number; // e.g. 60.0
+  minTradesThreshold: number; // e.g. 5
+  clustersCount: number;
+  discoveredClusters: DiscoveredConfluenceCluster[];
+  comparison: ConfluenceOptimizationComparison;
+  dimensionBreakdowns: {
+    setups: DimensionPerformanceBreakdown[];
+    sessions: DimensionPerformanceBreakdown[];
+    regimes: DimensionPerformanceBreakdown[];
+    weekdays: DimensionPerformanceBreakdown[];
+    timeWindows: DimensionPerformanceBreakdown[];
+  };
+  recommendedMasterSettings: {
+    enabled: boolean;
+    strict_mode: boolean;
+    min_validation_win_rate: number;
+    recommendedRulesCount: number;
+  };
+}
+
+export interface ConfluenceOptimizerRequest {
+  days?: number; // 7, 14, 30, 90, 180
+  minWinRateThreshold?: number; // e.g. 60.0
+  minTradesThreshold?: number; // e.g. 5
+  setupId?: string; // 'all' or specific setup
+  symbol?: string; // default: 'BTCUSDT'
+  forceRerun?: boolean;
 }

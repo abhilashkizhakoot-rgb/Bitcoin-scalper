@@ -452,6 +452,7 @@ export default function ConfigPage({
   const [unifiedConfluence, setUnifiedConfluence] = useState<UnifiedConfluenceConfig | null>(null);
   const [isLoadingConfluence, setIsLoadingConfluence] = useState(false);
   const [isSavingConfluence, setIsSavingConfluence] = useState(false);
+  const [isOptimizingRules, setIsOptimizingRules] = useState(false);
   const [confluenceSuccessMsg, setConfluenceSuccessMsg] = useState<string | null>(null);
   const [confluenceErrorMsg, setConfluenceErrorMsg] = useState<string | null>(null);
   const [confluenceFilterCategory, setConfluenceFilterCategory] = useState<"ALL" | "100_WR" | "80_WR" | "70_WR" | "CUSTOM">("ALL");
@@ -668,17 +669,89 @@ export default function ConfigPage({
     reader.onload = async (evt) => {
       try {
         const parsed = JSON.parse(evt.target?.result as string);
+        let incomingRules: any[] = [];
+        const configUpdates: any = {};
+
         if (Array.isArray(parsed)) {
-          await handleUpdateConfluenceConfig({ rules: parsed });
-          alert(`Successfully imported ${parsed.length} confluence rules!`);
+          incomingRules = parsed;
+        } else if (parsed && typeof parsed === "object") {
+          if (Array.isArray(parsed.rules)) {
+            incomingRules = parsed.rules;
+            if (typeof parsed.enabled === "boolean") configUpdates.enabled = parsed.enabled;
+            if (typeof parsed.strict_mode === "boolean") configUpdates.strict_mode = parsed.strict_mode;
+            if (typeof parsed.min_validation_win_rate === "number") configUpdates.min_validation_win_rate = parsed.min_validation_win_rate;
+          } else if (Array.isArray(parsed.discoveredClusters)) {
+            incomingRules = parsed.discoveredClusters.map((c: any) => c.ruleCandidate || c);
+          }
+        }
+
+        if (incomingRules.length === 0) {
+          alert("Invalid file format. Expected a JSON file with confluence rules (either an array of rules or an object with a rules array).");
+          return;
+        }
+
+        // Call the non-destructive import endpoint (preserves all old settings and existing rules!)
+        const res = await apiFetch("/api/strategy/unified-confluence/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rules: incomingRules,
+            mergeStrategy: "merge",
+            configUpdates,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.config) {
+            setUnifiedConfluence(data.config);
+          }
+          alert(data.message || `Successfully imported ${incomingRules.length} rules without deleting existing settings!`);
         } else {
-          alert("Invalid file format. Expected a JSON array of confluence rules.");
+          const errData = await res.json().catch(() => ({}));
+          alert(errData.error || errData.message || "Failed to import confluence rules.");
         }
       } catch (err) {
-        alert("Failed to parse JSON file.");
+        alert("Failed to parse JSON file. Please ensure it is valid JSON.");
+      } finally {
+        if (e.target) {
+          e.target.value = "";
+        }
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleOptimizeAndDeduplicateRules = async () => {
+    setIsOptimizingRules(true);
+    setConfluenceErrorMsg(null);
+    try {
+      const res = await apiFetch("/api/strategy/unified-confluence/optimize-rules", {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.config) {
+          setUnifiedConfluence(data.config);
+          setMsConfig({
+            ...msConfig,
+            unified_confluence: data.config,
+          });
+        }
+        const s = data.summary;
+        const msg = `Matrix Optimization & Deduplication Complete!\n\n• Duplicate rules removed: ${s.duplicatesRemoved}\n• Conflicting settings resolved: ${s.conflictsResolved}\n• Criteria rules normalized: ${s.normalizedCount}\n• Initial rules: ${s.initialRulesCount} → Final clean rules: ${s.finalRulesCount}`;
+        alert(msg);
+        setConfluenceSuccessMsg(`Matrix optimized: ${s.duplicatesRemoved} duplicates removed, ${s.conflictsResolved} conflicts resolved.`);
+        setTimeout(() => setConfluenceSuccessMsg(null), 5000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || "Failed to optimize rules.");
+      }
+    } catch (e: any) {
+      alert("Error optimizing rules: " + (e.message || "Unknown error"));
+    } finally {
+      setIsOptimizingRules(false);
+    }
   };
 
   const sanitizeCategoryData = (category: string, data: any) => {
@@ -4408,6 +4481,18 @@ export default function ConfigPage({
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Add Confluence Rule</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="btn-optimize-confluence-rules"
+                    onClick={handleOptimizeAndDeduplicateRules}
+                    disabled={isOptimizingRules}
+                    title="Scan and remove duplicate rules, resolve conflicting criteria, and harmonize win-rate settings"
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{isOptimizingRules ? "Optimizing..." : "Remove Conflicts & Duplicates"}</span>
                   </button>
                 </div>
 

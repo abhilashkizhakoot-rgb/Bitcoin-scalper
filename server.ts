@@ -14,6 +14,7 @@ import { ConnectionStatus, MarketRegime } from "./src/types.js";
 import { GoogleGenAI, Type } from "@google/genai";
 import { AVAILABLE_SETUPS, runIsolatedBacktest } from "./src/backtester/backtestRunner.js";
 import { rollingBufferManager } from "./src/backtester/rollingBuffer.js";
+import { runConfluenceOptimization } from "./src/backtester/confluenceOptimizer.js";
 
 function getRequestBaseUrl(req: express.Request): string {
   const url = getRawRequestBaseUrl(req);
@@ -878,6 +879,83 @@ async function startServer() {
       res.json({ success: true, config: updated });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post("/api/strategy/unified-confluence/import", (req, res) => {
+    try {
+      const { rules, mergeStrategy = "merge", configUpdates } = req.body || {};
+      if (!Array.isArray(rules)) {
+        return res.status(400).json({ success: false, message: "rules array is required" });
+      }
+
+      const result = dbManager.importUnifiedConfluenceRules(rules, {
+        mergeStrategy,
+        configUpdates,
+      });
+
+      res.json({
+        success: true,
+        message: `Successfully imported ${rules.length} rules (${result.addedCount} new rules added, ${result.updatedCount} rules updated, ${result.preservedCount} old rules preserved. Total: ${result.totalCount} rules).`,
+        ...result,
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post("/api/strategy/unified-confluence/optimize-rules", (req, res) => {
+    try {
+      const result = dbManager.optimizeAndDeduplicateRules();
+      res.json({
+        success: true,
+        message: `Optimization complete: ${result.summary.duplicatesRemoved} duplicate rules removed, ${result.summary.conflictsResolved} conflicts resolved, ${result.summary.normalizedCount} rules normalized. Clean rules: ${result.summary.finalRulesCount}.`,
+        ...result,
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // ----------------------------------------------------
+  // REST API: Unified Confluence Matrix Optimizer (WR > 60%)
+  // ----------------------------------------------------
+
+  app.post("/api/backtest/confluence-optimizer/analyze", async (req, res) => {
+    try {
+      const payload = req.body || {};
+      const report = await runConfluenceOptimization(payload);
+      res.json({ success: true, report });
+    } catch (err: any) {
+      console.error("[ConfluenceOptimizerAPI] Analysis error:", err);
+      res.status(500).json({ success: false, error: err.message || "Confluence optimization analysis failed" });
+    }
+  });
+
+  app.post("/api/backtest/confluence-optimizer/apply", (req, res) => {
+    try {
+      const { rules, minValidationWinRate, strictMode, enabled, mergeStrategy = "merge" } = req.body || {};
+      if (!Array.isArray(rules)) {
+        return res.status(400).json({ success: false, message: "rules array is required" });
+      }
+
+      const result = dbManager.importUnifiedConfluenceRules(rules, {
+        mergeStrategy,
+        configUpdates: {
+          enabled: enabled !== false,
+          strict_mode: strictMode !== false,
+          min_validation_win_rate: minValidationWinRate || 60.0,
+        },
+      });
+
+      res.json({
+        success: true,
+        message: `Successfully applied ${rules.length} optimized rules (${result.addedCount} new rules added, ${result.updatedCount} rules updated, ${result.preservedCount} existing rules preserved). Total: ${result.totalCount} active rules.`,
+        config: result.config,
+      });
+    } catch (err: any) {
+      console.error("[ConfluenceOptimizerAPI] Apply error:", err);
+      res.status(500).json({ success: false, error: err.message || "Failed to apply optimized matrix settings" });
     }
   });
 

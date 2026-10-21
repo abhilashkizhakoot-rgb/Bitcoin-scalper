@@ -1,0 +1,562 @@
+{
+  "allResultSummary": {
+    "totalCandlesAnalyzed": 259200,
+    "periodStart": "2026-04-23T09:43:31.537Z",
+    "periodEnd": "2026-10-20T09:43:31.537Z",
+    "totalTrades": 4184,
+    "winningTrades": 1675,
+    "losingTrades": 2509,
+    "winRate": 40.03,
+    "profitFactor": 1.45,
+    "netPnlUsd": -2060.12,
+    "maxDrawdownPercent": 20.6
+  },
+  "weekdayBreakdown": {
+    "monday": {
+      "dayId": "monday",
+      "dayName": "Monday",
+      "tradesCount": 1074,
+      "winCount": 284,
+      "lossCount": 790,
+      "winRate": 26.4,
+      "netPnlUsd": -707.07,
+      "profitFactor": 1.12,
+      "averageHoldDurationSeconds": 444
+    },
+    "tuesday": {
+      "dayId": "tuesday",
+      "dayName": "Tuesday",
+      "tradesCount": 393,
+      "winCount": 127,
+      "lossCount": 266,
+      "winRate": 32.3,
+      "netPnlUsd": -216.12,
+      "profitFactor": 1.45,
+      "averageHoldDurationSeconds": 381
+    },
+    "wednesday": {
+      "dayId": "wednesday",
+      "dayName": "Wednesday",
+      "tradesCount": 322,
+      "winCount": 107,
+      "lossCount": 215,
+      "winRate": 33.2,
+      "netPnlUsd": -208.99,
+      "profitFactor": 1.02,
+      "averageHoldDurationSeconds": 430
+    },
+    "thursday": {
+      "dayId": "thursday",
+      "dayName": "Thursday",
+      "tradesCount": 1174,
+      "winCount": 588,
+      "lossCount": 586,
+      "winRate": 50.1,
+      "netPnlUsd": -546.19,
+      "profitFactor": 1.53,
+      "averageHoldDurationSeconds": 425
+    },
+    "friday": {
+      "dayId": "friday",
+      "dayName": "Friday",
+      "tradesCount": 932,
+      "winCount": 434,
+      "lossCount": 498,
+      "winRate": 46.6,
+      "netPnlUsd": -299.05,
+      "profitFactor": 1.71,
+      "averageHoldDurationSeconds": 329
+    },
+    "saturday": {
+      "dayId": "saturday",
+      "dayName": "Saturday",
+      "tradesCount": 224,
+      "winCount": 101,
+      "lossCount": 123,
+      "winRate": 45.1,
+      "netPnlUsd": -58.69,
+      "profitFactor": 2.3,
+      "averageHoldDurationSeconds": 321
+    },
+    "sunday": {
+      "dayId": "sunday",
+      "dayName": "Sunday",
+      "tradesCount": 65,
+      "winCount": 34,
+      "lossCount": 31,
+      "winRate": 52.3,
+      "netPnlUsd": -24.01,
+      "profitFactor": 3.34,
+      "averageHoldDurationSeconds": 359
+    }
+  },
+  "sessionBreakdown": {
+    "asia_open": {
+      "sessionId": "asia_open",
+      "sessionName": "Asia Open Front-run",
+      "tradesCount": 1328,
+      "winCount": 456,
+      "lossCount": 872,
+      "winRate": 34.33734939759036,
+      "netPnlUsd": -748.12,
+      "profitFactor": 1.34
+    },
+    "intraday_chop": {
+      "sessionId": "intraday_chop",
+      "sessionName": "Intra-day Chop",
+      "tradesCount": 529,
+      "winCount": 243,
+      "lossCount": 286,
+      "winRate": 45.93572778827977,
+      "netPnlUsd": -177.83,
+      "profitFactor": 1.94
+    },
+    "europe_us_overlap": {
+      "sessionId": "europe_us_overlap",
+      "sessionName": "US / Europe Overlap",
+      "tradesCount": 1072,
+      "winCount": 484,
+      "lossCount": 588,
+      "winRate": 45.149253731343286,
+      "netPnlUsd": -497.84,
+      "profitFactor": 1.29
+    },
+    "late_us_session": {
+      "sessionId": "late_us_session",
+      "sessionName": "Late US Session",
+      "tradesCount": 859,
+      "winCount": 303,
+      "lossCount": 556,
+      "winRate": 35.273573923166474,
+      "netPnlUsd": -485.59,
+      "profitFactor": 1.34
+    },
+    "dead_liquidity": {
+      "sessionId": "dead_liquidity",
+      "sessionName": "Dead Liquidity",
+      "tradesCount": 169,
+      "winCount": 81,
+      "lossCount": 88,
+      "winRate": 47.928994082840234,
+      "netPnlUsd": -81.73,
+      "profitFactor": 1.92
+    },
+    "weekends": {
+      "sessionId": "weekends",
+      "sessionName": "Weekends",
+      "tradesCount": 227,
+      "winCount": 108,
+      "lossCount": 119,
+      "winRate": 47.57709251101321,
+      "netPnlUsd": -69.01,
+      "profitFactor": 2.66
+    }
+  },
+  "regimeBreakdown": {
+    "STRONG_UPTREND": {
+      "regime": "STRONG_UPTREND",
+      "tradesCount": 804,
+      "winCount": 352,
+      "lossCount": 452,
+      "winRate": 43.78109452736319,
+      "netPnlUsd": -444.2335854155073,
+      "profitFactor": 1.3467684368969493
+    },
+    "STRONG_DOWNTREND": {
+      "regime": "STRONG_DOWNTREND",
+      "tradesCount": 493,
+      "winCount": 200,
+      "lossCount": 293,
+      "winRate": 40.56795131845842,
+      "netPnlUsd": -282.268199826947,
+      "profitFactor": 1.3631663674869818
+    },
+    "RANGE_BOUND": {
+      "regime": "RANGE_BOUND",
+      "tradesCount": 1780,
+      "winCount": 777,
+      "lossCount": 1003,
+      "winRate": 43.651685393258425,
+      "netPnlUsd": -686.664662887074,
+      "profitFactor": 1.575759538879323
+    },
+    "HIGH_VOLATILITY": {
+      "regime": "HIGH_VOLATILITY",
+      "tradesCount": 452,
+      "winCount": 215,
+      "lossCount": 237,
+      "winRate": 47.56637168141593,
+      "netPnlUsd": -246.20583912968576,
+      "profitFactor": 1.2788366929711485
+    },
+    "LOW_VOLATILITY": {
+      "regime": "LOW_VOLATILITY",
+      "tradesCount": 655,
+      "winCount": 131,
+      "lossCount": 524,
+      "winRate": 20,
+      "netPnlUsd": -400.7447891745548,
+      "profitFactor": 1.5654411387005065
+    }
+  },
+  "ranking": [
+    {
+      "rank": 1,
+      "setupId": "setup_14_fresh_momentum_impulse",
+      "setupName": "Setup 14: Fresh Momentum Impulse",
+      "category": "trend",
+      "totalTrades": 1460,
+      "winningTrades": 823,
+      "losingTrades": 637,
+      "winRate": 56.37,
+      "bayesianWinRate": 56.4,
+      "profitFactor": 1.43,
+      "netPnlUsd": -736.63,
+      "expectancyUsd": -0.5,
+      "maxDrawdownPercent": 7.39,
+      "longTrades": 752,
+      "longWinRate": 56.38,
+      "shortTrades": 708,
+      "shortWinRate": 56.36,
+      "averageHoldDurationSeconds": 434,
+      "tier": "TIER_3_MODERATE",
+      "recommendation": "Moderate Probability - Requires strict regime/confluence filter",
+      "wins": 823,
+      "losses": 637,
+      "netPnl": -736.63
+    },
+    {
+      "rank": 2,
+      "setupId": "setup_3_liquidity_sweep",
+      "setupName": "Setup 3: Liquidity Sweep Reversal",
+      "category": "reversal",
+      "totalTrades": 625,
+      "winningTrades": 303,
+      "losingTrades": 322,
+      "winRate": 48.48,
+      "bayesianWinRate": 48.5,
+      "profitFactor": 2.17,
+      "netPnlUsd": -268.13,
+      "expectancyUsd": -0.43,
+      "maxDrawdownPercent": 2.68,
+      "longTrades": 300,
+      "longWinRate": 50,
+      "shortTrades": 325,
+      "shortWinRate": 47.08,
+      "averageHoldDurationSeconds": 250,
+      "tier": "TIER_4_LOW",
+      "recommendation": "Low Probability - Sensitive to choppy conditions or wide ATR",
+      "wins": 303,
+      "losses": 322,
+      "netPnl": -268.13
+    },
+    {
+      "rank": 3,
+      "setupId": "setup_9_range_failed_auction",
+      "setupName": "Setup 9: Range Failed Auction Reclaim",
+      "category": "reversal",
+      "totalTrades": 121,
+      "winningTrades": 56,
+      "losingTrades": 65,
+      "winRate": 46.28,
+      "bayesianWinRate": 46.4,
+      "profitFactor": 2.08,
+      "netPnlUsd": -59.57,
+      "expectancyUsd": -0.49,
+      "maxDrawdownPercent": 0.6,
+      "longTrades": 58,
+      "longWinRate": 51.72,
+      "shortTrades": 63,
+      "shortWinRate": 41.27,
+      "averageHoldDurationSeconds": 248,
+      "tier": "TIER_4_LOW",
+      "recommendation": "Low Probability - Sensitive to choppy conditions or wide ATR",
+      "wins": 56,
+      "losses": 65,
+      "netPnl": -59.57
+    },
+    {
+      "rank": 4,
+      "setupId": "setup_2_dynamic_ema_pushback",
+      "setupName": "Setup 2: Dynamic EMA Pushback",
+      "category": "trend",
+      "totalTrades": 503,
+      "winningTrades": 232,
+      "losingTrades": 271,
+      "winRate": 46.12,
+      "bayesianWinRate": 46.2,
+      "profitFactor": 1.84,
+      "netPnlUsd": -239.39,
+      "expectancyUsd": -0.48,
+      "maxDrawdownPercent": 2.41,
+      "longTrades": 284,
+      "longWinRate": 46.83,
+      "shortTrades": 219,
+      "shortWinRate": 45.21,
+      "averageHoldDurationSeconds": 295,
+      "tier": "TIER_4_LOW",
+      "recommendation": "Low Probability - Sensitive to choppy conditions or wide ATR",
+      "wins": 232,
+      "losses": 271,
+      "netPnl": -239.39
+    },
+    {
+      "rank": 5,
+      "setupId": "setup_12_cvd_absorption",
+      "setupName": "Setup 12: CVD Absorption & Delta Divergence",
+      "category": "orderflow",
+      "totalTrades": 1265,
+      "winningTrades": 567,
+      "losingTrades": 698,
+      "winRate": 44.82,
+      "bayesianWinRate": 44.8,
+      "profitFactor": 1.94,
+      "netPnlUsd": -273.96,
+      "expectancyUsd": -0.22,
+      "maxDrawdownPercent": 2.76,
+      "longTrades": 637,
+      "longWinRate": 42.7,
+      "shortTrades": 628,
+      "shortWinRate": 46.97,
+      "averageHoldDurationSeconds": 272,
+      "tier": "TIER_4_LOW",
+      "recommendation": "Low Probability - Sensitive to choppy conditions or wide ATR",
+      "wins": 567,
+      "losses": 698,
+      "netPnl": -273.96
+    },
+    {
+      "rank": 6,
+      "setupId": "setup_10_vwap_band_rejection",
+      "setupName": "Setup 10: VWAP Band Rejection",
+      "category": "reversal",
+      "totalTrades": 9,
+      "winningTrades": 3,
+      "losingTrades": 6,
+      "winRate": 33.33,
+      "bayesianWinRate": 38.5,
+      "profitFactor": 1.49,
+      "netPnlUsd": -1.78,
+      "expectancyUsd": -0.2,
+      "maxDrawdownPercent": 0.03,
+      "longTrades": 7,
+      "longWinRate": 42.86,
+      "shortTrades": 2,
+      "shortWinRate": 0,
+      "averageHoldDurationSeconds": 667,
+      "tier": "TIER_4_LOW",
+      "recommendation": "Low Probability - Sensitive to choppy conditions or wide ATR",
+      "wins": 3,
+      "losses": 6,
+      "netPnl": -1.78
+    },
+    {
+      "rank": 7,
+      "setupId": "setup_4_fvg_retest",
+      "setupName": "Setup 4: Fair Value Gap Retest",
+      "category": "trend",
+      "totalTrades": 352,
+      "winningTrades": 109,
+      "losingTrades": 243,
+      "winRate": 30.97,
+      "bayesianWinRate": 31.2,
+      "profitFactor": 1.16,
+      "netPnlUsd": -234,
+      "expectancyUsd": -0.66,
+      "maxDrawdownPercent": 2.34,
+      "longTrades": 198,
+      "longWinRate": 29.29,
+      "shortTrades": 154,
+      "shortWinRate": 33.12,
+      "averageHoldDurationSeconds": 886,
+      "tier": "TIER_4_LOW",
+      "recommendation": "Low Probability - Sensitive to choppy conditions or wide ATR",
+      "wins": 109,
+      "losses": 243,
+      "netPnl": -234
+    },
+    {
+      "rank": 8,
+      "setupId": "setup_13_oi_flush_cascade",
+      "setupName": "Setup 13: OI Flush & Cascade Fade",
+      "category": "orderflow",
+      "totalTrades": 768,
+      "winningTrades": 222,
+      "losingTrades": 546,
+      "winRate": 28.91,
+      "bayesianWinRate": 29,
+      "profitFactor": 0.97,
+      "netPnlUsd": -572.54,
+      "expectancyUsd": -0.75,
+      "maxDrawdownPercent": 5.73,
+      "longTrades": 415,
+      "longWinRate": 28.92,
+      "shortTrades": 353,
+      "shortWinRate": 28.9,
+      "averageHoldDurationSeconds": 632,
+      "tier": "TIER_4_LOW",
+      "recommendation": "Low Probability - Sensitive to choppy conditions or wide ATR",
+      "wins": 222,
+      "losses": 546,
+      "netPnl": -572.54
+    },
+    {
+      "rank": 9,
+      "setupId": "setup_15_trendline_bounce",
+      "setupName": "Setup 15: Trendline Bounce & Retest",
+      "category": "trend",
+      "totalTrades": 712,
+      "winningTrades": 134,
+      "losingTrades": 578,
+      "winRate": 18.82,
+      "bayesianWinRate": 19,
+      "profitFactor": 1.19,
+      "netPnlUsd": -471.43,
+      "expectancyUsd": -0.66,
+      "maxDrawdownPercent": 4.73,
+      "longTrades": 359,
+      "longWinRate": 19.5,
+      "shortTrades": 353,
+      "shortWinRate": 18.13,
+      "averageHoldDurationSeconds": 500,
+      "tier": "TIER_4_LOW",
+      "recommendation": "Low Probability - Sensitive to choppy conditions or wide ATR",
+      "wins": 134,
+      "losses": 578,
+      "netPnl": -471.43
+    },
+    {
+      "rank": 10,
+      "setupId": "setup_1_pullback_retest",
+      "setupName": "Setup 1: Pullback & Retest",
+      "category": "trend",
+      "totalTrades": 486,
+      "winningTrades": 91,
+      "losingTrades": 395,
+      "winRate": 18.72,
+      "bayesianWinRate": 19,
+      "profitFactor": 1.27,
+      "netPnlUsd": -311.07,
+      "expectancyUsd": -0.64,
+      "maxDrawdownPercent": 3.13,
+      "longTrades": 282,
+      "longWinRate": 23.05,
+      "shortTrades": 204,
+      "shortWinRate": 12.75,
+      "averageHoldDurationSeconds": 333,
+      "tier": "TIER_4_LOW",
+      "recommendation": "Low Probability - Sensitive to choppy conditions or wide ATR",
+      "wins": 91,
+      "losses": 395,
+      "netPnl": -311.07
+    },
+    {
+      "rank": 11,
+      "setupId": "setup_11_eqh_eql_double_touch",
+      "setupName": "Setup 11: EQH/EQL Double Touch",
+      "category": "reversal",
+      "totalTrades": 717,
+      "winningTrades": 55,
+      "losingTrades": 662,
+      "winRate": 7.67,
+      "bayesianWinRate": 7.9,
+      "profitFactor": 0.77,
+      "netPnlUsd": -561.69,
+      "expectancyUsd": -0.78,
+      "maxDrawdownPercent": 5.62,
+      "longTrades": 364,
+      "longWinRate": 8.24,
+      "shortTrades": 353,
+      "shortWinRate": 7.08,
+      "averageHoldDurationSeconds": 367,
+      "tier": "TIER_4_LOW",
+      "recommendation": "Low Probability - Sensitive to choppy conditions or wide ATR",
+      "wins": 55,
+      "losses": 662,
+      "netPnl": -561.69
+    }
+  ],
+  "topK1": [],
+  "topK2": [
+    [
+      "setup_14_fresh_momentum_impulse::unknown",
+      {
+        "total": 1234,
+        "wins": 694,
+        "pnl": -628.6408339258707
+      }
+    ],
+    [
+      "setup_3_liquidity_sweep::unknown",
+      {
+        "total": 363,
+        "wins": 170,
+        "pnl": -156.70956299402212
+      }
+    ],
+    [
+      "setup_9_range_failed_auction::unknown",
+      {
+        "total": 28,
+        "wins": 13,
+        "pnl": -14.769964801613849
+      }
+    ],
+    [
+      "setup_2_dynamic_ema_pushback::unknown",
+      {
+        "total": 225,
+        "wins": 100,
+        "pnl": -111.4546746698272
+      }
+    ],
+    [
+      "setup_12_cvd_absorption::unknown",
+      {
+        "total": 1019,
+        "wins": 452,
+        "pnl": -234.62191040149438
+      }
+    ],
+    [
+      "setup_13_oi_flush_cascade::unknown",
+      {
+        "total": 303,
+        "wins": 89,
+        "pnl": -231.0967457826193
+      }
+    ],
+    [
+      "setup_4_fvg_retest::unknown",
+      {
+        "total": 135,
+        "wins": 35,
+        "pnl": -94.01701189992284
+      }
+    ],
+    [
+      "setup_1_pullback_retest::unknown",
+      {
+        "total": 246,
+        "wins": 46,
+        "pnl": -140.48430157065332
+      }
+    ],
+    [
+      "setup_15_trendline_bounce::unknown",
+      {
+        "total": 323,
+        "wins": 59,
+        "pnl": -211.42707245219503
+      }
+    ],
+    [
+      "setup_11_eqh_eql_double_touch::unknown",
+      {
+        "total": 305,
+        "wins": 15,
+        "pnl": -238.29739958002725
+      }
+    ]
+  ]
+}

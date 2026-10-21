@@ -1,0 +1,68 @@
+[
+  {
+    "name": "Setup 12: CVD Absorption & Delta Divergence • LOW_VOLATILITY • asia_open • WEDNESDAY",
+    "setup_id": "setup_12_cvd_absorption",
+    "regimes": [
+      "LOW_VOLATILITY"
+    ],
+    "sessions": [
+      "asia_open"
+    ],
+    "days": [
+      "wednesday"
+    ],
+    "hours_utc": "ALL",
+    "discovery_trades": 11,
+    "discovery_win_rate": 63.6,
+    "validation_trades": 8,
+    "validation_win_rate": 75,
+    "total_trades": 19,
+    "total_win_rate": 68.4,
+    "net_pnl": 3.71,
+    "profit_factor": 9.92
+  },
+  {
+    "name": "Setup 4: Fair Value Gap Retest • HIGH_VOLATILITY • intraday_chop • THURSDAY",
+    "setup_id": "setup_4_fvg_retest",
+    "regimes": [
+      "HIGH_VOLATILITY"
+    ],
+    "sessions": [
+      "intraday_chop"
+    ],
+    "days": [
+      "thursday"
+    ],
+    "hours_utc": "ALL",
+    "discovery_trades": 10,
+    "discovery_win_rate": 50,
+    "validation_trades": 8,
+    "validation_win_rate": 87.5,
+    "total_trades": 18,
+    "total_win_rate": 66.7,
+    "net_pnl": 5.77,
+    "profit_factor": 4.24
+  },
+  {
+    "name": "Setup 14: Fresh Momentum Impulse • HIGH_VOLATILITY • FRIDAY • 12-16 UTC",
+    "setup_id": "setup_14_fresh_momentum_impulse",
+    "regimes": [
+      "HIGH_VOLATILITY"
+    ],
+    "sessions": "ALL",
+    "days": [
+      "friday"
+    ],
+    "hours_utc": [
+      "12-16"
+    ],
+    "discovery_trades": 9,
+    "discovery_win_rate": 55.6,
+    "validation_trades": 6,
+    "validation_win_rate": 83.3,
+    "total_trades": 15,
+    "total_win_rate": 66.7,
+    "net_pnl": 1.84,
+    "profit_factor": 3.95
+  }
+]

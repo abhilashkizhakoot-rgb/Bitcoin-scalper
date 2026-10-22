@@ -2,8 +2,7 @@
  * Helper to determine the API Base URL in sandboxed / iframe environments
  */
 export function getApiBaseUrl(): string {
-  // If window.location is available and on standard web protocol, prefer relative paths ("")
-  // Relative paths are naturally resolved by the browser to the current origin without CORS or protocol mismatches.
+  // If window.location is available and has a valid http/https origin, prefer relative paths ("")
   if (typeof window !== "undefined" && window.location) {
     const origin = window.location.origin;
     if (origin && origin !== "null" && origin !== "about:" && (origin.startsWith("http://") || origin.startsWith("https://"))) {
@@ -12,10 +11,19 @@ export function getApiBaseUrl(): string {
   }
 
   // Fallback for sandboxed iframes where window.location.origin is "null"
-  if (typeof window !== "undefined" && (window as any).__API_BASE_URL__) {
+  if (typeof window !== "undefined") {
     const injected = (window as any).__API_BASE_URL__;
     if (injected && typeof injected === "string" && injected.trim() !== "" && !injected.includes("null") && injected.startsWith("http")) {
       return injected.endsWith("/") ? injected.slice(0, -1) : injected;
+    }
+    // Also check document.baseURI
+    if (typeof document !== "undefined" && document.baseURI && document.baseURI.startsWith("http")) {
+      try {
+        const u = new URL(document.baseURI);
+        if (u.origin && u.origin !== "null" && (u.origin.startsWith("http://") || u.origin.startsWith("https://"))) {
+          return u.origin;
+        }
+      } catch (e) {}
     }
   }
 
@@ -25,6 +33,8 @@ export function getApiBaseUrl(): string {
 /**
  * Drop-in wrapper for standard fetch that automatically prepends
  * the correct API Base URL if the path starts with /api/
+ * Never throws unhandled TypeError (Load failed / Failed to fetch);
+ * returns a synthetic 503 response on network disconnection.
  */
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const baseUrl = getApiBaseUrl();
@@ -53,9 +63,17 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   try {
     const response = await fetch(finalInput, fetchOptions);
     return response;
-  } catch (error) {
+  } catch (error: any) {
     // Soft log network issues so normal transient drops don't explode into uncaught rejections
     console.debug(`[apiFetch] Request note for "${typeof finalInput === "string" ? finalInput : (finalInput as any).url || (finalInput as any).href}":`, error);
-    throw error;
+    // Return a synthetic 503 response instead of throwing unhandled TypeError: Load failed / Failed to fetch
+    return new Response(
+      JSON.stringify({ error: error?.message || "Network request failed", offline: true }),
+      {
+        status: 503,
+        statusText: "Service Unavailable",
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 }

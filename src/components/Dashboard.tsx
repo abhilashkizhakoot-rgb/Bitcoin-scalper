@@ -301,10 +301,12 @@ export default function Dashboard({
       }
     };
 
-    fetchCandles();
+    fetchCandles().catch(() => {});
     
     // Refresh candles on a short loop to keep current candle ticking live
-    const interval = setInterval(fetchCandles, 5000);
+    const interval = setInterval(() => {
+      fetchCandles().catch(() => {});
+    }, 5000);
     return () => {
       active = false;
       clearInterval(interval);

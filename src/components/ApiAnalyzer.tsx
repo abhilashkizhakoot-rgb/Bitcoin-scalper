@@ -52,7 +52,7 @@ export default function ApiAnalyzer({ isPaperMode = true }: ApiAnalyzerProps) {
   useEffect(() => {
     if (!autoRefresh) return;
     const interval = setInterval(() => {
-      fetchLogs();
+      fetchLogs().catch(() => {});
     }, 2000);
     return () => clearInterval(interval);
   }, [autoRefresh]);

@@ -276,8 +276,14 @@ export default function App() {
           // Ignore stream chunk jitter
         }
       };
+      let sseErrorCount = 0;
       eventSource.onerror = () => {
-        // SSE connection drop/reconnect handled automatically; fallback polling active
+        sseErrorCount++;
+        // If SSE fails multiple times (e.g. proxy drops or sandbox restricts SSE), close it and rely on polling
+        if (sseErrorCount >= 3 && eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
       };
     } catch (err) {
       // EventSource not supported or blocked in environment; polling continues

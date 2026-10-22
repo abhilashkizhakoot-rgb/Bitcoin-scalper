@@ -72,9 +72,11 @@ export default function BacktestLab({
   const [setupSearchQuery, setSetupSearchQuery] = useState<string>("");
 
   useEffect(() => {
-    loadSetups();
-    loadBufferStatus();
-    const interval = setInterval(loadBufferStatus, 15000);
+    loadSetups().catch(() => {});
+    loadBufferStatus().catch(() => {});
+    const interval = setInterval(() => {
+      loadBufferStatus().catch(() => {});
+    }, 15000);
     return () => clearInterval(interval);
   }, []);
 

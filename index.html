@@ -45,23 +45,42 @@
           window.WebSocket = MockWebSocket;
         } catch (e) {}
 
+        function isIgnoredError(msg) {
+          if (!msg) return false;
+          var s = String(msg).toLowerCase();
+          return s.includes('load failed') ||
+                 s.includes('failed to fetch') ||
+                 s.includes('networkerror') ||
+                 s.includes('websocket') ||
+                 s.includes('@vite/client') ||
+                 s.includes('vite:ws');
+        }
+
         window.addEventListener('unhandledrejection', function(event) {
-          var reason = event.reason;
+          var reason = event && event.reason;
           var msg = (reason && (reason.message || String(reason))) || '';
-          if (msg.includes('WebSocket') || msg.includes('@vite/client') || msg.includes('vite:ws') || msg.includes('Load failed') || msg.includes('Failed to fetch')) {
+          if (isIgnoredError(msg)) {
             event.preventDefault();
-            event.stopImmediatePropagation && event.stopImmediatePropagation();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
           }
         }, true);
 
         window.addEventListener('error', function(event) {
-          var msg = event.message || '';
-          var filename = event.filename || '';
-          if (msg.includes('WebSocket') || filename.includes('@vite/client') || msg.includes('Load failed') || msg.includes('Failed to fetch')) {
+          var msg = (event && (event.message || (event.error && event.error.message))) || '';
+          var filename = (event && event.filename) || '';
+          if (isIgnoredError(msg) || isIgnoredError(filename)) {
             event.preventDefault();
-            event.stopImmediatePropagation && event.stopImmediatePropagation();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
           }
         }, true);
+
+        window.onerror = function(message, source, lineno, colno, error) {
+          var msg = (message || (error && error.message) || '').toString();
+          var src = (source || '').toString();
+          if (isIgnoredError(msg) || isIgnoredError(src)) {
+            return true;
+          }
+        };
       })();
     </script>
   </head>

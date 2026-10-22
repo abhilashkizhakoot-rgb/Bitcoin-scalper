@@ -17,8 +17,11 @@ import { rollingBufferManager } from "./src/backtester/rollingBuffer.js";
 import { runConfluenceOptimization } from "./src/backtester/confluenceOptimizer.js";
 
 function getRequestBaseUrl(req: express.Request): string {
-  // Relative API routing is standard and safest across both localhost and proxied iframes.
-  // We return empty string by default so the browser executes relative /api/... fetches.
+  const host = (req.headers["x-forwarded-host"] as string) || req.headers.host;
+  const proto = (req.headers["x-forwarded-proto"] as string) || (req.secure ? "https" : "http");
+  if (host) {
+    return `${proto}://${host}`;
+  }
   return "";
 }
 
@@ -1381,9 +1384,15 @@ Provide a confidence score (0-100) for each recommendation based on how strongly
       (res as any).flushHeaders();
     }
 
-    // Send initial status
+    // Send initial status safely
     const sendEvent = (data: any) => {
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      try {
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify(data)}\n\n`);
+        }
+      } catch (e) {
+        clearInterval(interval);
+      }
     };
 
     sendEvent({
@@ -1471,23 +1480,42 @@ Provide a confidence score (0-100) for each recommendation based on how strongly
                 window.WebSocket = MockWebSocket;
               } catch (e) {}
 
+              function isIgnoredError(msg) {
+                if (!msg) return false;
+                var s = String(msg).toLowerCase();
+                return s.includes('load failed') ||
+                       s.includes('failed to fetch') ||
+                       s.includes('networkerror') ||
+                       s.includes('websocket') ||
+                       s.includes('@vite/client') ||
+                       s.includes('vite:ws');
+              }
+
               window.addEventListener('unhandledrejection', function(event) {
-                var reason = event.reason;
+                var reason = event && event.reason;
                 var msg = (reason && (reason.message || String(reason))) || '';
-                if (msg.includes('WebSocket') || msg.includes('@vite/client') || msg.includes('vite:ws') || msg.includes('Load failed') || msg.includes('Failed to fetch')) {
+                if (isIgnoredError(msg)) {
                   event.preventDefault();
-                  event.stopImmediatePropagation && event.stopImmediatePropagation();
+                  if (event.stopImmediatePropagation) event.stopImmediatePropagation();
                 }
               }, true);
 
               window.addEventListener('error', function(event) {
-                var msg = event.message || '';
-                var filename = event.filename || '';
-                if (msg.includes('WebSocket') || filename.includes('@vite/client') || msg.includes('Load failed') || msg.includes('Failed to fetch')) {
+                var msg = (event && (event.message || (event.error && event.error.message))) || '';
+                var filename = (event && event.filename) || '';
+                if (isIgnoredError(msg) || isIgnoredError(filename)) {
                   event.preventDefault();
-                  event.stopImmediatePropagation && event.stopImmediatePropagation();
+                  if (event.stopImmediatePropagation) event.stopImmediatePropagation();
                 }
               }, true);
+
+              window.onerror = function(message, source, lineno, colno, error) {
+                var msg = (message || (error && error.message) || '').toString();
+                var src = (source || '').toString();
+                if (isIgnoredError(msg) || isIgnoredError(src)) {
+                  return true;
+                }
+              };
             })();
           </script>`;
           html = html.replace("<head>", `<head>${injection}`);

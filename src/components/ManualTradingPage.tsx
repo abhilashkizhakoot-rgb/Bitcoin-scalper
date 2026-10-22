@@ -70,8 +70,10 @@ export default function ManualTradingPage({ status, config, onRefresh }: ManualT
         console.warn("Failed to fetch candles for ATR calculation", e);
       }
     };
-    fetchCandles();
-    const interval = setInterval(fetchCandles, 15000);
+    fetchCandles().catch(() => {});
+    const interval = setInterval(() => {
+      fetchCandles().catch(() => {});
+    }, 15000);
     return () => clearInterval(interval);
   }, []);
 

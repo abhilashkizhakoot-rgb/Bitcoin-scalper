@@ -958,7 +958,9 @@ export default function TradeHistory({ trades, isPaperMode = true, onRefresh, co
                {filteredTrades.length === 0 && (
                  <tr>
                    <td colSpan={(showTargetsInTable ? 12 : 10) + (showAtrInTable ? 1 : 0)} className="text-center font-mono text-slate-400 text-xs italic py-16">
-                     No historical trades matching the current filter criteria...
+                     {trades.length === 0
+                       ? "No historical trades recorded yet. Live and paper trades executed by the engine will appear here."
+                       : "No historical trades matching the current filter criteria..."}
                    </td>
                  </tr>
                )}

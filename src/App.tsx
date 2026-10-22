@@ -249,25 +249,23 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchAllData();
+    fetchAllData().catch(() => {});
 
     // 1. Establish SSE Server Sent Events Real-Time Stream
     let eventSource: EventSource | null = null;
     try {
-      const baseUrl = getApiBaseUrl() || window.location.origin;
+      const baseUrl = getApiBaseUrl();
       const sseUrl = baseUrl && baseUrl.startsWith("http")
         ? new URL("/api/stream", baseUrl).href
         : "/api/stream";
-      eventSource = new EventSource(sseUrl, { withCredentials: true });
+      eventSource = new EventSource(sseUrl);
       eventSource.onmessage = (event) => {
         try {
           if (!event.data || typeof event.data !== "string" || event.data.trim() === "") {
             return;
           }
-          // Fast fail if it's clearly HTML or plain text error from proxy/load-balancer
           const trimmed = event.data.trim();
           if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html") || trimmed.startsWith("Error:")) {
-            console.warn("Live stream received HTML or text error instead of JSON:", trimmed.slice(0, 100));
             return;
           }
           const msg = JSON.parse(event.data);
@@ -275,19 +273,19 @@ export default function App() {
             setStatus(msg.payload);
           }
         } catch (e) {
-          console.warn("Could not parse live stream chunk (connection may have reset or fragmented):", e, "Raw data snippet:", event.data ? event.data.slice(0, 120) : "empty");
+          // Ignore stream chunk jitter
         }
       };
-      eventSource.onerror = (e) => {
-        console.warn("SSE stream closed or encountered a reconnect event:", e);
+      eventSource.onerror = () => {
+        // SSE connection drop/reconnect handled automatically; fallback polling active
       };
     } catch (err) {
-      console.warn("SSE EventSource not supported or failed to initialize, relying on fallback polling:", err);
+      // EventSource not supported or blocked in environment; polling continues
     }
 
     // 2. Fallback Polling loop every 3 seconds to sync trades list and graphs
     const interval = setInterval(() => {
-      fetchAllData(false);
+      fetchAllData(false).catch(() => {});
     }, 3000);
 
     return () => {

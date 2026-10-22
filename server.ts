@@ -17,92 +17,9 @@ import { rollingBufferManager } from "./src/backtester/rollingBuffer.js";
 import { runConfluenceOptimization } from "./src/backtester/confluenceOptimizer.js";
 
 function getRequestBaseUrl(req: express.Request): string {
-  const url = getRawRequestBaseUrl(req);
-  if (url && url.includes(".run.app") && url.startsWith("http://")) {
-    return url.replace(/^http:\/\//i, "https://");
-  }
-  return url;
-}
-
-function getRawRequestBaseUrl(req: express.Request): string {
-  // 1. Try to extract from origin or referer headers (highly reliable under proxies/sandboxes)
-  const originHeader = req.headers["origin"];
-  if (originHeader && typeof originHeader === "string" && originHeader.startsWith("http") && originHeader.includes(".run.app")) {
-    return originHeader;
-  }
-
-  const refererHeader = req.headers["referer"];
-  if (refererHeader && typeof refererHeader === "string" && refererHeader.startsWith("http") && refererHeader.includes(".run.app")) {
-    try {
-      const urlObj = new URL(refererHeader);
-      if (urlObj.origin && urlObj.origin.startsWith("http") && urlObj.origin.includes(".run.app")) {
-        return urlObj.origin;
-      }
-    } catch (e) {}
-  }
-
-  // 2. Scan all request headers for any .run.app domain
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (typeof value === "string") {
-      const match = value.match(/([a-zA-Z0-9.-]+\.run\.app)/i);
-      if (match) {
-        const proto = req.headers["x-forwarded-proto"] || "https";
-        const protocol = Array.isArray(proto) ? proto[0] : proto;
-        return `${protocol}://${match[1]}`;
-      }
-    }
-  }
-
-  let proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
-  if (Array.isArray(proto)) {
-    proto = proto[0];
-  }
-  let host = req.headers["x-forwarded-host"] || req.headers["host"] || req.get("host") || "";
-  if (Array.isArray(host)) {
-    host = host[0];
-  }
-  
-  // If host is a local address, but process.env.APP_URL is defined, use APP_URL
-  if ((!host || host.includes("localhost") || host.includes("127.0.0.1") || host.includes("0.0.0.0")) && process.env.APP_URL) {
-    try {
-      const urlObj = new URL(process.env.APP_URL);
-      if (urlObj.host && !urlObj.host.includes("localhost")) {
-        host = urlObj.host;
-        proto = urlObj.protocol.replace(":", "");
-      }
-    } catch (e) {}
-  }
-  
-  // Ensure that if we are on Cloud Run (which has K_SERVICE), we default to https if not explicitly http
-  if (process.env.K_SERVICE && proto === "http") {
-    proto = "https";
-  }
-  
-  if (host && !host.includes("localhost") && !host.includes("127.0.0.1") && !host.includes("0.0.0.0")) {
-    return `${proto}://${host}`;
-  }
-
-  // 3. Scan all environment variables last as a fallback if headers are not available or local
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string" && key !== "SHARED_URL" && key !== "DEV_URL") { // Skip generic cross URLs if possible
-      const match = value.match(/(https?:\/\/[a-zA-Z0-9.-]+\.run\.app)/i);
-      if (match) {
-        return match[1];
-      }
-    }
-  }
-
-  // Last fallback to whatever .run.app URL is found in env if no headers or other keys matched
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string") {
-      const match = value.match(/(https?:\/\/[a-zA-Z0-9.-]+\.run\.app)/i);
-      if (match) {
-        return match[1];
-      }
-    }
-  }
-
-  return host ? `${proto}://${host}` : "";
+  // Relative API routing is standard and safest across both localhost and proxied iframes.
+  // We return empty string by default so the browser executes relative /api/... fetches.
+  return "";
 }
 
 async function startServer() {
@@ -1457,8 +1374,12 @@ Provide a confidence score (0-100) for each recommendation based on how strongly
 
   app.get("/api/stream", (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    if (typeof (res as any).flushHeaders === "function") {
+      (res as any).flushHeaders();
+    }
 
     // Send initial status
     const sendEvent = (data: any) => {
@@ -1553,7 +1474,7 @@ Provide a confidence score (0-100) for each recommendation based on how strongly
               window.addEventListener('unhandledrejection', function(event) {
                 var reason = event.reason;
                 var msg = (reason && (reason.message || String(reason))) || '';
-                if (msg.includes('WebSocket') || msg.includes('@vite/client') || msg.includes('vite:ws')) {
+                if (msg.includes('WebSocket') || msg.includes('@vite/client') || msg.includes('vite:ws') || msg.includes('Load failed') || msg.includes('Failed to fetch')) {
                   event.preventDefault();
                   event.stopImmediatePropagation && event.stopImmediatePropagation();
                 }
@@ -1562,7 +1483,7 @@ Provide a confidence score (0-100) for each recommendation based on how strongly
               window.addEventListener('error', function(event) {
                 var msg = event.message || '';
                 var filename = event.filename || '';
-                if (msg.includes('WebSocket') || filename.includes('@vite/client')) {
+                if (msg.includes('WebSocket') || filename.includes('@vite/client') || msg.includes('Load failed') || msg.includes('Failed to fetch')) {
                   event.preventDefault();
                   event.stopImmediatePropagation && event.stopImmediatePropagation();
                 }

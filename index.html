@@ -48,7 +48,7 @@
         window.addEventListener('unhandledrejection', function(event) {
           var reason = event.reason;
           var msg = (reason && (reason.message || String(reason))) || '';
-          if (msg.includes('WebSocket') || msg.includes('@vite/client') || msg.includes('vite:ws')) {
+          if (msg.includes('WebSocket') || msg.includes('@vite/client') || msg.includes('vite:ws') || msg.includes('Load failed') || msg.includes('Failed to fetch')) {
             event.preventDefault();
             event.stopImmediatePropagation && event.stopImmediatePropagation();
           }
@@ -57,7 +57,7 @@
         window.addEventListener('error', function(event) {
           var msg = event.message || '';
           var filename = event.filename || '';
-          if (msg.includes('WebSocket') || filename.includes('@vite/client')) {
+          if (msg.includes('WebSocket') || filename.includes('@vite/client') || msg.includes('Load failed') || msg.includes('Failed to fetch')) {
             event.preventDefault();
             event.stopImmediatePropagation && event.stopImmediatePropagation();
           }

@@ -973,108 +973,7 @@ function generateMockHistory(): DatabaseSchema {
     }
   }
 
-  // 3. Generate 25 historical trades over the last 3 days
-  const basePrice = 101250;
-  for (let k = 25; k >= 1; k--) {
-    const tradeHoursAgo = k * 2.8 + Math.random() * 1.5;
-    const entryTime = new Date(now - tradeHoursAgo * 3600 * 1000);
-    const exitTime = new Date(entryTime.getTime() + (10 + Math.floor(Math.random() * 18)) * 60000); // 10-28 mins duration
-
-    const direction = Math.random() > 0.42 ? TradeDirection.LONG : TradeDirection.SHORT;
-    const isWin = Math.random() > 0.34; // ~66% Win Rate
-
-    const entryPrice = basePrice + (direction === TradeDirection.LONG ? -200 : 200) + Math.random() * 1000 - Math.random() * 1000;
-    const atrValue = 120 + Math.random() * 80;
-    const stopDistance = atrValue * 1.3;
-    const takeProfitDistance = stopDistance * 2;
-
-    let exitPrice = entryPrice;
-    let exitReason: ExitReason;
-
-    if (isWin) {
-      exitPrice = direction === TradeDirection.LONG ? entryPrice + takeProfitDistance : entryPrice - takeProfitDistance;
-      exitReason = ExitReason.TAKE_PROFIT;
-    } else {
-      exitPrice = direction === TradeDirection.LONG ? entryPrice - stopDistance : entryPrice + stopDistance;
-      exitReason = Math.random() > 0.7 ? ExitReason.TIME_LIMIT_29MIN : ExitReason.STOP_LOSS;
-    }
-
-    const tradeRiskUsdt = currentBalance * 0.005; // 0.5% risk
-    const quantityBtc = Number((tradeRiskUsdt / stopDistance).toFixed(4));
-    const leverage = 20;
-
-    let pnlUsdt = 0;
-    if (direction === TradeDirection.LONG) {
-      pnlUsdt = (exitPrice - entryPrice) * quantityBtc;
-    } else {
-      pnlUsdt = (entryPrice - exitPrice) * quantityBtc;
-    }
-
-    // Fees paid: 0.05% of position size on entry and exit
-    const positionValue = entryPrice * quantityBtc;
-    const feesPaid = positionValue * 0.0006 * 2;
-    pnlUsdt -= feesPaid;
-
-    currentBalance += pnlUsdt;
-
-    const catboostProbability = direction === TradeDirection.LONG
-      ? (isWin ? 0.81 + Math.random() * 0.15 : 0.70 + Math.random() * 0.12)
-      : (isWin ? 0.05 + Math.random() * 0.12 : 0.15 + Math.random() * 0.14);
-
-    const regime = direction === TradeDirection.LONG ? MarketRegime.STRONG_UPTREND : MarketRegime.STRONG_DOWNTREND;
-
-    trades.push({
-      id: `trade-hist-${26 - k}`,
-      entry_timestamp: entryTime.toISOString(),
-      exit_timestamp: exitTime.toISOString(),
-      direction,
-      entry_price: Number(entryPrice.toFixed(2)),
-      exit_price: Number(exitPrice.toFixed(2)),
-      quantity_btc: quantityBtc,
-      leverage,
-      pnl_usdt: Number(pnlUsdt.toFixed(2)),
-      pnl_pct: Number(((pnlUsdt / currentBalance) * 100).toFixed(4)),
-      fees_paid_usdt: Number(feesPaid.toFixed(4)),
-      exit_reason: exitReason,
-      catboost_probability: Number(catboostProbability.toFixed(4)),
-      regime_at_entry: regime,
-      sentiment_score_at_entry: direction === TradeDirection.LONG ? 0.35 + Math.random() * 0.3 : -0.35 - Math.random() * 0.3,
-      sentiment_momentum_at_entry: direction === TradeDirection.LONG ? 0.12 : -0.11,
-      entry_signal_score: 82 + Math.floor(Math.random() * 16),
-      max_favorable_excursion: isWin ? 2.1 : 0.4 + Math.random() * 0.6,
-      max_adverse_excursion: isWin ? 0.3 + Math.random() * 0.4 : 1.35,
-      max_favorable_atr_pct: Number(((((isWin ? 2.1 : 0.4 + Math.random() * 0.6) / 100 * entryPrice) / atrValue) * 100).toFixed(1)),
-      max_adverse_atr_pct: Number(((((isWin ? 0.3 + Math.random() * 0.4 : 1.35) / 100 * entryPrice) / atrValue) * 100).toFixed(1)),
-      hold_duration_seconds: Math.floor((exitTime.getTime() - entryTime.getTime()) / 1000),
-      is_win: isWin,
-      setup_triggered: MOCK_SETUPS[(26 - k) % MOCK_SETUPS.length],
-      feature_snapshot: {
-        adx: 32.5,
-        atr_14: atrValue,
-        rsi_14: direction === TradeDirection.LONG ? 62 : 38,
-        macd_hist: direction === TradeDirection.LONG ? 12.5 : -14.2,
-        setup_triggered: MOCK_SETUPS[(26 - k) % MOCK_SETUPS.length],
-      },
-      created_at: entryTime.toISOString(),
-    });
-
-    // 4. Generate some matching signals
-    signals.push({
-      id: `sig-${26 - k}`,
-      trade_id: `trade-hist-${26 - k}`,
-      timestamp: entryTime.toISOString(),
-      catboost_probability: Number(catboostProbability.toFixed(4)),
-      direction,
-      regime_detected: regime,
-      sentiment_score: direction === TradeDirection.LONG ? 0.45 : -0.42,
-      sentiment_momentum: direction === TradeDirection.LONG ? 0.12 : -0.15,
-      all_conditions_met: true,
-      failed_conditions: [],
-      executed: true,
-      rejection_reason: null,
-      created_at: entryTime.toISOString(),
-    });
-  }
+  // 3. Trade history and signals initialize empty (live and paper trades will populate here organically)
 
   // 5. Generate typical high-fidelity crypto headlines
   const sampleHeadlines = [
@@ -1144,111 +1043,6 @@ function generateMockHistory(): DatabaseSchema {
 }
 
 function generateMockPaperHistory(): { credentials: ExchangeCredentials; trades: Trade[]; signals: TradingSignal[] } {
-  const trades: Trade[] = [];
-  const signals: TradingSignal[] = [];
-  const now = Date.now();
-  let currentBalance = 100000; // Starting capital is $100,000 USDT for paper account
-  const basePrice = 101250;
-
-  for (let k = 35; k >= 1; k--) {
-    const tradeHoursAgo = k * 4.6 + Math.random() * 1.5;
-    const entryTime = new Date(now - tradeHoursAgo * 3600 * 1000);
-    const exitTime = new Date(entryTime.getTime() + (12 + Math.floor(Math.random() * 15)) * 60000);
-
-    const direction = Math.random() > 0.45 ? TradeDirection.LONG : TradeDirection.SHORT;
-    const isWin = Math.random() > 0.35; // ~65% Win Rate for paper trading
-
-    const entryPrice = basePrice + (direction === TradeDirection.LONG ? -150 : 150) + Math.random() * 800 - Math.random() * 800;
-    const atrValue = 130 + Math.random() * 60;
-    const stopDistance = atrValue * 1.3;
-    const takeProfitDistance = stopDistance * 2.0;
-
-    let exitPrice = entryPrice;
-    let exitReason: ExitReason;
-
-    if (isWin) {
-      exitPrice = direction === TradeDirection.LONG ? entryPrice + takeProfitDistance : entryPrice - takeProfitDistance;
-      exitReason = ExitReason.TAKE_PROFIT;
-    } else {
-      exitPrice = direction === TradeDirection.LONG ? entryPrice - stopDistance : entryPrice + stopDistance;
-      exitReason = Math.random() > 0.8 ? ExitReason.TIME_LIMIT_29MIN : ExitReason.STOP_LOSS;
-    }
-
-    const tradeRiskUsdt = currentBalance * 0.005; // 0.5% risk
-    const quantityBtc = Number((tradeRiskUsdt / stopDistance).toFixed(4));
-    const leverage = 20;
-
-    let pnlUsdt = 0;
-    if (direction === TradeDirection.LONG) {
-      pnlUsdt = (exitPrice - entryPrice) * quantityBtc;
-    } else {
-      pnlUsdt = (entryPrice - exitPrice) * quantityBtc;
-    }
-
-    const positionValue = entryPrice * quantityBtc;
-    const feesPaid = positionValue * 0.0006 * 2;
-    pnlUsdt -= feesPaid;
-
-    currentBalance += pnlUsdt;
-
-    const catboostProbability = direction === TradeDirection.LONG
-      ? (isWin ? 0.80 + Math.random() * 0.14 : 0.69 + Math.random() * 0.10)
-      : (isWin ? 0.06 + Math.random() * 0.10 : 0.16 + Math.random() * 0.12);
-
-    const regime = direction === TradeDirection.LONG ? MarketRegime.STRONG_UPTREND : MarketRegime.STRONG_DOWNTREND;
-
-    trades.push({
-      id: `trade-paper-hist-${25 - k}`,
-      entry_timestamp: entryTime.toISOString(),
-      exit_timestamp: exitTime.toISOString(),
-      direction,
-      entry_price: Number(entryPrice.toFixed(2)),
-      exit_price: Number(exitPrice.toFixed(2)),
-      quantity_btc: quantityBtc,
-      leverage,
-      pnl_usdt: Number(pnlUsdt.toFixed(2)),
-      pnl_pct: Number(((pnlUsdt / currentBalance) * 100).toFixed(4)),
-      fees_paid_usdt: Number(feesPaid.toFixed(4)),
-      exit_reason: exitReason,
-      catboost_probability: Number(catboostProbability.toFixed(4)),
-      regime_at_entry: regime,
-      sentiment_score_at_entry: direction === TradeDirection.LONG ? 0.30 + Math.random() * 0.3 : -0.30 - Math.random() * 0.3,
-      sentiment_momentum_at_entry: direction === TradeDirection.LONG ? 0.10 : -0.10,
-      entry_signal_score: 80 + Math.floor(Math.random() * 18),
-      max_favorable_excursion: isWin ? 2.0 : 0.3 + Math.random() * 0.5,
-      max_adverse_excursion: isWin ? 0.2 + Math.random() * 0.4 : 1.30,
-      max_favorable_atr_pct: Number(((((isWin ? 2.0 : 0.3 + Math.random() * 0.5) / 100 * entryPrice) / atrValue) * 100).toFixed(1)),
-      max_adverse_atr_pct: Number(((((isWin ? 0.2 + Math.random() * 0.4 : 1.30) / 100 * entryPrice) / atrValue) * 100).toFixed(1)),
-      hold_duration_seconds: Math.floor((exitTime.getTime() - entryTime.getTime()) / 1000),
-      is_win: isWin,
-      setup_triggered: MOCK_SETUPS[(25 - k) % MOCK_SETUPS.length],
-      feature_snapshot: {
-        last_price: entryPrice,
-        atr_14: atrValue,
-        regime,
-        average_sentiment: direction === TradeDirection.LONG ? 0.35 : -0.35,
-        setup_triggered: MOCK_SETUPS[(25 - k) % MOCK_SETUPS.length],
-      },
-      created_at: entryTime.toISOString(),
-    });
-
-    signals.push({
-      id: `sig-paper-${25 - k}`,
-      trade_id: `trade-paper-hist-${25 - k}`,
-      timestamp: entryTime.toISOString(),
-      catboost_probability: Number(catboostProbability.toFixed(4)),
-      direction,
-      regime_detected: regime,
-      sentiment_score: direction === TradeDirection.LONG ? 0.40 : -0.38,
-      sentiment_momentum: direction === TradeDirection.LONG ? 0.10 : -0.12,
-      all_conditions_met: true,
-      failed_conditions: [],
-      executed: true,
-      rejection_reason: null,
-      created_at: entryTime.toISOString(),
-    });
-  }
-
   return {
     credentials: {
       ...DEFAULT_CREDENTIALS,
@@ -1256,14 +1050,14 @@ function generateMockPaperHistory(): { credentials: ExchangeCredentials; trades:
       exchange_name: "Delta Exchange (Paper)",
       api_key: "PAPER_TRADING_API_KEY",
       api_secret: "PAPER_TRADING_API_SECRET",
-      account_balance_usdt: Number(currentBalance.toFixed(2)),
+      account_balance_usdt: 100000,
       connection_status: ConnectionStatus.CONNECTED,
       last_tested_at: new Date().toISOString(),
       last_successful_connection: new Date().toISOString(),
       connection_error_message: null,
     },
-    trades,
-    signals,
+    trades: [],
+    signals: [],
   };
 }
 
@@ -1310,21 +1104,17 @@ class DatabaseManager {
           }
         }
         if (this.cache && this.cache.trades) {
-          let tradesUpdated = false;
-          this.cache.trades.forEach((t, idx) => {
-            if (!t.setup_triggered) {
-              t.setup_triggered = (t.feature_snapshot && (t.feature_snapshot as any).setup_triggered) || MOCK_SETUPS[idx % MOCK_SETUPS.length];
-              tradesUpdated = true;
-            }
-            if (!t.feature_snapshot) {
-              t.feature_snapshot = {};
-            }
-            if (!t.feature_snapshot.setup_triggered) {
-              t.feature_snapshot.setup_triggered = t.setup_triggered;
-              tradesUpdated = true;
-            }
-          });
-          if (tradesUpdated) {
+          // Purge any legacy preset mock trades so history page is never populated with fake presets
+          const originalLen = this.cache.trades.length;
+          this.cache.trades = this.cache.trades.filter(
+            (t) => !t.id.startsWith("trade-hist-") && !t.id.startsWith("trade-paper-hist-")
+          );
+          if (this.cache.signals) {
+            this.cache.signals = this.cache.signals.filter(
+              (s) => !s.id.startsWith("sig-") && !s.id.startsWith("sig-paper-")
+            );
+          }
+          if (this.cache.trades.length !== originalLen) {
             this.save();
           }
         }
@@ -1342,18 +1132,17 @@ class DatabaseManager {
       if (fs.existsSync(DB_PAPER_FILE_PATH)) {
         const fileContent = fs.readFileSync(DB_PAPER_FILE_PATH, "utf-8");
         this.paperCache = JSON.parse(fileContent);
-        if (this.paperCache && this.paperCache.trades && this.paperCache.trades.length < 35) {
-          this.paperCache = generateMockPaperHistory();
-          this.savePaper();
-        } else if (this.paperCache && this.paperCache.trades) {
-          let paperUpdated = false;
-          this.paperCache.trades.forEach((t, idx) => {
-            if (!t.setup_triggered) {
-              t.setup_triggered = (t.feature_snapshot && (t.feature_snapshot as any).setup_triggered) || MOCK_SETUPS[idx % MOCK_SETUPS.length];
-              paperUpdated = true;
-            }
-          });
-          if (paperUpdated) {
+        if (this.paperCache && this.paperCache.trades) {
+          const originalPaperLen = this.paperCache.trades.length;
+          this.paperCache.trades = this.paperCache.trades.filter(
+            (t) => !t.id.startsWith("trade-hist-") && !t.id.startsWith("trade-paper-hist-")
+          );
+          if (this.paperCache.signals) {
+            this.paperCache.signals = this.paperCache.signals.filter(
+              (s) => !s.id.startsWith("sig-") && !s.id.startsWith("sig-paper-")
+            );
+          }
+          if (this.paperCache.trades.length !== originalPaperLen) {
             this.savePaper();
           }
         }
